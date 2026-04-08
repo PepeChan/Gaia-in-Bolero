@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<linker>
+  <assembly fullname="Gaia.Server">
+    <resource name="FSharpSignatureData.Gaia.Server" action="remove"></resource>
+    <resource name="FSharpSignatureCompressedData.Gaia.Server" action="remove"></resource>
+    <resource name="FSharpSignatureDataB.Gaia.Server" action="remove"></resource>
+    <resource name="FSharpSignatureCompressedDataB.Gaia.Server" action="remove"></resource>
+    <resource name="FSharpOptimizationData.Gaia.Server" action="remove"></resource>
+    <resource name="FSharpOptimizationCompressedData.Gaia.Server" action="remove"></resource>
+    <resource name="FSharpOptimizationDataB.Gaia.Server" action="remove"></resource>
+    <resource name="FSharpOptimizationCompressedDataB.Gaia.Server" action="remove"></resource>
+    <resource name="FSharpOptimizationInfo.Gaia.Server" action="remove"></resource>
+    <resource name="FSharpSignatureInfo.Gaia.Server" action="remove"></resource>
+  </assembly>
+</linker>
