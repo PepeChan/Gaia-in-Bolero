@@ -4,6 +4,9 @@
     <TargetFramework>net8.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\Gaia.Core\Gaia.Core.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
     <Compile Include="Main.fs" />
     <Compile Include="Startup.fs" />
   </ItemGroup>

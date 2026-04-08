@@ -7,9 +7,6 @@ open Bolero.Html
 open Bolero.Remoting
 open Bolero.Remoting.Client
 open Bolero.Templating.Client
-open Gaia.Core
-open Gaia.Core.DemoData
-open Gaia.Core.Engine
 
 /// Routing endpoints definition.
 type Page =

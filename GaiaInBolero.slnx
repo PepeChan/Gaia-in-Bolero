@@ -1,2 +1,7 @@
 <Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Gaia.Client/Gaia.Client.fsproj" />
+    <Project Path="src/Gaia.Core/Gaia.Core.fsproj" />
+    <Project Path="src/Gaia.Server/Gaia.Server.fsproj" />
+  </Folder>
 </Solution>
