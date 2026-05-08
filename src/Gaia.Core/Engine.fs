@@ -90,3 +90,55 @@ module Engine =
               "Simulation"
               "Performance"
               "V&V" ]
+    
+    let private addIf flag value =
+        if flag then [ value ] else []
+    
+    let deltaSigmaSummary (p: PhiParse) =
+        [
+            yield! addIf p.DeltaAdd "ADD"
+            yield! addIf p.DeltaRemove "REMOVE" 
+            yield! addIf p.DeltaConstrain "CONSTRAIN"
+            yield! addIf p.DeltaSplit "SPLIT"
+            yield! addIf p.DeltaRevealMissing "REVEAL MISSING"
+        ]
+        |> function
+            | [] -> "No ΔΣ candidate."
+            | xs -> "ΔΣ candidate(s): " + String.concat ", " xs
+    
+    let gammaSummary (p: PhiParse) =
+        [
+            yield! addIf p.GammaInconsistencyFlagged "INCONSISTENCY FLAGGED"
+            yield! addIf p.GammaEvidenceNeeded "EVIDENCE NEEDED"
+            yield! addIf p.GammaHypothesisLogged "HYPOTHESIS LOGGED"
+            yield! addIf p.ResultIndeterminate "RESULT INDETERMINATE"
+            yield! addIf p.ResultRejected "RESULT REJECTED"
+            yield! addIf p.OutcomeHold "HOLD"
+            yield! addIf p.OutcomeEscalate "ESCALATE"
+        ]
+        |> function
+            | [] -> "No Γ event."
+            | xs -> "Γ: " + String.concat "; " xs
+
+    let resolveParse (sigma: Sigma) (p: PhiParse) : ResolutionView =
+        let selected = selectDerivationEntry p
+        let path = executionPath selected
+
+        let matchedFRs =
+            if p.Exposure.Function = "" then []
+            else findFRByName sigma p.Exposure.Function
+
+        let matchedDPs = findDPsForFR sigma matchedFRs
+        let matchedTFs = findTFsForDP sigma matchedDPs
+        let matchedCTQs = findCTQsForTF sigma matchedTFs
+
+        {
+            SelectedEntry = Some selected
+            ExecutionPath = path
+            DeltaSigmaSummary = deltaSigmaSummary p
+            GammaSummary = gammaSummary p
+            MatchedFRs = matchedFRs
+            MatchedDPs = matchedDPs
+            MatchedTFs = matchedTFs
+            MatchedCTQs = matchedCTQs
+        }

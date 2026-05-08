@@ -128,3 +128,13 @@ type ResolutionView =
         MatchedTFs: string list
         MatchedCTQs: string list
     }
+
+// We want here to have some demo data that can be used for testing and demonstration purposes, without needing to set up a full database or external dependencies.
+type DemoScenario =
+    {
+        Id: string
+        Title: string
+        Description: string
+        Intake: PhiIntake
+        Parse: PhiParse
+    }

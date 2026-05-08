@@ -123,6 +123,8 @@ module DemoData =
             FR_to_CtQ = fr_to_ctq
         }
 
+    let demoSigma = sigmaBerenice
+
     let emptyExposure =
         {
             Function = ""
@@ -243,4 +245,77 @@ module DemoData =
             Sigma = sigmaBerenice
             Summary = "Initial Berenice baseline"
             CreatedAtUtc = DateTime.UtcNow
+        }
+    
+    let demoScenarios : DemoScenario list =
+        [
+            {
+                Id = "berenice-click-too-loud"
+                Title = "Berenice — click too loud"
+                Description = "A Φ that constrains acoustic behavior and produces Γ flags."
+                Intake = emptyIntake
+                Parse = demoParse
+            }
+
+            {
+                Id = "berenice-click-acceptable"
+                Title = "Berenice — click acceptable"
+                Description = "A Φ that produces no ΔΣ candidate."
+                Intake = emptyIntake
+                Parse = demoParse2
+            }
+
+            {
+            Id = "sphynx-unparsed-block"
+            Title = "Sphynx — unresolved internet block"
+            Description = "Tests probing of an unparsed context block."
+            Intake = emptyIntake
+
+            Parse =
+                {
+                    emptyParse with
+                        PhiId = "PHI-SPHYNX-001"
+                        Statement = "Is the internet block part of the Sphynx device context?"
+
+                        Exposure =
+                            {
+                                Function = ""
+                                Mode = ""
+                                Interface = "Internet connection"
+                                State = ""
+                                HostCandidate = "External internet service"
+                            }
+
+                        DeltaRevealMissing = true
+
+                        GammaEvidenceNeeded = true
+                        GammaHypothesisLogged = true
+
+                        ResultIndeterminate = true
+                        OutcomeHold = true
+
+                        DerivationEntry = Some FromInterface
+                }
+            }
+        ]
+    
+    let sphynxUnparsedBlockParse =
+        {
+            emptyParse with
+                PhiId = "PHI-SPHYNX-001"
+                Statement = "Is the internet block part of the Sphynx device context?"
+                Exposure =
+                    {
+                        Function = ""
+                        Mode = ""
+                        Interface = "Internet connection"
+                        State = ""
+                        HostCandidate = "External internet service"
+                    }
+                DeltaRevealMissing = true
+                GammaEvidenceNeeded = true
+                GammaHypothesisLogged = true
+                ResultIndeterminate = true
+                OutcomeHold = true
+                DerivationEntry = Some FromInterface
         }
