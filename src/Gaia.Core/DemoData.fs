@@ -193,7 +193,7 @@ module DemoData =
                 Statement = "Mouse click too loud"
                 Exposure =
                     {
-                        Function = "Primary click action"
+                        Function = "Detect Click Inputs"
                         Mode = "Normal use"
                         Interface = "Acoustic emission"
                         State = "Button actuation"
@@ -266,6 +266,72 @@ module DemoData =
             }
 
             {
+                Id = "berenice-confirm-quiet-click"
+                Title = "Berenice — confirm quiet click constraint"
+                Description = "A valid Φ that confirms an existing acoustic constraint and produces an admissible ΔΣ."
+                Intake = emptyIntake
+                Parse =
+                    {
+                        emptyParse with
+                            PhiId = "PHI-AUD-003"
+                            Statement = "Confirm that quiet click behavior is constrained by the acoustic click transfer function."
+                            Exposure =
+                                {
+                                    Function = "Quiet Click Behavior"
+                                    Mode = "Click"
+                                    Interface = "Button-to-housing mechanical interface"
+                                    State = "Click sound pressure level below threshold"
+                                    HostCandidate = "Click mechanism"
+                                }
+                            DeltaConstrain = true
+                            ResultValid = true
+                            DerivationEntry = Some FromFR
+                    }
+            }
+
+            {
+                Id = "sphynx-stylus-low-light"
+                Title = "Sphynx — stylus under low ambient light"
+                Description = "Evaluates whether stylus interaction remains admissible under low-light operational conditions."
+
+                Intake = emptyIntake
+
+                Parse =
+                    {
+                        emptyParse with
+
+                            PhiId = "PHI-SPHYNX-010"
+
+                            Statement =
+                                "The stylus shall continue functioning during low ambient light conditions."
+
+                            Exposure =
+                                {
+                                    Function = "Detect Stylus Inputs"
+                                    Mode = "Low Light Operation"
+                                    Interface = "Stylus-to-display interaction"
+                                    State = "Low ambient illumination"
+                                    HostCandidate = "Sphynx Display Assembly"
+                                }
+
+                            DeltaConstrain = true
+
+                            GammaEvidenceNeeded = false
+                            GammaInconsistencyFlagged = false
+                            GammaHypothesisLogged = false
+
+                            ResultValid = true
+                            ResultIndeterminate = false
+                            ResultRejected = false
+
+                            OutcomeHold = false
+                            OutcomeEscalate = false
+
+                            DerivationEntry = Some FromMode
+                    }
+            }
+
+            {
             Id = "sphynx-unparsed-block"
             Title = "Sphynx — unresolved internet block"
             Description = "Tests probing of an unparsed context block."
@@ -319,3 +385,4 @@ module DemoData =
                 OutcomeHold = true
                 DerivationEntry = Some FromInterface
         }
+
