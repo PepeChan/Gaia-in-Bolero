@@ -231,6 +231,7 @@ module DemoData =
             SelectedEntry = None
             ExecutionPath = []
             DeltaSigmaSummary = ""
+            DeltaCandidateSummary = ""
             MatchedFRs = []
             MatchedDPs = []
             MatchedTFs = []

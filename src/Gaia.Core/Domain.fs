@@ -117,11 +117,27 @@ type PhiParse =
         DerivationEntry: DerivationEntry option
     }
 
+// I want to add here now the SigmaTransition to create a real delta sigma
+type SigmaTransition =
+    | AddFunction of string
+    | AddMode of string
+    | AddInterface of string
+    | AddState of string
+    | AddConstraint of string
+    | RevealMissing of string
+    | RemoveElement of string
+
+type DeltaSigmaCandidate =
+    {
+        SourcePhiId : string
+        Transitions : SigmaTransition list
+    }
 type ResolutionView =
     {
         SelectedEntry: DerivationEntry option
         ExecutionPath: string list
         DeltaSigmaSummary: string
+        DeltaCandidateSummary: string
         GammaSummary: string
         MatchedFRs: string list
         MatchedDPs: string list
@@ -138,3 +154,4 @@ type DemoScenario =
         Intake: PhiIntake
         Parse: PhiParse
     }
+

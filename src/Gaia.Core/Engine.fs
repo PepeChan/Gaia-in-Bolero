@@ -120,9 +120,30 @@ module Engine =
             | [] -> "No Γ event."
             | xs -> "Γ: " + String.concat "; " xs
 
+    let buildDeltaCandidate (p: PhiParse) =
+            {
+                SourcePhiId = p.PhiId
+
+                Transitions =
+                    [
+                        if p.DeltaAdd then
+                            AddFunction "Placeholder"
+
+                        if p.DeltaConstrain then
+                            AddConstraint "Placeholder"
+
+                        if p.DeltaRevealMissing then
+                            RevealMissing "Placeholder"
+
+                        if p.DeltaRemove then
+                            RemoveElement "Placeholder"
+                    ]
+            }
+
     let resolveParse (sigma: Sigma) (p: PhiParse) : ResolutionView =
         let selected = selectDerivationEntry p
         let path = executionPath selected
+        let delta = buildDeltaCandidate p
 
         let matchedFRs =
             if p.Exposure.Function = "" then []
@@ -136,9 +157,26 @@ module Engine =
             SelectedEntry = Some selected
             ExecutionPath = path
             DeltaSigmaSummary = deltaSigmaSummary p
+            DeltaCandidateSummary =
+                if List.isEmpty delta.Transitions then
+                    "No ΔΣ candidate."
+                else
+                    "ΔΣ candidate(s): " +
+                    String.concat ", "
+                        (delta.Transitions
+                        |> List.map (function
+                            | AddFunction f -> "ADD FUNCTION: " + f
+                            | AddMode m -> "ADD MODE: " + m
+                            | AddInterface i -> "ADD INTERFACE: " + i
+                            | AddState s -> "ADD STATE: " + s
+                            | AddConstraint c -> "ADD CONSTRAINT: " + c
+                            | RevealMissing m -> "REVEAL MISSING: " + m
+                            | RemoveElement e -> "REMOVE ELEMENT: " + e))
             GammaSummary = gammaSummary p
             MatchedFRs = matchedFRs
             MatchedDPs = matchedDPs
             MatchedTFs = matchedTFs
             MatchedCTQs = matchedCTQs
         }
+
+    

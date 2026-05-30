@@ -352,17 +352,33 @@ let homePage model dispatch =
                     }
                     div {
                         attr.``class`` "columns"
+
                         div {
-                            attr.``class`` "column is-4"
-                            renderSummaryBox "Selected derivation entry" (formatDerivationEntry resolution.SelectedEntry)
+                            attr.``class`` "column is-3"
+                            renderSummaryBox
+                                "Selected derivation entry"
+                                (formatDerivationEntry resolution.SelectedEntry)
                         }
+
                         div {
-                            attr.``class`` "column is-4"
-                            renderSummaryBox "DeltaSigmaSummary" resolution.DeltaSigmaSummary
+                            attr.``class`` "column is-3"
+                            renderSummaryBox
+                                "DeltaSigmaSummary"
+                                resolution.DeltaSigmaSummary
                         }
+
                         div {
-                            attr.``class`` "column is-4"
-                            renderSummaryBox "GammaSummary" resolution.GammaSummary
+                            attr.``class`` "column is-3"
+                            renderSummaryBox
+                                "Delta Candidate"
+                                resolution.DeltaCandidateSummary
+                        }
+
+                        div {
+                            attr.``class`` "column is-3"
+                            renderSummaryBox
+                                "GammaSummary"
+                                resolution.GammaSummary
                         }
                     }
                     div {
