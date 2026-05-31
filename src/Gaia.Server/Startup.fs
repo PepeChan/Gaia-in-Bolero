@@ -25,7 +25,7 @@ let main args =
         .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
         .AddCookie()
     |> ignore
-    builder.Services.AddBoleroRemoting<BookService>() |> ignore
+    
     builder.Services.AddBoleroComponents() |> ignore
 #if DEBUG
     builder.Services.AddHotReload(templateDir = __SOURCE_DIRECTORY__ + "/../Gaia.Client") |> ignore
