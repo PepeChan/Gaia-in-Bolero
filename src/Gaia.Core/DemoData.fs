@@ -386,4 +386,59 @@ module DemoData =
                 OutcomeHold = true
                 DerivationEntry = Some FromInterface
         }
+    let demoPhiIntakes : PhiIntake list =
+        [
+            {
+                PhiId = "PHI-SPHYNX-SEED-003"
+                Date = "2026-05-31"
+                Source = "Operational requirement"
+                Context = "Users may operate in environments with intermittent internet access."
+                Confidence = "High"
+                Status = "Ingested"
+                RawStatement = "The device shall preserve annotations when network connectivity is unavailable."
+                Trigger = "Users may operate in environments with intermittent internet access."
+                Claim = ""
+                About = ""
+                Condition = ""
+                Assumption = ""
+                TypeText = ""
+                Impact = ""
+                UnresolvedSignal = ""
+            }
 
+            {
+                PhiId = "PHI-SPHYNX-SEED-002"
+                Date = "2026-05-31"
+                Source = "User interview"
+                Context = "Field work often occurs away from desks and fixed workstations."
+                Confidence = "High"
+                Status = "Ingested"
+                RawStatement = "The user shall be able to annotate documents while standing and without a desk."
+                Trigger = "Field work often occurs away from desks and fixed workstations."
+                Claim = ""
+                About = ""
+                Condition = ""
+                Assumption = ""
+                TypeText = ""
+                Impact = ""
+                UnresolvedSignal = ""
+            }
+
+            {
+                PhiId = "PHI-SPHYNX-SEED-001"
+                Date = "2026-05-31"
+                Source = "Design review / usability concern"
+                Context = "User interaction may occur in cold or industrial environments where gloves are required."
+                Confidence = "Medium"
+                Status = "Ingested"
+                RawStatement = "The stylus shall remain usable when the user wears gloves."
+                Trigger = "User interaction may occur in cold or industrial environments where gloves are required."
+                Claim = ""
+                About = ""
+                Condition = ""
+                Assumption = ""
+                TypeText = ""
+                Impact = ""
+                UnresolvedSignal = ""
+            }
+        ]

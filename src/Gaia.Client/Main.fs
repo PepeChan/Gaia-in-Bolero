@@ -26,6 +26,9 @@ type Model =
         phiDraftQuickTags: string
         phiDraftConfidence: string
         ingestedPhis: PhiIntake list
+        selectedPhiId: string option
+        selectedPhiParse: PhiParse option
+        selectedPhiResolution: ResolutionView option
     }
 
 let demoScenarios = DemoData.demoScenarios
@@ -61,7 +64,10 @@ let initModel =
         phiDraftSource = ""
         phiDraftQuickTags = ""
         phiDraftConfidence = "Medium"
-        ingestedPhis = []
+        ingestedPhis = DemoData.demoPhiIntakes
+        selectedPhiId = None
+        selectedPhiParse = None
+        selectedPhiResolution = None
     }
 /// The Elmish application's update messages.
 type Message =
@@ -75,6 +81,7 @@ type Message =
     | SetPhiDraftQuickTags of string
     | SetPhiDraftConfidence of string
     | IngestPhiDraft
+    | ParseIngestedPhi of string
 
 let update message model =
     match message with
@@ -106,6 +113,20 @@ let update message model =
 
     | SetPhiDraftConfidence value ->
         { model with phiDraftConfidence = value }, Cmd.none
+
+    | ParseIngestedPhi phiId ->
+        match model.ingestedPhis |> List.tryFind (fun phi -> phi.PhiId = phiId) with
+        | Some phi ->
+            let parse = Engine.parseIntake phi
+            let resolution = Engine.resolveParse DemoData.demoSigma parse
+
+            { model with
+                selectedPhiId = Some phi.PhiId
+                selectedPhiParse = Some parse
+                selectedPhiResolution = Some resolution }, Cmd.none
+
+        | None ->
+            model, Cmd.none
 
     | IngestPhiDraft ->
         let intake =
@@ -378,6 +399,12 @@ let homePage model dispatch =
                                         p {
                                             attr.``class`` "is-size-7 has-text-grey"
                                             text ("Source: " + phi.Source + " | Confidence: " + phi.Confidence)
+                                        }
+                                        button {
+                                            attr.``class`` "button is-small is-link is-light"
+                                            attr.``type`` "button"
+                                            on.click (fun _ -> dispatch (ParseIngestedPhi phi.PhiId))
+                                            text "Parse Φ"
                                         }
                                     }
                             }
