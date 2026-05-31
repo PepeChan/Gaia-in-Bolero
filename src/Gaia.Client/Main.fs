@@ -20,6 +20,12 @@ type Model =
         error: string option
         selectedScenarioId: string option
         scenarioResolution: ResolutionView option
+        phiDraftRawStatement: string
+        phiDraftTriggerContext: string
+        phiDraftSource: string
+        phiDraftQuickTags: string
+        phiDraftConfidence: string
+        ingestedPhis: PhiIntake list
     }
 
 let demoScenarios = DemoData.demoScenarios
@@ -50,6 +56,12 @@ let initModel =
         error = None
         selectedScenarioId = selectedScenarioId
         scenarioResolution = scenarioResolution
+        phiDraftRawStatement = ""
+        phiDraftTriggerContext = ""
+        phiDraftSource = ""
+        phiDraftQuickTags = ""
+        phiDraftConfidence = "Medium"
+        ingestedPhis = []
     }
 /// The Elmish application's update messages.
 type Message =
@@ -57,12 +69,17 @@ type Message =
     | SelectScenario of string
     | Error of exn
     | ClearError
+    | SetPhiDraftRawStatement of string
+    | SetPhiDraftTriggerContext of string
+    | SetPhiDraftSource of string
+    | SetPhiDraftQuickTags of string
+    | SetPhiDraftConfidence of string
+    | IngestPhiDraft
 
 let update message model =
     match message with
     | SetPage page ->
         { model with page = page }, Cmd.none
-
     | SelectScenario scenarioId ->
         match tryFindScenario scenarioId with
         | Some scenario ->
@@ -71,12 +88,52 @@ let update message model =
                 scenarioResolution = Some (Engine.resolveParse DemoData.demoSigma scenario.Parse) }, Cmd.none
         | None ->
             model, Cmd.none
-
     | Error exn ->
         { model with error = Some exn.Message }, Cmd.none
-
     | ClearError ->
         { model with error = None }, Cmd.none
+    | SetPhiDraftRawStatement value ->
+        { model with phiDraftRawStatement = value }, Cmd.none
+
+    | SetPhiDraftTriggerContext value ->
+        { model with phiDraftTriggerContext = value }, Cmd.none
+
+    | SetPhiDraftSource value ->
+        { model with phiDraftSource = value }, Cmd.none
+
+    | SetPhiDraftQuickTags value ->
+        { model with phiDraftQuickTags = value }, Cmd.none
+
+    | SetPhiDraftConfidence value ->
+        { model with phiDraftConfidence = value }, Cmd.none
+
+    | IngestPhiDraft ->
+        let intake =
+            {
+                PhiId = "PHI-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss")
+                Date = DateTime.UtcNow.ToString("yyyy-MM-dd")
+                Source = model.phiDraftSource
+                Context = model.phiDraftTriggerContext
+                Confidence = model.phiDraftConfidence
+                Status = "Ingested"
+                RawStatement = model.phiDraftRawStatement
+                Trigger = model.phiDraftTriggerContext
+                Claim = ""
+                About = ""
+                Condition = ""
+                Assumption = ""
+                TypeText = ""
+                Impact = ""
+                UnresolvedSignal = ""
+            }
+
+        { model with
+            ingestedPhis = intake :: model.ingestedPhis
+            phiDraftRawStatement = ""
+            phiDraftTriggerContext = ""
+            phiDraftSource = ""
+            phiDraftQuickTags = ""
+            phiDraftConfidence = "Medium" }, Cmd.none
 
 /// Connects the routing system to the Elmish application.
 let router = Router.infer SetPage (fun model -> model.page)
