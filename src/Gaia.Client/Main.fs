@@ -248,6 +248,138 @@ let homePage model dispatch =
                 text "Probe demo scenarios, resolve them through Gaia.Core, and inspect the resulting path and matches."
             }
             div {
+                attr.``class`` "box"
+                h2 {
+                    attr.``class`` "title is-5"
+                    text "T1 — Φ Ingestion"
+                }
+
+                div {
+                    attr.``class`` "field"
+                    label {
+                        attr.``class`` "label"
+                        text "Raw statement / observation"
+                    }
+                    div {
+                        attr.``class`` "control"
+                        textarea {
+                            attr.``class`` "textarea"
+                            attr.placeholder "Write the Φ as provided..."
+                            bind.input.string model.phiDraftRawStatement (fun v -> dispatch (SetPhiDraftRawStatement v))
+                        }
+                    }
+                }
+
+                div {
+                    attr.``class`` "field"
+                    label {
+                        attr.``class`` "label"
+                        text "Trigger context"
+                    }
+                    div {
+                        attr.``class`` "control"
+                        input {
+                            attr.``class`` "input"
+                            attr.placeholder "Why did this matter?"
+                            bind.input.string model.phiDraftTriggerContext (fun v -> dispatch (SetPhiDraftTriggerContext v))
+                        }
+                    }
+                }
+
+                div {
+                    attr.``class`` "field"
+                    label {
+                        attr.``class`` "label"
+                        text "Source"
+                    }
+                    div {
+                        attr.``class`` "control"
+                        input {
+                            attr.``class`` "input"
+                            attr.placeholder "User, observation, requirement, review..."
+                            bind.input.string model.phiDraftSource (fun v -> dispatch (SetPhiDraftSource v))
+                        }
+                    }
+                }
+
+                div {
+                    attr.``class`` "field"
+                    label {
+                        attr.``class`` "label"
+                        text "Quick tags"
+                    }
+                    div {
+                        attr.``class`` "control"
+                        input {
+                            attr.``class`` "input"
+                            attr.placeholder "function, mode, interface, state, unknown..."
+                            bind.input.string model.phiDraftQuickTags (fun v -> dispatch (SetPhiDraftQuickTags v))
+                        }
+                    }
+                }
+
+                div {
+                    attr.``class`` "field"
+                    label {
+                        attr.``class`` "label"
+                        text "Confidence"
+                    }
+                    div {
+                        attr.``class`` "control"
+                        div {
+                            attr.``class`` "select is-fullwidth"
+                            select {
+                                bind.input.string model.phiDraftConfidence (fun v -> dispatch (SetPhiDraftConfidence v))
+                                option { text "High" }
+                                option { text "Medium" }
+                                option { text "Low" }
+                            }
+                        }
+                    }
+                }
+
+                button {
+                    attr.``class`` "button is-link is-fullwidth"
+                    attr.``type`` "button"
+                    on.click (fun _ -> dispatch IngestPhiDraft)
+                    text "Ingest Φ"
+                }
+            }
+
+            div {
+                attr.``class`` "box"
+                h2 {
+                    attr.``class`` "title is-5"
+                    text "Φ Set"
+                }
+
+                match model.ingestedPhis with
+                | [] ->
+                    p {
+                        attr.``class`` "has-text-grey"
+                        text "No Φ ingested yet."
+                    }
+                | phis ->
+                    div {
+                        attr.``class`` "content"
+                        forEach phis <| fun phi ->
+                            div {
+                                attr.``class`` "box"
+                                p {
+                                    strong { text phi.PhiId }
+                                }
+                                p {
+                                    text phi.RawStatement
+                                }
+                                p {
+                                    attr.``class`` "is-size-7 has-text-grey"
+                                    text ("Source: " + phi.Source + " | Confidence: " + phi.Confidence)
+                                }
+                            }
+                    }
+            }
+
+            div {
                 attr.``class`` "columns is-variable is-5"
                 div {
                     attr.``class`` "column is-4"
