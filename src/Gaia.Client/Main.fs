@@ -442,12 +442,57 @@ let homePage model dispatch =
                         attr.``class`` "box"
                         h2 {
                             attr.``class`` "title is-5"
-                            text "T2 — Parse"
+                            text "T2: Parse"
                         }
-                        p {
-                            attr.``class`` "has-text-grey"
-                            text "Select an ingested Φ to prepare a structural parse."
-                        }
+
+                        match model.selectedPhiParse, model.selectedPhiResolution with
+                        | Some parse, Some resolution ->
+                            let admissibility = getAdmissibilityResult parse
+
+                            p {
+                                attr.``class`` "is-size-7 has-text-grey"
+                                text parse.PhiId
+                            }
+
+                            h3 {
+                                attr.``class`` "title is-6"
+                                text "Selected Φ"
+                            }
+                            p { text parse.Statement }
+
+                            div {
+                                attr.``class`` "mb-4"
+                                span {
+                                    attr.``class`` (admissibilityBadgeClass admissibility)
+                                    text (formatAdmissibilityResult admissibility)
+                                }
+                            }
+
+                            renderSummaryBox "Function" parse.Exposure.Function
+                            renderSummaryBox "Mode" parse.Exposure.Mode
+                            renderSummaryBox "Interface" parse.Exposure.Interface
+                            renderSummaryBox "State" parse.Exposure.State
+                            renderSummaryBox "Host candidate" parse.Exposure.HostCandidate
+                            renderSummaryBox "ΔΣ" resolution.DeltaSigmaSummary
+                            renderSummaryBox "Γ" resolution.GammaSummary
+
+                            div {
+                                attr.``class`` "box"
+                                h3 {
+                                    attr.``class`` "title is-6"
+                                    text "Execution path"
+                                }
+                                ol {
+                                    forEach resolution.ExecutionPath <| fun step ->
+                                        li { text step }
+                                }
+                            }
+
+                        | _ ->
+                            p {
+                                attr.``class`` "has-text-grey"
+                                text "Select an ingested Φ to prepare a structural parse."
+                            }
                     }
 
                     div {

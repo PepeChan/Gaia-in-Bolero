@@ -1,5 +1,7 @@
 namespace Gaia.Core
 
+open System
+
 module Engine =
 
     let findFRByName (sigma: Sigma) name =
@@ -179,91 +181,198 @@ module Engine =
             MatchedCTQs = matchedCTQs
         }
 
+    let private requirementMarkers =
+        [ "shall"; "must"; "needs to"; "should" ]
+
+    let private conditionMarkers =
+        [ "when"; "while"; "during"; "under"; "without"; "in case of"; "if" ]
+
+    let private modeConditionMarkers =
+        [ "while"; "during" ]
+
+    let private interfaceMarkers =
+        [ "with"; "through"; "via"; "using"; "between" ]
+
+    let private riskMarkers =
+        [ "missing"; "unavailable"; "unable"; "fails"; "cannot"; "not" ]
+
+    let private phraseTrimChars =
+        [| ' '; '\t'; '\r'; '\n'; '.'; ','; ';'; ':'; '-' |]
+
+    let private sentenceStopChars =
+        [| '.'; ';'; '\r'; '\n' |]
+
+    let private phraseStopChars =
+        [| '.'; ','; ';'; '\r'; '\n' |]
+
+    let private joinIntakeText (intake: PhiIntake) =
+        [
+            intake.RawStatement
+            intake.Context
+            intake.Trigger
+            intake.TypeText
+        ]
+        |> List.map (fun value -> if isNull value then "" else value.Trim())
+        |> List.filter (fun value -> value <> "")
+        |> String.concat ". "
+
+    let private hasMarkerBoundary (text: string) index length =
+        let before =
+            index = 0 || not (Char.IsLetterOrDigit text.[index - 1])
+
+        let afterIndex = index + length
+
+        let after =
+            afterIndex >= text.Length || not (Char.IsLetterOrDigit text.[afterIndex])
+
+        before && after
+
+    let private tryFindMarker (markers: string list) (text: string) =
+        let rec findFrom marker start =
+            let index = text.IndexOf(marker, start, StringComparison.OrdinalIgnoreCase)
+
+            if index < 0 then
+                None
+            elif hasMarkerBoundary text index marker.Length then
+                Some (index, marker)
+            else
+                findFrom marker (index + 1)
+
+        markers
+        |> List.choose (fun marker -> findFrom marker 0)
+        |> List.sortBy fst
+        |> List.tryHead
+
+    let private tryFindMarkerIndex markers text =
+        tryFindMarker markers text
+        |> Option.map fst
+
+    let private tryFindCharIndex (chars: char array) (text: string) =
+        chars
+        |> Array.choose (fun value ->
+            let index = text.IndexOf(value)
+
+            if index < 0 then
+                None
+            else
+                Some index)
+        |> Array.sort
+        |> Array.tryHead
+
+    let private trimPhrase (value: string) =
+        value.Trim(phraseTrimChars)
+
+    let private takeBefore markers stopChars text =
+        [
+            tryFindMarkerIndex markers text
+            tryFindCharIndex stopChars text
+        ]
+        |> List.choose id
+        |> List.sort
+        |> List.tryHead
+        |> function
+            | Some stopIndex -> text.Substring(0, stopIndex)
+            | None -> text
+        |> trimPhrase
+
+    let private tryExtractAfter markers stopMarkers stopChars text =
+        tryFindMarker markers text
+        |> Option.bind (fun (index, marker) ->
+            let phrase =
+                text.Substring(index + marker.Length)
+                |> takeBefore stopMarkers stopChars
+
+            if phrase = "" then
+                None
+            else
+                Some (marker, phrase))
+
+    let private hasAnyMarker markers text =
+        tryFindMarker markers text
+        |> Option.isSome
+
     let parseIntake (intake: PhiIntake) : PhiParse =
+        let combinedText = joinIntakeText intake
+
+        let functionCandidate =
+            combinedText
+            |> tryExtractAfter requirementMarkers conditionMarkers sentenceStopChars
+            |> Option.map snd
+            |> Option.defaultValue ""
+
+        let conditionCandidate =
+            combinedText
+            |> tryExtractAfter conditionMarkers (requirementMarkers @ interfaceMarkers) phraseStopChars
+
+        let interfaceCandidate =
+            combinedText
+            |> tryExtractAfter interfaceMarkers (requirementMarkers @ conditionMarkers) phraseStopChars
+            |> Option.map snd
+            |> Option.defaultValue ""
+
+        let conditionMarker, conditionPhrase =
+            conditionCandidate
+            |> Option.defaultValue ("", "")
+
+        let hasFunctionCandidate = functionCandidate <> ""
+        let hasConditionCandidate = conditionPhrase <> ""
+        let hasRequirementMarker = hasAnyMarker requirementMarkers combinedText
+        let hasRiskMarker = hasAnyMarker riskMarkers combinedText
+        let isModeCondition = List.contains conditionMarker modeConditionMarkers
+        let isValid = hasRequirementMarker && hasFunctionCandidate && hasConditionCandidate
+        let isIndeterminate = not isValid
+        let shouldRevealMissing = hasRiskMarker && not hasFunctionCandidate
+
+        let derivationEntry =
+            if isIndeterminate then
+                Some GammaOnly
+            elif isModeCondition then
+                Some FromMode
+            elif hasConditionCandidate then
+                Some FromState
+            else
+                Some GammaOnly
+
         {
             PhiId = intake.PhiId
             Date = intake.Date
             Statement = intake.RawStatement
-            InScope = "TBD"
+            InScope = "Assumed in scope for T2 v0."
             OutOfScope = ""
             Exposure =
                 {
-                    Function = ""
-                    Mode = ""
-                    Interface = ""
-                    State = ""
+                    Function = functionCandidate
+                    Mode = if isModeCondition then conditionPhrase else ""
+                    Interface = interfaceCandidate
+                    State = conditionPhrase
                     HostCandidate = ""
                 }
-            ExposureNotes = "Generated by T2 v0."
+            ExposureNotes = "Generated by deterministic T2 v0 parser."
             DeltaAdd = false
             DeltaRemove = false
-            DeltaConstrain = false
+            DeltaConstrain = hasConditionCandidate
             DeltaSplit = false
-            DeltaRevealMissing = false
+            DeltaRevealMissing = shouldRevealMissing
             DeltaNotes = ""
             GammaInconsistencyFlagged = false
-            GammaEvidenceNeeded = true
-            GammaHypothesisLogged = true
-            GammaDetails = "T2 v0 requires semantic refinement."
+            GammaEvidenceNeeded = isIndeterminate || shouldRevealMissing
+            GammaHypothesisLogged = isIndeterminate
+            GammaDetails =
+                if isIndeterminate then
+                    "T2 v0 could not infer enough structure."
+                else
+                    ""
             Falsifiable = true
             Traceable = true
             PhaseCorrect = true
             ContextBounded = true
-            ResultValid = false
-            ResultIndeterminate = true
+            ResultValid = isValid
+            ResultIndeterminate = isIndeterminate
             ResultRejected = false
             FormalNoFormalization = false
-            OutcomeUpdateSigma = false
-            OutcomeRecordGamma = true
+            OutcomeUpdateSigma = isValid
+            OutcomeRecordGamma = isIndeterminate
             OutcomeEscalate = false
-            OutcomeHold = true
-            DerivationEntry = Some GammaOnly
+            OutcomeHold = isIndeterminate
+            DerivationEntry = derivationEntry
         }
-    
-    // Here we build the Parse action, which is moving from T1 to T2 when the users clicks on the button Parse.
-    let private constainsAny (terms: string list) (Ttext: string) = 
-        let lowerText = Ttext.ToLowerInvariant()
-        terms |> List.exists (fun term -> lowerText.Contains(term.ToLowerInvariant()))
-    
-    let privatebaseParseFromIntake (intake: PhiIntake) : PhiParse =
-        {
-        PhiId = intake.PhiId
-        Date = intake.Date
-        Statement = intake.RawStatement
-        InScope = "Assumed in scope for T2 v0."
-        OutOfScope = ""
-        Exposure =
-            {
-                Function = ""
-                Mode = ""
-                Interface = ""
-                State = ""
-                HostCandidate = ""
-            }
-        ExposureNotes = "Generated by T2 v0 rule-based parser."
-        DeltaAdd = false
-        DeltaRemove = false
-        DeltaConstrain = false
-        DeltaSplit = false
-        DeltaRevealMissing = false
-        DeltaNotes = ""
-        GammaInconsistencyFlagged = false
-        GammaEvidenceNeeded = false
-        GammaHypothesisLogged = false
-        GammaDetails = ""
-        Falsifiable = true
-        Traceable = true
-        PhaseCorrect = true
-        ContextBounded = true
-        ResultValid = false
-        ResultIndeterminate = true
-        ResultRejected = false
-        FormalNoFormalization = false
-        OutcomeUpdateSigma = false
-        OutcomeRecordGamma = false
-        OutcomeEscalate = false
-        OutcomeHold = true
-        DerivationEntry = Some GammaOnly
-    }
-
-    
