@@ -249,6 +249,109 @@ let renderSummaryBox title body =
         }
     }
 
+let renderSummaryCard title body =
+    div {
+        attr.``class`` "card mb-4"
+        div {
+            attr.``class`` "card-content"
+            p {
+                attr.``class`` "heading"
+                text title
+            }
+            p {
+                text body
+            }
+        }
+    }
+
+let renderExecutionPathCard steps =
+    div {
+        attr.``class`` "card"
+        div {
+            attr.``class`` "card-content"
+            h3 {
+                attr.``class`` "title is-6"
+                text "Execution path"
+            }
+            ol {
+                forEach steps <| fun step ->
+                    li { text step }
+            }
+        }
+    }
+
+let renderExposureChain (parse: PhiParse) =
+    let chain =
+        [
+            if parse.Exposure.Function <> "" then
+                yield ("Function", parse.Exposure.Function, false)
+
+            if parse.Exposure.Mode <> "" then
+                yield ("Mode", parse.Exposure.Mode, false)
+            else
+                yield ("Mode", "Missing", true)
+
+            if parse.Exposure.Interface <> "" then
+                yield ("Interface", parse.Exposure.Interface, false)
+            else
+                yield ("Interface", "Missing", true)
+
+            if parse.Exposure.State <> "" then
+                yield ("State", parse.Exposure.State, false)
+            else
+                yield ("State", "Missing", true)
+
+            if parse.Exposure.HostCandidate <> "" then
+                yield ("Host", parse.Exposure.HostCandidate, false)
+            else
+                yield ("Host", "Missing", true)
+        ]
+        |> List.mapi (fun index step -> index, step)
+
+    let lastIndex = List.length chain - 1
+
+    div {
+        attr.``class`` "card mb-4"
+
+        div {
+            attr.``class`` "card-content"
+
+            h3 {
+                attr.``class`` "title is-6"
+                text "Exposure chain"
+            }
+
+            div {
+                attr.``class`` "tags are-medium"
+
+                forEach chain <| fun (index, (label, value, isMissing)) ->
+                    div {
+                        attr.``class`` "tags has-addons mb-2 mr-2"
+
+                        span {
+                            attr.``class`` "tag is-dark"
+                            text label
+                        }
+
+                        span {
+                            attr.``class`` (
+                                if isMissing then
+                                    "tag is-warning is-light has-text-grey"
+                                else
+                                    "tag is-info is-light")
+                            text value
+                        }
+
+                        if index < lastIndex then
+                            span {
+                                attr.``class`` "tag is-light has-text-grey"
+                                text "->"
+                            }
+                    }
+            }
+        }
+    }
+
 let homePage model dispatch =
     match tryGetSelectedScenario model, model.scenarioResolution with
     | Some scenario, Some resolution ->
@@ -468,25 +571,11 @@ let homePage model dispatch =
                                 }
                             }
 
-                            renderSummaryBox "Function" parse.Exposure.Function
-                            renderSummaryBox "Mode" parse.Exposure.Mode
-                            renderSummaryBox "Interface" parse.Exposure.Interface
-                            renderSummaryBox "State" parse.Exposure.State
-                            renderSummaryBox "Host candidate" parse.Exposure.HostCandidate
-                            renderSummaryBox "ΔΣ" resolution.DeltaSigmaSummary
-                            renderSummaryBox "Γ" resolution.GammaSummary
+                            renderExposureChain parse
 
-                            div {
-                                attr.``class`` "box"
-                                h3 {
-                                    attr.``class`` "title is-6"
-                                    text "Execution path"
-                                }
-                                ol {
-                                    forEach resolution.ExecutionPath <| fun step ->
-                                        li { text step }
-                                }
-                            }
+                            renderSummaryCard "ΔΣ" resolution.DeltaSigmaSummary
+                            renderSummaryCard "Γ" resolution.GammaSummary
+                            renderExecutionPathCard resolution.ExecutionPath
 
                         | _ ->
                             p {
@@ -516,6 +605,7 @@ let homePage model dispatch =
                                 text (formatAdmissibilityResult admissibility)
                             }
                         }
+                        
                         h3 {
                             attr.``class`` "title is-6"
                             text "Φ statement"
