@@ -26,6 +26,7 @@ type Model =
         phiDraftQuickTags: string
         phiDraftConfidence: string
         ingestedPhis: PhiIntake list
+        parsedPhis: PhiParse list
         selectedPhiId: string option
         selectedPhiParse: PhiParse option
         selectedPhiResolution: ResolutionView option
@@ -65,6 +66,7 @@ let initModel =
         phiDraftQuickTags = ""
         phiDraftConfidence = "Medium"
         ingestedPhis = DemoData.demoPhiIntakes
+        parsedPhis = []
         selectedPhiId = None
         selectedPhiParse = None
         selectedPhiResolution = None
@@ -82,6 +84,17 @@ type Message =
     | SetPhiDraftConfidence of string
     | IngestPhiDraft
     | ParseIngestedPhi of string
+
+let upsertParsedPhi parse parsedPhis =
+    if parsedPhis |> List.exists (fun parsedPhi -> parsedPhi.PhiId = parse.PhiId) then
+        parsedPhis
+        |> List.map (fun parsedPhi ->
+            if parsedPhi.PhiId = parse.PhiId then
+                parse
+            else
+                parsedPhi)
+    else
+        parsedPhis @ [ parse ]
 
 let update message model =
     match message with
@@ -119,11 +132,13 @@ let update message model =
         | Some phi ->
             let parse = Engine.parseIntake phi
             let resolution = Engine.resolveParse DemoData.demoSigma parse
+            let parsedPhis = upsertParsedPhi parse model.parsedPhis
 
             { model with
                 selectedPhiId = Some phi.PhiId
                 selectedPhiParse = Some parse
-                selectedPhiResolution = Some resolution }, Cmd.none
+                selectedPhiResolution = Some resolution
+                parsedPhis = parsedPhis }, Cmd.none
 
         | None ->
             model, Cmd.none
@@ -166,6 +181,23 @@ type AdmissibilityResult =
     | Hold
     | Reject
     | Escalate
+
+type SigmaContextEntry =
+    {
+        Value: string
+        SourcePhiId: string
+        SourcePhiStatement: string
+        ParseSequenceNumber: int
+    }
+
+type SigmaContext =
+    {
+        Functions: SigmaContextEntry list
+        Modes: SigmaContextEntry list
+        Interfaces: SigmaContextEntry list
+        States: SigmaContextEntry list
+        Hosts: SigmaContextEntry list
+    }
 
 let tryGetSelectedScenario model =
     model.selectedScenarioId
@@ -235,6 +267,87 @@ let renderMatchedGroup title names =
                         text name
                     }
             }
+    }
+
+let buildSigmaContextEntries getValue parsedPhis =
+    parsedPhis
+    |> List.mapi (fun index parse -> index + 1, parse)
+    |> List.choose (fun (parseSequenceNumber, parse) ->
+        let value = getValue parse
+
+        if value = "" then
+            None
+        else
+            Some
+                {
+                    Value = value
+                    SourcePhiId = parse.PhiId
+                    SourcePhiStatement = parse.Statement
+                    ParseSequenceNumber = parseSequenceNumber
+                })
+    |> List.distinctBy (fun entry -> entry.Value)
+
+let buildSigmaContext parsedPhis =
+    {
+        Functions = buildSigmaContextEntries (fun parse -> parse.Exposure.Function) parsedPhis
+        Modes = buildSigmaContextEntries (fun parse -> parse.Exposure.Mode) parsedPhis
+        Interfaces = buildSigmaContextEntries (fun parse -> parse.Exposure.Interface) parsedPhis
+        States = buildSigmaContextEntries (fun parse -> parse.Exposure.State) parsedPhis
+        Hosts = buildSigmaContextEntries (fun parse -> parse.Exposure.HostCandidate) parsedPhis
+    }
+
+let renderKnownContextGroup title entries =
+    div {
+        attr.``class`` "box"
+        h3 {
+            attr.``class`` "title is-6"
+            text title
+        }
+        match entries with
+        | [] ->
+            p {
+                attr.``class`` "has-text-grey"
+                text "No known items yet."
+            }
+        | items ->
+            div {
+                forEach items <| fun entry ->
+                    div {
+                        attr.``class`` "mb-4"
+                        p {
+                            strong { text ("Value: " + entry.Value) }
+                        }
+                        p {
+                            attr.``class`` "is-size-7 has-text-grey mb-1"
+                            text ("SourcePhiId: " + entry.SourcePhiId)
+                        }
+                        p {
+                            attr.``class`` "is-size-7 has-text-grey mb-1"
+                            text ("SourcePhiStatement: " + entry.SourcePhiStatement)
+                        }
+                        p {
+                            attr.``class`` "is-size-7 has-text-grey"
+                            text ("Parse sequence number: " + string entry.ParseSequenceNumber)
+                        }
+                    }
+            }
+    }
+
+let renderSigmaSnapshotMetric label count =
+    span {
+        attr.``class`` "tag is-light"
+        text (label + ": " + string count)
+    }
+
+let renderSigmaSnapshotCounts parsedPhiCount sigmaContext =
+    div {
+        attr.``class`` "tags are-medium mb-4"
+        renderSigmaSnapshotMetric "Total parsed Φ" parsedPhiCount
+        renderSigmaSnapshotMetric "Functions" (List.length sigmaContext.Functions)
+        renderSigmaSnapshotMetric "Modes" (List.length sigmaContext.Modes)
+        renderSigmaSnapshotMetric "Interfaces" (List.length sigmaContext.Interfaces)
+        renderSigmaSnapshotMetric "States" (List.length sigmaContext.States)
+        renderSigmaSnapshotMetric "Hosts" (List.length sigmaContext.Hosts)
     }
 
 let renderSummaryBox title body =
@@ -344,51 +457,103 @@ let renderExposureChain (parse: PhiParse) =
         }
     }
 
-let renderRelevantSigmaContextPanel selectedPhiResolution =
+let renderRelevantSigmaContextPanel parsedPhis selectedPhiParse selectedPhiResolution =
+    let sigmaContext = buildSigmaContext parsedPhis
+
     div {
         attr.``class`` "box"
 
-        match selectedPhiResolution with
-        | None ->
+        p {
+            attr.``class`` "heading"
+            text "Current Σ Snapshot"
+        }
+
+        renderSigmaSnapshotCounts (List.length parsedPhis) sigmaContext
+
+        h2 {
+            attr.``class`` "title is-5"
+            text "T3 — Relevant Σ Context"
+        }
+
+        match parsedPhis with
+        | [] ->
             p {
                 attr.``class`` "has-text-grey"
                 text "Parse a Φ to reconstruct relevant Σ context."
             }
 
-        | Some resolution ->
-            let matchedFrNames = mapIdsToNames (fun (fr: FR) -> fr.Id) (fun fr -> fr.Name) DemoData.demoSigma.FRs resolution.MatchedFRs
-            let matchedDpNames = mapIdsToNames (fun (dp: DP) -> dp.Id) (fun dp -> dp.Name) DemoData.demoSigma.DPs resolution.MatchedDPs
-            let matchedTfNames = mapIdsToNames (fun (tf: TF) -> tf.Id) (fun tf -> tf.Name) DemoData.demoSigma.TFs resolution.MatchedTFs
-            let matchedCtqNames = mapIdsToNames (fun (ctq: CTQ) -> ctq.Id) (fun ctq -> ctq.Name) DemoData.demoSigma.CTQs resolution.MatchedCTQs
-
-            h2 {
-                attr.``class`` "title is-5"
-                text "T3: Relevant Σ Context"
-            }
-
+        | _ ->
             div {
                 attr.``class`` "columns is-multiline"
 
                 div {
                     attr.``class`` "column is-6"
-                    renderMatchedGroup "Matched FRs" matchedFrNames
+                    renderKnownContextGroup "Known Functions" sigmaContext.Functions
                 }
 
                 div {
                     attr.``class`` "column is-6"
-                    renderMatchedGroup "Matched DPs" matchedDpNames
+                    renderKnownContextGroup "Known Modes" sigmaContext.Modes
                 }
 
                 div {
                     attr.``class`` "column is-6"
-                    renderMatchedGroup "Matched TFs" matchedTfNames
+                    renderKnownContextGroup "Known Interfaces" sigmaContext.Interfaces
                 }
 
                 div {
                     attr.``class`` "column is-6"
-                    renderMatchedGroup "Matched CTQs" matchedCtqNames
+                    renderKnownContextGroup "Known States" sigmaContext.States
+                }
+
+                div {
+                    attr.``class`` "column is-6"
+                    renderKnownContextGroup "Known Hosts" sigmaContext.Hosts
                 }
             }
+
+            match selectedPhiParse, selectedPhiResolution with
+            | Some parse, Some resolution ->
+                let missingContext =
+                    [
+                        if parse.Exposure.Function <> "" && List.isEmpty resolution.MatchedFRs then
+                            yield "Function not found in current Σ."
+
+                        if parse.Exposure.Interface <> "" then
+                            yield "Interface parsed; explicit interface storage is not yet modeled in Σ."
+
+                        if parse.Exposure.State <> "" then
+                            yield "State parsed; explicit state storage is not yet modeled in Σ."
+
+                        if parse.Exposure.Mode <> "" then
+                            yield "Mode parsed; explicit mode storage is not yet modeled in Σ."
+
+                        if parse.Exposure.HostCandidate = "" then
+                            yield "Host candidate missing."
+                    ]
+
+                div {
+                    attr.``class`` "box"
+                    h3 {
+                        attr.``class`` "title is-6"
+                        text "Missing / unresolved context"
+                    }
+
+                    match missingContext with
+                    | [] ->
+                        p {
+                            attr.``class`` "has-text-grey"
+                            text "No missing or unresolved context."
+                        }
+                    | messages ->
+                        ul {
+                            forEach messages <| fun message ->
+                                li { text message }
+                        }
+                }
+
+            | _ ->
+                empty()
     }
 
 let homePage model dispatch =
@@ -642,7 +807,7 @@ let homePage model dispatch =
                                 }
                         }
 
-                        renderRelevantSigmaContextPanel model.selectedPhiResolution
+                        renderRelevantSigmaContextPanel model.parsedPhis model.selectedPhiParse model.selectedPhiResolution
                     }
                 }
             }
