@@ -283,29 +283,13 @@ let renderExecutionPathCard steps =
 let renderExposureChain (parse: PhiParse) =
     let chain =
         [
-            if parse.Exposure.Function <> "" then
-                yield ("Function", parse.Exposure.Function, false)
-
-            if parse.Exposure.Mode <> "" then
-                yield ("Mode", parse.Exposure.Mode, false)
-            else
-                yield ("Mode", "Missing", true)
-
-            if parse.Exposure.Interface <> "" then
-                yield ("Interface", parse.Exposure.Interface, false)
-            else
-                yield ("Interface", "Missing", true)
-
-            if parse.Exposure.State <> "" then
-                yield ("State", parse.Exposure.State, false)
-            else
-                yield ("State", "Missing", true)
-
-            if parse.Exposure.HostCandidate <> "" then
-                yield ("Host", parse.Exposure.HostCandidate, false)
-            else
-                yield ("Host", "Missing", true)
+            "Function", parse.Exposure.Function
+            "Mode", parse.Exposure.Mode
+            "Interface", parse.Exposure.Interface
+            "State", parse.Exposure.State
+            "Host", parse.Exposure.HostCandidate
         ]
+        |> List.map (fun (label, value) -> label, value, value = "")
         |> List.mapi (fun index step -> index, step)
 
     let lastIndex = List.length chain - 1
@@ -322,34 +306,89 @@ let renderExposureChain (parse: PhiParse) =
             }
 
             div {
-                attr.``class`` "tags are-medium"
+                attr.``class`` "is-flex is-align-items-stretch is-flex-wrap-nowrap"
 
                 forEach chain <| fun (index, (label, value, isMissing)) ->
                     div {
-                        attr.``class`` "tags has-addons mb-2 mr-2"
+                        attr.``class`` "is-flex is-align-items-stretch is-flex-grow-1"
 
-                        span {
-                            attr.``class`` "tag is-dark"
-                            text label
-                        }
+                        div {
+                            attr.``class`` "box p-0 mb-0 is-flex-grow-1"
 
-                        span {
-                            attr.``class`` (
-                                if isMissing then
-                                    "tag is-warning is-light has-text-grey"
-                                else
-                                    "tag is-info is-light")
-                            text value
+                            div {
+                                attr.``class`` "has-background-black-ter has-text-white has-text-weight-semibold px-3 py-2"
+                                text label
+                            }
+
+                            div {
+                                attr.``class`` (
+                                    if isMissing then
+                                        "has-background-warning-light has-text-warning-dark has-text-weight-semibold px-3 py-3"
+                                    else
+                                        "has-background-white-ter has-text-dark px-3 py-3")
+                                text (
+                                    if isMissing then
+                                        "Missing"
+                                    else
+                                        value)
+                            }
                         }
 
                         if index < lastIndex then
-                            span {
-                                attr.``class`` "tag is-light has-text-grey"
+                            div {
+                                attr.``class`` "is-flex is-align-items-center px-2 has-text-grey has-text-weight-bold"
                                 text "->"
                             }
                     }
             }
         }
+    }
+
+let renderRelevantSigmaContextPanel selectedPhiResolution =
+    div {
+        attr.``class`` "box"
+
+        match selectedPhiResolution with
+        | None ->
+            p {
+                attr.``class`` "has-text-grey"
+                text "Parse a Φ to reconstruct relevant Σ context."
+            }
+
+        | Some resolution ->
+            let matchedFrNames = mapIdsToNames (fun (fr: FR) -> fr.Id) (fun fr -> fr.Name) DemoData.demoSigma.FRs resolution.MatchedFRs
+            let matchedDpNames = mapIdsToNames (fun (dp: DP) -> dp.Id) (fun dp -> dp.Name) DemoData.demoSigma.DPs resolution.MatchedDPs
+            let matchedTfNames = mapIdsToNames (fun (tf: TF) -> tf.Id) (fun tf -> tf.Name) DemoData.demoSigma.TFs resolution.MatchedTFs
+            let matchedCtqNames = mapIdsToNames (fun (ctq: CTQ) -> ctq.Id) (fun ctq -> ctq.Name) DemoData.demoSigma.CTQs resolution.MatchedCTQs
+
+            h2 {
+                attr.``class`` "title is-5"
+                text "T3: Relevant Σ Context"
+            }
+
+            div {
+                attr.``class`` "columns is-multiline"
+
+                div {
+                    attr.``class`` "column is-6"
+                    renderMatchedGroup "Matched FRs" matchedFrNames
+                }
+
+                div {
+                    attr.``class`` "column is-6"
+                    renderMatchedGroup "Matched DPs" matchedDpNames
+                }
+
+                div {
+                    attr.``class`` "column is-6"
+                    renderMatchedGroup "Matched TFs" matchedTfNames
+                }
+
+                div {
+                    attr.``class`` "column is-6"
+                    renderMatchedGroup "Matched CTQs" matchedCtqNames
+                }
+            }
     }
 
 let homePage model dispatch =
@@ -371,310 +410,385 @@ let homePage model dispatch =
                 attr.``class`` "subtitle is-6"
                 text "Probe demo scenarios, resolve them through Gaia.Core, and inspect the resulting path and matches."
             }
+
             div {
-                attr.``class`` "columns is-variable is-5"
+                attr.``class`` "mb-6 pb-5"
+
+                h2 {
+                    attr.``class`` "title is-4"
+                    text "Live Gaia Workflow"
+                }
+
                 div {
-                    attr.``class`` "column is-4"
-                    div {
-                        attr.``class`` "box"
-                        h2 {
-                            attr.``class`` "title is-5"
-                            text "T1 — Φ Ingestion"
-                        }
-
-                        div {
-                            attr.``class`` "field"
-                            label {
-                                attr.``class`` "label"
-                                text "Raw statement / observation"
-                            }
-                            div {
-                                attr.``class`` "control"
-                                textarea {
-                                    attr.``class`` "textarea"
-                                    attr.placeholder "Write the Φ as provided..."
-                                    bind.input.string model.phiDraftRawStatement (fun v -> dispatch (SetPhiDraftRawStatement v))
-                                }
-                            }
-                        }
-
-                        div {
-                            attr.``class`` "field"
-                            label {
-                                attr.``class`` "label"
-                                text "Trigger context"
-                            }
-                            div {
-                                attr.``class`` "control"
-                                input {
-                                    attr.``class`` "input"
-                                    attr.placeholder "Why did this matter?"
-                                    bind.input.string model.phiDraftTriggerContext (fun v -> dispatch (SetPhiDraftTriggerContext v))
-                                }
-                            }
-                        }
-
-                        div {
-                            attr.``class`` "field"
-                            label {
-                                attr.``class`` "label"
-                                text "Source"
-                            }
-                            div {
-                                attr.``class`` "control"
-                                input {
-                                    attr.``class`` "input"
-                                    attr.placeholder "User, observation, requirement, review..."
-                                    bind.input.string model.phiDraftSource (fun v -> dispatch (SetPhiDraftSource v))
-                                }
-                            }
-                        }
-
-                        div {
-                            attr.``class`` "field"
-                            label {
-                                attr.``class`` "label"
-                                text "Quick tags"
-                            }
-                            div {
-                                attr.``class`` "control"
-                                input {
-                                    attr.``class`` "input"
-                                    attr.placeholder "function, mode, interface, state, unknown..."
-                                    bind.input.string model.phiDraftQuickTags (fun v -> dispatch (SetPhiDraftQuickTags v))
-                                }
-                            }
-                        }
-
-                        div {
-                            attr.``class`` "field"
-                            label {
-                                attr.``class`` "label"
-                                text "Confidence"
-                            }
-                            div {
-                                attr.``class`` "control"
-                                div {
-                                    attr.``class`` "select is-fullwidth"
-                                    select {
-                                        bind.input.string model.phiDraftConfidence (fun v -> dispatch (SetPhiDraftConfidence v))
-                                        option { text "High" }
-                                        option { text "Medium" }
-                                        option { text "Low" }
-                                    }
-                                }
-                            }
-                        }
-
-                        button {
-                            attr.``class`` "button is-link is-fullwidth"
-                            attr.``type`` "button"
-                            on.click (fun _ -> dispatch IngestPhiDraft)
-                            text "Ingest Φ"
-                        }
+                    attr.``class`` "tags are-medium mb-5"
+                    span {
+                        attr.``class`` "tag is-link"
+                        text "T1"
                     }
-
-                    div {
-                        attr.``class`` "box"
-                        h2 {
-                            attr.``class`` "title is-5"
-                            text "Φ Set"
-                        }
-
-                        match model.ingestedPhis with
-                        | [] ->
-                            p {
-                                attr.``class`` "has-text-grey"
-                                text "No Φ ingested yet."
-                            }
-                        | phis ->
-                            div {
-                                attr.``class`` "content"
-                                forEach phis <| fun phi ->
-                                    div {
-                                        attr.``class`` "box"
-                                        p {
-                                            strong { text phi.PhiId }
-                                        }
-                                        p {
-                                            text phi.RawStatement
-                                        }
-                                        p {
-                                            attr.``class`` "is-size-7 has-text-grey"
-                                            text ("Source: " + phi.Source + " | Confidence: " + phi.Confidence)
-                                        }
-                                        button {
-                                            attr.``class`` "button is-small is-link is-light"
-                                            attr.``type`` "button"
-                                            on.click (fun _ -> dispatch (ParseIngestedPhi phi.PhiId))
-                                            text "Parse Φ"
-                                        }
-                                    }
-                            }
+                    span {
+                        attr.``class`` "tag is-light"
+                        text "->"
                     }
-
-                    div {
-                        attr.``class`` "box"
-                        h2 {
-                            attr.``class`` "title is-5"
-                            text "Scenarios"
-                        }
-                        div {
-                            attr.``class`` "buttons"
-                            forEach demoScenarios <| fun candidate ->
-                                button {
-                                    attr.``class`` (
-                                        if Some candidate.Id = model.selectedScenarioId then
-                                            "button is-link is-fullwidth"
-                                        else
-                                            "button is-fullwidth")
-                                    attr.``type`` "button"
-                                    on.click (fun _ -> dispatch (SelectScenario candidate.Id))
-                                    text candidate.Title
-                                }
-                        }
-                        p {
-                            attr.``class`` "has-text-grey"
-                            text scenario.Description
-                        }
+                    span {
+                        attr.``class`` "tag is-link is-light"
+                        text "Φ Set"
+                    }
+                    span {
+                        attr.``class`` "tag is-light"
+                        text "->"
+                    }
+                    span {
+                        attr.``class`` "tag is-link is-light"
+                        text "T2 Parse"
+                    }
+                    span {
+                        attr.``class`` "tag is-light"
+                        text "->"
+                    }
+                    span {
+                        attr.``class`` "tag is-link is-light"
+                        text "T3 Relevant Σ Context"
                     }
                 }
+
                 div {
-                    attr.``class`` "column is-8"
+                    attr.``class`` "columns is-variable is-5"
+
                     div {
-                        attr.``class`` "box"
-                        h2 {
-                            attr.``class`` "title is-5"
-                            text "T2: Parse"
-                        }
+                        attr.``class`` "column is-4"
 
-                        match model.selectedPhiParse, model.selectedPhiResolution with
-                        | Some parse, Some resolution ->
-                            let admissibility = getAdmissibilityResult parse
-
-                            p {
-                                attr.``class`` "is-size-7 has-text-grey"
-                                text parse.PhiId
+                        div {
+                            attr.``class`` "box"
+                            h2 {
+                                attr.``class`` "title is-5"
+                                text "T1 — Φ Ingestion"
                             }
-
-                            h3 {
-                                attr.``class`` "title is-6"
-                                text "Selected Φ"
-                            }
-                            p { text parse.Statement }
 
                             div {
+                                attr.``class`` "field"
+                                label {
+                                    attr.``class`` "label"
+                                    text "Raw statement / observation"
+                                }
+                                div {
+                                    attr.``class`` "control"
+                                    textarea {
+                                        attr.``class`` "textarea"
+                                        attr.placeholder "Write the Φ as provided..."
+                                        bind.input.string model.phiDraftRawStatement (fun v -> dispatch (SetPhiDraftRawStatement v))
+                                    }
+                                }
+                            }
+
+                            div {
+                                attr.``class`` "field"
+                                label {
+                                    attr.``class`` "label"
+                                    text "Trigger context"
+                                }
+                                div {
+                                    attr.``class`` "control"
+                                    input {
+                                        attr.``class`` "input"
+                                        attr.placeholder "Why did this matter?"
+                                        bind.input.string model.phiDraftTriggerContext (fun v -> dispatch (SetPhiDraftTriggerContext v))
+                                    }
+                                }
+                            }
+
+                            div {
+                                attr.``class`` "field"
+                                label {
+                                    attr.``class`` "label"
+                                    text "Source"
+                                }
+                                div {
+                                    attr.``class`` "control"
+                                    input {
+                                        attr.``class`` "input"
+                                        attr.placeholder "User, observation, requirement, review..."
+                                        bind.input.string model.phiDraftSource (fun v -> dispatch (SetPhiDraftSource v))
+                                    }
+                                }
+                            }
+
+                            div {
+                                attr.``class`` "field"
+                                label {
+                                    attr.``class`` "label"
+                                    text "Quick tags"
+                                }
+                                div {
+                                    attr.``class`` "control"
+                                    input {
+                                        attr.``class`` "input"
+                                        attr.placeholder "function, mode, interface, state, unknown..."
+                                        bind.input.string model.phiDraftQuickTags (fun v -> dispatch (SetPhiDraftQuickTags v))
+                                    }
+                                }
+                            }
+
+                            div {
+                                attr.``class`` "field"
+                                label {
+                                    attr.``class`` "label"
+                                    text "Confidence"
+                                }
+                                div {
+                                    attr.``class`` "control"
+                                    div {
+                                        attr.``class`` "select is-fullwidth"
+                                        select {
+                                            bind.input.string model.phiDraftConfidence (fun v -> dispatch (SetPhiDraftConfidence v))
+                                            option { text "High" }
+                                            option { text "Medium" }
+                                            option { text "Low" }
+                                        }
+                                    }
+                                }
+                            }
+
+                            button {
+                                attr.``class`` "button is-link is-fullwidth"
+                                attr.``type`` "button"
+                                on.click (fun _ -> dispatch IngestPhiDraft)
+                                text "Ingest Φ"
+                            }
+                        }
+
+                        div {
+                            attr.``class`` "box"
+                            h2 {
+                                attr.``class`` "title is-5"
+                                text "Φ Set"
+                            }
+
+                            match model.ingestedPhis with
+                            | [] ->
+                                p {
+                                    attr.``class`` "has-text-grey"
+                                    text "No Φ ingested yet."
+                                }
+                            | phis ->
+                                div {
+                                    attr.``class`` "content"
+                                    forEach phis <| fun phi ->
+                                        div {
+                                            attr.``class`` "box"
+                                            p {
+                                                strong { text phi.PhiId }
+                                            }
+                                            p {
+                                                text phi.RawStatement
+                                            }
+                                            p {
+                                                attr.``class`` "is-size-7 has-text-grey"
+                                                text ("Source: " + phi.Source + " | Confidence: " + phi.Confidence)
+                                            }
+                                            button {
+                                                attr.``class`` "button is-small is-link is-light"
+                                                attr.``type`` "button"
+                                                on.click (fun _ -> dispatch (ParseIngestedPhi phi.PhiId))
+                                                text "Parse Φ"
+                                            }
+                                        }
+                                }
+                        }
+                    }
+
+                    div {
+                        attr.``class`` "column is-8"
+
+                        div {
+                            attr.``class`` "box"
+                            h2 {
+                                attr.``class`` "title is-5"
+                                text "T2: Parse"
+                            }
+
+                            match model.selectedPhiParse, model.selectedPhiResolution with
+                            | Some parse, Some resolution ->
+                                let admissibility = getAdmissibilityResult parse
+
+                                p {
+                                    attr.``class`` "is-size-7 has-text-grey"
+                                    text parse.PhiId
+                                }
+
+                                h3 {
+                                    attr.``class`` "title is-6"
+                                    text "Selected Φ"
+                                }
+                                p { text parse.Statement }
+
+                                div {
+                                    attr.``class`` "mb-4"
+                                    span {
+                                        attr.``class`` (admissibilityBadgeClass admissibility)
+                                        text (formatAdmissibilityResult admissibility)
+                                    }
+                                }
+
+                                renderExposureChain parse
+
+                                renderSummaryCard "ΔΣ" resolution.DeltaSigmaSummary
+                                renderSummaryCard "Γ" resolution.GammaSummary
+                                renderExecutionPathCard resolution.ExecutionPath
+
+                            | _ ->
+                                p {
+                                    attr.``class`` "has-text-grey"
+                                    text "Select an ingested Φ to prepare a structural parse."
+                                }
+                        }
+
+                        renderRelevantSigmaContextPanel model.selectedPhiResolution
+                    }
+                }
+            }
+
+            hr {}
+
+            div {
+                attr.``class`` "pt-5"
+
+                h2 {
+                    attr.``class`` "title is-4"
+                    text "Legacy Examples"
+                }
+
+                div {
+                    attr.``class`` "columns is-variable is-5"
+
+                    div {
+                        attr.``class`` "column is-4"
+
+                        div {
+                            attr.``class`` "box"
+                            h2 {
+                                attr.``class`` "title is-5"
+                                text "Demo Scenarios / Legacy Examples"
+                            }
+                            div {
+                                attr.``class`` "buttons"
+                                forEach demoScenarios <| fun candidate ->
+                                    button {
+                                        attr.``class`` (
+                                            if Some candidate.Id = model.selectedScenarioId then
+                                                "button is-link is-fullwidth"
+                                            else
+                                                "button is-fullwidth")
+                                        attr.``type`` "button"
+                                        on.click (fun _ -> dispatch (SelectScenario candidate.Id))
+                                        text candidate.Title
+                                    }
+                            }
+                            p {
+                                attr.``class`` "has-text-grey"
+                                text scenario.Description
+                            }
+                        }
+                    }
+
+                    div {
+                        attr.``class`` "column is-8"
+
+                        div {
+                            attr.``class`` "box"
+                            h2 {
+                                attr.``class`` "title is-4"
+                                text "Legacy Scenario Resolution"
+                            }
+                            p {
+                                attr.``class`` "is-size-7 has-text-grey"
+                                text scenario.Parse.PhiId
+                            }
+                            div {
                                 attr.``class`` "mb-4"
+                                h3 {
+                                    attr.``class`` "title is-6"
+                                    text "Admissibility Result"
+                                }
                                 span {
                                     attr.``class`` (admissibilityBadgeClass admissibility)
                                     text (formatAdmissibilityResult admissibility)
                                 }
                             }
 
-                            renderExposureChain parse
-
-                            renderSummaryCard "ΔΣ" resolution.DeltaSigmaSummary
-                            renderSummaryCard "Γ" resolution.GammaSummary
-                            renderExecutionPathCard resolution.ExecutionPath
-
-                        | _ ->
-                            p {
-                                attr.``class`` "has-text-grey"
-                                text "Select an ingested Φ to prepare a structural parse."
-                            }
-                    }
-
-                    div {
-                        attr.``class`` "box"
-                        h2 {
-                            attr.``class`` "title is-4"
-                            text scenario.Title
-                        }
-                        p {
-                            attr.``class`` "is-size-7 has-text-grey"
-                            text scenario.Parse.PhiId
-                        }
-                        div {
-                            attr.``class`` "mb-4"
                             h3 {
                                 attr.``class`` "title is-6"
-                                text "Admissibility Result"
+                                text "Φ statement"
                             }
-                            span {
-                                attr.``class`` (admissibilityBadgeClass admissibility)
-                                text (formatAdmissibilityResult admissibility)
+                            p {
+                                text scenario.Parse.Statement
                             }
                         }
-                        
-                        h3 {
-                            attr.``class`` "title is-6"
-                            text "Φ statement"
-                        }
-                        p {
-                            text scenario.Parse.Statement
-                        }
-                    }
-                    div {
-                        attr.``class`` "columns"
 
                         div {
-                            attr.``class`` "column is-3"
-                            renderSummaryBox
-                                "Selected derivation entry"
-                                (formatDerivationEntry resolution.SelectedEntry)
+                            attr.``class`` "columns"
+
+                            div {
+                                attr.``class`` "column is-3"
+                                renderSummaryBox
+                                    "Selected derivation entry"
+                                    (formatDerivationEntry resolution.SelectedEntry)
+                            }
+
+                            div {
+                                attr.``class`` "column is-3"
+                                renderSummaryBox
+                                    "DeltaSigmaSummary"
+                                    resolution.DeltaSigmaSummary
+                            }
+
+                            div {
+                                attr.``class`` "column is-3"
+                                renderSummaryBox
+                                    "Delta Candidate"
+                                    resolution.DeltaCandidateSummary
+                            }
+
+                            div {
+                                attr.``class`` "column is-3"
+                                renderSummaryBox
+                                    "GammaSummary"
+                                    resolution.GammaSummary
+                            }
                         }
 
                         div {
-                            attr.``class`` "column is-3"
-                            renderSummaryBox
-                                "DeltaSigmaSummary"
-                                resolution.DeltaSigmaSummary
+                            attr.``class`` "box"
+                            h3 {
+                                attr.``class`` "title is-6"
+                                text "Execution path"
+                            }
+                            ol {
+                                forEach resolution.ExecutionPath <| fun step ->
+                                    li {
+                                        text step
+                                    }
+                            }
                         }
 
                         div {
-                            attr.``class`` "column is-3"
-                            renderSummaryBox
-                                "Delta Candidate"
-                                resolution.DeltaCandidateSummary
-                        }
+                            attr.``class`` "columns is-multiline"
 
-                        div {
-                            attr.``class`` "column is-3"
-                            renderSummaryBox
-                                "GammaSummary"
-                                resolution.GammaSummary
-                        }
-                    }
-                    div {
-                        attr.``class`` "box"
-                        h3 {
-                            attr.``class`` "title is-6"
-                            text "Execution path"
-                        }
-                        ol {
-                            forEach resolution.ExecutionPath <| fun step ->
-                                li {
-                                    text step
-                                }
-                        }
-                    }
-                    div {
-                        attr.``class`` "columns is-multiline"
-                        div {
-                            attr.``class`` "column is-6"
-                            renderMatchedGroup "Matched FR names" matchedFrNames
-                        }
-                        div {
-                            attr.``class`` "column is-6"
-                            renderMatchedGroup "Matched DP names" matchedDpNames
-                        }
-                        div {
-                            attr.``class`` "column is-6"
-                            renderMatchedGroup "Matched TF names" matchedTfNames
-                        }
-                        div {
-                            attr.``class`` "column is-6"
-                            renderMatchedGroup "Matched CTQ names" matchedCtqNames
+                            div {
+                                attr.``class`` "column is-6"
+                                renderMatchedGroup "Matched FR names" matchedFrNames
+                            }
+                            div {
+                                attr.``class`` "column is-6"
+                                renderMatchedGroup "Matched DP names" matchedDpNames
+                            }
+                            div {
+                                attr.``class`` "column is-6"
+                                renderMatchedGroup "Matched TF names" matchedTfNames
+                            }
+                            div {
+                                attr.``class`` "column is-6"
+                                renderMatchedGroup "Matched CTQ names" matchedCtqNames
+                            }
                         }
                     }
                 }
