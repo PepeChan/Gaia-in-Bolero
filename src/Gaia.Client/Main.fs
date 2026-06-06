@@ -212,29 +212,36 @@ let hasDeltaSigmaAnalysisChanges analysis =
     hasDeltaSigmaAtomChanges analysis.AddedAtoms
     || hasDeltaSigmaAtomChanges analysis.RemovedAtoms
 
-let buildDeltaSigmaAnalysis phiId wasExcluded beforeSigma afterSigma parsedPhis =
+let createDeltaSigmaAnalysis action reason sourcePhiId sourceStatement beforeSigma afterSigma =
+    {
+        Action = action
+        SourcePhiId = sourcePhiId
+        SourceStatement = sourceStatement
+        Reason = reason
+        AddedAtoms = buildDeltaSigmaAtomGroups beforeSigma afterSigma
+        RemovedAtoms = buildDeltaSigmaAtomGroups afterSigma beforeSigma
+    }
+
+let buildReplayDeltaSigmaAnalysis phiId wasExcluded beforeSigma afterSigma parsedPhis =
     let sourceStatement =
         parsedPhis
         |> List.tryFind (fun parse -> parse.PhiId = phiId)
         |> Option.map (fun parse -> parse.Statement)
         |> Option.defaultValue "Source statement unavailable."
 
-    {
-        Action =
-            if wasExcluded then
-                "Included " + phiId
-            else
-                "Excluded " + phiId
-        SourcePhiId = phiId
-        SourceStatement = sourceStatement
-        Reason =
-            if wasExcluded then
-                "This Phi is now included in replay, so its exposed atoms can enter current Sigma."
-            else
-                "This Phi is now excluded from replay, so atoms only supplied by it can leave current Sigma."
-        AddedAtoms = buildDeltaSigmaAtomGroups beforeSigma afterSigma
-        RemovedAtoms = buildDeltaSigmaAtomGroups afterSigma beforeSigma
-    }
+    let action =
+        if wasExcluded then
+            "Included " + phiId
+        else
+            "Excluded " + phiId
+
+    let reason =
+        if wasExcluded then
+            "This Phi is now included in replay, so its exposed atoms can enter current Sigma."
+        else
+            "This Phi is now excluded from replay, so atoms only supplied by it can leave current Sigma."
+
+    createDeltaSigmaAnalysis action reason phiId sourceStatement beforeSigma afterSigma
 
 let update message model =
     match message with
@@ -270,15 +277,35 @@ let update message model =
     | ParseIngestedPhi phiId ->
         match model.ingestedPhis |> List.tryFind (fun phi -> phi.PhiId = phiId) with
         | Some phi ->
+            let beforeSigma =
+                model.parsedPhis
+                |> getIncludedSequencedParsedPhis model.excludedPhiIds
+                |> buildSigmaContext
+
             let parse = Engine.parseIntake phi
             let resolution = Engine.resolveParse DemoData.demoSigma parse
             let parsedPhis = upsertParsedPhi parse model.parsedPhis
+
+            let afterSigma =
+                parsedPhis
+                |> getIncludedSequencedParsedPhis model.excludedPhiIds
+                |> buildSigmaContext
+
+            let lastReplayAction =
+                createDeltaSigmaAnalysis
+                    ("Parsed " + parse.PhiId)
+                    "This Phi was parsed, so its exposed atoms can enter current Sigma."
+                    parse.PhiId
+                    parse.Statement
+                    beforeSigma
+                    afterSigma
 
             { model with
                 selectedPhiId = Some phi.PhiId
                 selectedPhiParse = Some parse
                 selectedPhiResolution = Some resolution
-                parsedPhis = parsedPhis }, Cmd.none
+                parsedPhis = parsedPhis
+                lastReplayAction = Some lastReplayAction }, Cmd.none
 
         | None ->
             model, Cmd.none
@@ -304,7 +331,7 @@ let update message model =
             |> buildSigmaContext
 
         let lastReplayAction =
-            buildDeltaSigmaAnalysis phiId wasExcluded beforeSigma afterSigma model.parsedPhis
+            buildReplayDeltaSigmaAnalysis phiId wasExcluded beforeSigma afterSigma model.parsedPhis
 
         { model with
             excludedPhiIds = excludedPhiIds
