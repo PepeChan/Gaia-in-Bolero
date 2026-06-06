@@ -13,6 +13,42 @@ open Gaia.Core
 type Page =
     | [<EndPoint "/">] Probe
 
+type SigmaContextEntry =
+    {
+        Value: string
+        SourcePhiId: string
+        SourcePhiStatement: string
+        ParseSequenceNumber: int
+    }
+
+type SigmaContext =
+    {
+        Functions: SigmaContextEntry list
+        Modes: SigmaContextEntry list
+        Interfaces: SigmaContextEntry list
+        States: SigmaContextEntry list
+        Hosts: SigmaContextEntry list
+    }
+
+type DeltaSigmaAtomGroups =
+    {
+        FunctionAtoms: string list
+        ModeAtoms: string list
+        InterfaceAtoms: string list
+        StateAtoms: string list
+        HostAtoms: string list
+    }
+
+type DeltaSigmaAnalysis =
+    {
+        Action: string
+        SourcePhiId: string
+        SourceStatement: string
+        Reason: string
+        AddedAtoms: DeltaSigmaAtomGroups
+        RemovedAtoms: DeltaSigmaAtomGroups
+    }
+
 /// The Elmish application's model.
 type Model =
     {
@@ -31,6 +67,7 @@ type Model =
         selectedPhiId: string option
         selectedPhiParse: PhiParse option
         selectedPhiResolution: ResolutionView option
+        lastReplayAction: DeltaSigmaAnalysis option
     }
 
 let demoScenarios = DemoData.demoScenarios
@@ -72,6 +109,7 @@ let initModel =
         selectedPhiId = None
         selectedPhiParse = None
         selectedPhiResolution = None
+        lastReplayAction = None
     }
 /// The Elmish application's update messages.
 type Message =
@@ -98,6 +136,105 @@ let upsertParsedPhi parse parsedPhis =
                 parsedPhi)
     else
         parsedPhis @ [ parse ]
+
+let isPhiExcluded excludedPhiIds phiId =
+    excludedPhiIds
+    |> List.contains phiId
+
+let getSequencedParsedPhis parsedPhis =
+    parsedPhis
+    |> List.mapi (fun index parse -> index + 1, parse)
+
+let getIncludedSequencedParsedPhis excludedPhiIds parsedPhis =
+    parsedPhis
+    |> getSequencedParsedPhis
+    |> List.filter (fun (_, parse) -> not (isPhiExcluded excludedPhiIds parse.PhiId))
+
+let buildSigmaContextEntries getValue sequencedParsedPhis =
+    sequencedParsedPhis
+    |> List.choose (fun (parseSequenceNumber, parse) ->
+        let value = getValue parse
+
+        if value = "" then
+            None
+        else
+            Some
+                {
+                    Value = value
+                    SourcePhiId = parse.PhiId
+                    SourcePhiStatement = parse.Statement
+                    ParseSequenceNumber = parseSequenceNumber
+                })
+    |> List.distinctBy (fun entry -> entry.Value)
+
+let buildSigmaContext sequencedParsedPhis =
+    {
+        Functions = buildSigmaContextEntries (fun parse -> parse.Exposure.Function) sequencedParsedPhis
+        Modes = buildSigmaContextEntries (fun parse -> parse.Exposure.Mode) sequencedParsedPhis
+        Interfaces = buildSigmaContextEntries (fun parse -> parse.Exposure.Interface) sequencedParsedPhis
+        States = buildSigmaContextEntries (fun parse -> parse.Exposure.State) sequencedParsedPhis
+        Hosts = buildSigmaContextEntries (fun parse -> parse.Exposure.HostCandidate) sequencedParsedPhis
+    }
+
+let getAddedAtomValues beforeEntries afterEntries =
+    let beforeValues =
+        beforeEntries
+        |> List.map (fun entry -> entry.Value)
+        |> Set.ofList
+
+    afterEntries
+    |> List.choose (fun entry ->
+        if beforeValues |> Set.contains entry.Value then
+            None
+        else
+            Some entry.Value)
+
+let buildDeltaSigmaAtomGroups (beforeSigma: SigmaContext) (afterSigma: SigmaContext) =
+    {
+        FunctionAtoms = getAddedAtomValues beforeSigma.Functions afterSigma.Functions
+        ModeAtoms = getAddedAtomValues beforeSigma.Modes afterSigma.Modes
+        InterfaceAtoms = getAddedAtomValues beforeSigma.Interfaces afterSigma.Interfaces
+        StateAtoms = getAddedAtomValues beforeSigma.States afterSigma.States
+        HostAtoms = getAddedAtomValues beforeSigma.Hosts afterSigma.Hosts
+    }
+
+let hasDeltaSigmaAtomChanges atomGroups =
+    [
+        atomGroups.FunctionAtoms
+        atomGroups.ModeAtoms
+        atomGroups.InterfaceAtoms
+        atomGroups.StateAtoms
+        atomGroups.HostAtoms
+    ]
+    |> List.exists (fun atoms -> not (List.isEmpty atoms))
+
+let hasDeltaSigmaAnalysisChanges analysis =
+    hasDeltaSigmaAtomChanges analysis.AddedAtoms
+    || hasDeltaSigmaAtomChanges analysis.RemovedAtoms
+
+let buildDeltaSigmaAnalysis phiId wasExcluded beforeSigma afterSigma parsedPhis =
+    let sourceStatement =
+        parsedPhis
+        |> List.tryFind (fun parse -> parse.PhiId = phiId)
+        |> Option.map (fun parse -> parse.Statement)
+        |> Option.defaultValue "Source statement unavailable."
+
+    {
+        Action =
+            if wasExcluded then
+                "Included " + phiId
+            else
+                "Excluded " + phiId
+        SourcePhiId = phiId
+        SourceStatement = sourceStatement
+        Reason =
+            if wasExcluded then
+                "This Phi is now included in replay, so its exposed atoms can enter current Sigma."
+            else
+                "This Phi is now excluded from replay, so atoms only supplied by it can leave current Sigma."
+        AddedAtoms = buildDeltaSigmaAtomGroups beforeSigma afterSigma
+        RemovedAtoms = buildDeltaSigmaAtomGroups afterSigma beforeSigma
+    }
 
 let update message model =
     match message with
@@ -147,14 +284,31 @@ let update message model =
             model, Cmd.none
 
     | ToggleExcludeParsedPhi phiId ->
+        let beforeSigma =
+            model.parsedPhis
+            |> getIncludedSequencedParsedPhis model.excludedPhiIds
+            |> buildSigmaContext
+
+        let wasExcluded = model.excludedPhiIds |> List.contains phiId
+
         let excludedPhiIds =
-            if model.excludedPhiIds |> List.contains phiId then
+            if wasExcluded then
                 model.excludedPhiIds
                 |> List.filter (fun excludedPhiId -> excludedPhiId <> phiId)
             else
                 phiId :: model.excludedPhiIds
 
-        { model with excludedPhiIds = excludedPhiIds }, Cmd.none
+        let afterSigma =
+            model.parsedPhis
+            |> getIncludedSequencedParsedPhis excludedPhiIds
+            |> buildSigmaContext
+
+        let lastReplayAction =
+            buildDeltaSigmaAnalysis phiId wasExcluded beforeSigma afterSigma model.parsedPhis
+
+        { model with
+            excludedPhiIds = excludedPhiIds
+            lastReplayAction = Some lastReplayAction }, Cmd.none
 
     | IngestPhiDraft ->
         let intake =
@@ -194,23 +348,6 @@ type AdmissibilityResult =
     | Hold
     | Reject
     | Escalate
-
-type SigmaContextEntry =
-    {
-        Value: string
-        SourcePhiId: string
-        SourcePhiStatement: string
-        ParseSequenceNumber: int
-    }
-
-type SigmaContext =
-    {
-        Functions: SigmaContextEntry list
-        Modes: SigmaContextEntry list
-        Interfaces: SigmaContextEntry list
-        States: SigmaContextEntry list
-        Hosts: SigmaContextEntry list
-    }
 
 let tryGetSelectedScenario model =
     model.selectedScenarioId
@@ -280,45 +417,6 @@ let renderMatchedGroup title names =
                         text name
                     }
             }
-    }
-
-let isPhiExcluded excludedPhiIds phiId =
-    excludedPhiIds
-    |> List.contains phiId
-
-let getSequencedParsedPhis parsedPhis =
-    parsedPhis
-    |> List.mapi (fun index parse -> index + 1, parse)
-
-let getIncludedSequencedParsedPhis excludedPhiIds parsedPhis =
-    parsedPhis
-    |> getSequencedParsedPhis
-    |> List.filter (fun (_, parse) -> not (isPhiExcluded excludedPhiIds parse.PhiId))
-
-let buildSigmaContextEntries getValue sequencedParsedPhis =
-    sequencedParsedPhis
-    |> List.choose (fun (parseSequenceNumber, parse) ->
-        let value = getValue parse
-
-        if value = "" then
-            None
-        else
-            Some
-                {
-                    Value = value
-                    SourcePhiId = parse.PhiId
-                    SourcePhiStatement = parse.Statement
-                    ParseSequenceNumber = parseSequenceNumber
-                })
-    |> List.distinctBy (fun entry -> entry.Value)
-
-let buildSigmaContext sequencedParsedPhis =
-    {
-        Functions = buildSigmaContextEntries (fun parse -> parse.Exposure.Function) sequencedParsedPhis
-        Modes = buildSigmaContextEntries (fun parse -> parse.Exposure.Mode) sequencedParsedPhis
-        Interfaces = buildSigmaContextEntries (fun parse -> parse.Exposure.Interface) sequencedParsedPhis
-        States = buildSigmaContextEntries (fun parse -> parse.Exposure.State) sequencedParsedPhis
-        Hosts = buildSigmaContextEntries (fun parse -> parse.Exposure.HostCandidate) sequencedParsedPhis
     }
 
 let renderKnownContextGroup title entries =
@@ -473,6 +571,94 @@ let renderParsedPhiLedgerPanel parsedPhis excludedPhiIds dispatch =
                     }
                 }
             }
+    }
+
+let renderDeltaSigmaAtomGroup title atoms =
+    div {
+        attr.``class`` "mb-3"
+        h4 {
+            attr.``class`` "title is-6 mb-2"
+            text title
+        }
+
+        match atoms with
+        | [] ->
+            p {
+                attr.``class`` "has-text-grey is-size-7"
+                text "None."
+            }
+        | values ->
+            ul {
+                forEach values <| fun value ->
+                    li { text value }
+            }
+    }
+
+let renderDeltaSigmaAtomColumn title (atomGroups: DeltaSigmaAtomGroups) =
+    div {
+        attr.``class`` "column is-6"
+
+        h3 {
+            attr.``class`` "title is-6"
+            text title
+        }
+
+        renderDeltaSigmaAtomGroup "Functions" atomGroups.FunctionAtoms
+        renderDeltaSigmaAtomGroup "Modes" atomGroups.ModeAtoms
+        renderDeltaSigmaAtomGroup "Interfaces" atomGroups.InterfaceAtoms
+        renderDeltaSigmaAtomGroup "States" atomGroups.StateAtoms
+        renderDeltaSigmaAtomGroup "Hosts" atomGroups.HostAtoms
+    }
+
+let renderDeltaSigmaAnalysisPanel (lastReplayAction: DeltaSigmaAnalysis option) =
+    div {
+        attr.``class`` "box"
+
+        p {
+            attr.``class`` "heading"
+            text "Replay Engine Lite"
+        }
+
+        h2 {
+            attr.``class`` "title is-5"
+            text "ΔΣ Analysis — Last Replay Action"
+        }
+
+        match lastReplayAction with
+        | None ->
+            p {
+                attr.``class`` "has-text-grey"
+                text "No replay action yet."
+            }
+
+        | Some analysis ->
+            p {
+                strong { text "Action: " }
+                text analysis.Action
+            }
+
+            p {
+                strong { text "Source statement: " }
+                text analysis.SourceStatement
+            }
+
+            p {
+                attr.``class`` "mb-4"
+                strong { text "Why: " }
+                text analysis.Reason
+            }
+
+            if hasDeltaSigmaAnalysisChanges analysis then
+                div {
+                    attr.``class`` "columns"
+                    renderDeltaSigmaAtomColumn "Added atoms" analysis.AddedAtoms
+                    renderDeltaSigmaAtomColumn "Removed atoms" analysis.RemovedAtoms
+                }
+            else
+                p {
+                    attr.``class`` "has-text-grey"
+                    text "No Sigma atoms changed."
+                }
     }
 
 let renderSummaryBox title body =
@@ -934,6 +1120,8 @@ let homePage model dispatch =
                         }
 
                         renderParsedPhiLedgerPanel model.parsedPhis model.excludedPhiIds dispatch
+
+                        renderDeltaSigmaAnalysisPanel model.lastReplayAction
 
                         renderRelevantSigmaContextPanel includedSequencedParsedPhis model.selectedPhiParse model.selectedPhiResolution
                     }
