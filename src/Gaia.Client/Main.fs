@@ -13,12 +13,18 @@ open Gaia.Core
 type Page =
     | [<EndPoint "/">] Probe
 
+type TopNavigationTab =
+    | GaiaProbeTab
+    | DemoToolsTab
+
 type SigmaContextEntry =
     {
         Value: string
         SourcePhiId: string
         SourcePhiStatement: string
         ParseSequenceNumber: int
+        SupportCount: int
+        SupportingPhiIds: string list
     }
 
 type SigmaContext =
@@ -47,12 +53,14 @@ type DeltaSigmaAnalysis =
         Reason: string
         AddedAtoms: DeltaSigmaAtomGroups
         RemovedAtoms: DeltaSigmaAtomGroups
+        AlreadyKnownAtoms: DeltaSigmaAtomGroups
     }
 
 /// The Elmish application's model.
 type Model =
     {
         page: Page
+        activeTopNavigationTab: TopNavigationTab
         error: string option
         selectedScenarioId: string option
         scenarioResolution: ResolutionView option
@@ -95,6 +103,7 @@ let initModel =
 
     {
         page = Probe
+        activeTopNavigationTab = GaiaProbeTab
         error = None
         selectedScenarioId = selectedScenarioId
         scenarioResolution = scenarioResolution
@@ -114,6 +123,7 @@ let initModel =
 /// The Elmish application's update messages.
 type Message =
     | SetPage of Page
+    | SelectTopNavigationTab of TopNavigationTab
     | SelectScenario of string
     | Error of exn
     | ClearError
@@ -164,8 +174,21 @@ let buildSigmaContextEntries getValue sequencedParsedPhis =
                     SourcePhiId = parse.PhiId
                     SourcePhiStatement = parse.Statement
                     ParseSequenceNumber = parseSequenceNumber
+                    SupportCount = 1
+                    SupportingPhiIds = [ parse.PhiId ]
                 })
-    |> List.distinctBy (fun entry -> entry.Value)
+    |> List.groupBy (fun entry -> entry.Value)
+    |> List.map (fun (_, entries) ->
+        let firstEntry = entries |> List.head
+
+        let supportingPhiIds =
+            entries
+            |> List.map (fun entry -> entry.SourcePhiId)
+            |> List.distinct
+
+        { firstEntry with
+            SupportCount = List.length supportingPhiIds
+            SupportingPhiIds = supportingPhiIds })
 
 let buildSigmaContext sequencedParsedPhis =
     {
@@ -174,6 +197,30 @@ let buildSigmaContext sequencedParsedPhis =
         Interfaces = buildSigmaContextEntries (fun parse -> parse.Exposure.Interface) sequencedParsedPhis
         States = buildSigmaContextEntries (fun parse -> parse.Exposure.State) sequencedParsedPhis
         Hosts = buildSigmaContextEntries (fun parse -> parse.Exposure.HostCandidate) sequencedParsedPhis
+    }
+
+let emptyDeltaSigmaAtomGroups =
+    {
+        FunctionAtoms = []
+        ModeAtoms = []
+        InterfaceAtoms = []
+        StateAtoms = []
+        HostAtoms = []
+    }
+
+let getPhiAtomGroups (parse: PhiParse) =
+    let asAtom value =
+        if value = "" then
+            []
+        else
+            [ value ]
+
+    {
+        FunctionAtoms = asAtom parse.Exposure.Function
+        ModeAtoms = asAtom parse.Exposure.Mode
+        InterfaceAtoms = asAtom parse.Exposure.Interface
+        StateAtoms = asAtom parse.Exposure.State
+        HostAtoms = asAtom parse.Exposure.HostCandidate
     }
 
 let getAddedAtomValues beforeEntries afterEntries =
@@ -198,6 +245,27 @@ let buildDeltaSigmaAtomGroups (beforeSigma: SigmaContext) (afterSigma: SigmaCont
         HostAtoms = getAddedAtomValues beforeSigma.Hosts afterSigma.Hosts
     }
 
+let getAlreadyKnownAtomValues sourcePhiId beforeEntries atomValues =
+    atomValues
+    |> List.filter (fun atomValue ->
+        beforeEntries
+        |> List.tryFind (fun entry -> entry.Value = atomValue)
+        |> Option.exists (fun entry ->
+            not (entry.SupportingPhiIds |> List.contains sourcePhiId)
+            && (entry.SupportingPhiIds |> List.exists (fun supportingPhiId -> supportingPhiId <> sourcePhiId))))
+    |> List.distinct
+
+let buildAlreadyKnownAtomGroups sourcePhiId (beforeSigma: SigmaContext) (parse: PhiParse) =
+    let parseAtoms = getPhiAtomGroups parse
+
+    {
+        FunctionAtoms = getAlreadyKnownAtomValues sourcePhiId beforeSigma.Functions parseAtoms.FunctionAtoms
+        ModeAtoms = getAlreadyKnownAtomValues sourcePhiId beforeSigma.Modes parseAtoms.ModeAtoms
+        InterfaceAtoms = getAlreadyKnownAtomValues sourcePhiId beforeSigma.Interfaces parseAtoms.InterfaceAtoms
+        StateAtoms = getAlreadyKnownAtomValues sourcePhiId beforeSigma.States parseAtoms.StateAtoms
+        HostAtoms = getAlreadyKnownAtomValues sourcePhiId beforeSigma.Hosts parseAtoms.HostAtoms
+    }
+
 let hasDeltaSigmaAtomChanges atomGroups =
     [
         atomGroups.FunctionAtoms
@@ -211,8 +279,9 @@ let hasDeltaSigmaAtomChanges atomGroups =
 let hasDeltaSigmaAnalysisChanges analysis =
     hasDeltaSigmaAtomChanges analysis.AddedAtoms
     || hasDeltaSigmaAtomChanges analysis.RemovedAtoms
+    || hasDeltaSigmaAtomChanges analysis.AlreadyKnownAtoms
 
-let createDeltaSigmaAnalysis action reason sourcePhiId sourceStatement beforeSigma afterSigma =
+let createDeltaSigmaAnalysis action reason sourcePhiId sourceStatement alreadyKnownAtoms beforeSigma afterSigma =
     {
         Action = action
         SourcePhiId = sourcePhiId
@@ -220,6 +289,7 @@ let createDeltaSigmaAnalysis action reason sourcePhiId sourceStatement beforeSig
         Reason = reason
         AddedAtoms = buildDeltaSigmaAtomGroups beforeSigma afterSigma
         RemovedAtoms = buildDeltaSigmaAtomGroups afterSigma beforeSigma
+        AlreadyKnownAtoms = alreadyKnownAtoms
     }
 
 let buildReplayDeltaSigmaAnalysis phiId wasExcluded beforeSigma afterSigma parsedPhis =
@@ -241,12 +311,23 @@ let buildReplayDeltaSigmaAnalysis phiId wasExcluded beforeSigma afterSigma parse
         else
             "This Phi is now excluded from replay, so atoms only supplied by it can leave current Sigma."
 
-    createDeltaSigmaAnalysis action reason phiId sourceStatement beforeSigma afterSigma
+    let alreadyKnownAtoms =
+        if wasExcluded then
+            parsedPhis
+            |> List.tryFind (fun parse -> parse.PhiId = phiId)
+            |> Option.map (buildAlreadyKnownAtomGroups phiId beforeSigma)
+            |> Option.defaultValue emptyDeltaSigmaAtomGroups
+        else
+            emptyDeltaSigmaAtomGroups
+
+    createDeltaSigmaAnalysis action reason phiId sourceStatement alreadyKnownAtoms beforeSigma afterSigma
 
 let update message model =
     match message with
     | SetPage page ->
         { model with page = page }, Cmd.none
+    | SelectTopNavigationTab tab ->
+        { model with activeTopNavigationTab = tab }, Cmd.none
     | SelectScenario scenarioId ->
         match tryFindScenario scenarioId with
         | Some scenario ->
@@ -291,12 +372,16 @@ let update message model =
                 |> getIncludedSequencedParsedPhis model.excludedPhiIds
                 |> buildSigmaContext
 
+            let alreadyKnownAtoms =
+                buildAlreadyKnownAtomGroups parse.PhiId beforeSigma parse
+
             let lastReplayAction =
                 createDeltaSigmaAnalysis
                     ("Parsed " + parse.PhiId)
                     "This Phi was parsed, so its exposed atoms can enter current Sigma."
                     parse.PhiId
                     parse.Statement
+                    alreadyKnownAtoms
                     beforeSigma
                     afterSigma
 
@@ -465,7 +550,7 @@ let renderKnownContextGroup title entries =
                     div {
                         attr.``class`` "mb-4"
                         p {
-                            strong { text ("Value: " + entry.Value) }
+                            strong { text ("Value: " + entry.Value + " [" + string entry.SupportCount + "]") }
                         }
                         p {
                             attr.``class`` "is-size-7 has-text-grey mb-1"
@@ -623,7 +708,7 @@ let renderDeltaSigmaAtomGroup title atoms =
 
 let renderDeltaSigmaAtomColumn title (atomGroups: DeltaSigmaAtomGroups) =
     div {
-        attr.``class`` "column is-6"
+        attr.``class`` "column is-4"
 
         h3 {
             attr.``class`` "title is-6"
@@ -680,6 +765,7 @@ let renderDeltaSigmaAnalysisPanel (lastReplayAction: DeltaSigmaAnalysis option) 
                     attr.``class`` "columns"
                     renderDeltaSigmaAtomColumn "Added atoms" analysis.AddedAtoms
                     renderDeltaSigmaAtomColumn "Removed atoms" analysis.RemovedAtoms
+                    renderDeltaSigmaAtomColumn "Already known / reinforced atoms" analysis.AlreadyKnownAtoms
                 }
             else
                 p {
@@ -894,6 +980,36 @@ let renderRelevantSigmaContextPanel sequencedParsedPhis selectedPhiParse selecte
                 empty()
     }
 
+let renderTopNavigation activeTab dispatch =
+    div {
+        attr.``class`` "tabs is-toggle mb-5"
+        ul {
+            li {
+                attr.``class`` (
+                    if activeTab = GaiaProbeTab then
+                        "is-active"
+                    else
+                        "")
+                a {
+                    on.click (fun _ -> dispatch (SelectTopNavigationTab GaiaProbeTab))
+                    text "Gaia Probe"
+                }
+            }
+
+            li {
+                attr.``class`` (
+                    if activeTab = DemoToolsTab then
+                        "is-active"
+                    else
+                        "")
+                a {
+                    on.click (fun _ -> dispatch (SelectTopNavigationTab DemoToolsTab))
+                    text "Demo Tools"
+                }
+            }
+        }
+    }
+
 let homePage model dispatch =
     match tryGetSelectedScenario model, model.scenarioResolution with
     | Some scenario, Some resolution ->
@@ -915,7 +1031,10 @@ let homePage model dispatch =
                 text "Probe demo scenarios, resolve them through Gaia.Core, and inspect the resulting path and matches."
             }
 
-            div {
+            renderTopNavigation model.activeTopNavigationTab dispatch
+
+            match model.activeTopNavigationTab with
+            | GaiaProbeTab -> div {
                 attr.``class`` "mb-6 pb-5"
 
                 h2 {
@@ -1153,12 +1272,10 @@ let homePage model dispatch =
                         renderRelevantSigmaContextPanel includedSequencedParsedPhis model.selectedPhiParse model.selectedPhiResolution
                     }
                 }
-            }
+                }
 
-            hr {}
-
-            div {
-                attr.``class`` "pt-5"
+            | DemoToolsTab -> div {
+                attr.``class`` "pt-2"
 
                 h2 {
                     attr.``class`` "title is-4"
