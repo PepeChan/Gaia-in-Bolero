@@ -27,6 +27,7 @@ type Model =
         phiDraftConfidence: string
         ingestedPhis: PhiIntake list
         parsedPhis: PhiParse list
+        excludedPhiIds: string list
         selectedPhiId: string option
         selectedPhiParse: PhiParse option
         selectedPhiResolution: ResolutionView option
@@ -67,6 +68,7 @@ let initModel =
         phiDraftConfidence = "Medium"
         ingestedPhis = DemoData.demoPhiIntakes
         parsedPhis = []
+        excludedPhiIds = []
         selectedPhiId = None
         selectedPhiParse = None
         selectedPhiResolution = None
@@ -84,6 +86,7 @@ type Message =
     | SetPhiDraftConfidence of string
     | IngestPhiDraft
     | ParseIngestedPhi of string
+    | ToggleExcludeParsedPhi of string
 
 let upsertParsedPhi parse parsedPhis =
     if parsedPhis |> List.exists (fun parsedPhi -> parsedPhi.PhiId = parse.PhiId) then
@@ -142,6 +145,16 @@ let update message model =
 
         | None ->
             model, Cmd.none
+
+    | ToggleExcludeParsedPhi phiId ->
+        let excludedPhiIds =
+            if model.excludedPhiIds |> List.contains phiId then
+                model.excludedPhiIds
+                |> List.filter (fun excludedPhiId -> excludedPhiId <> phiId)
+            else
+                phiId :: model.excludedPhiIds
+
+        { model with excludedPhiIds = excludedPhiIds }, Cmd.none
 
     | IngestPhiDraft ->
         let intake =
@@ -269,9 +282,21 @@ let renderMatchedGroup title names =
             }
     }
 
-let buildSigmaContextEntries getValue parsedPhis =
+let isPhiExcluded excludedPhiIds phiId =
+    excludedPhiIds
+    |> List.contains phiId
+
+let getSequencedParsedPhis parsedPhis =
     parsedPhis
     |> List.mapi (fun index parse -> index + 1, parse)
+
+let getIncludedSequencedParsedPhis excludedPhiIds parsedPhis =
+    parsedPhis
+    |> getSequencedParsedPhis
+    |> List.filter (fun (_, parse) -> not (isPhiExcluded excludedPhiIds parse.PhiId))
+
+let buildSigmaContextEntries getValue sequencedParsedPhis =
+    sequencedParsedPhis
     |> List.choose (fun (parseSequenceNumber, parse) ->
         let value = getValue parse
 
@@ -287,13 +312,13 @@ let buildSigmaContextEntries getValue parsedPhis =
                 })
     |> List.distinctBy (fun entry -> entry.Value)
 
-let buildSigmaContext parsedPhis =
+let buildSigmaContext sequencedParsedPhis =
     {
-        Functions = buildSigmaContextEntries (fun parse -> parse.Exposure.Function) parsedPhis
-        Modes = buildSigmaContextEntries (fun parse -> parse.Exposure.Mode) parsedPhis
-        Interfaces = buildSigmaContextEntries (fun parse -> parse.Exposure.Interface) parsedPhis
-        States = buildSigmaContextEntries (fun parse -> parse.Exposure.State) parsedPhis
-        Hosts = buildSigmaContextEntries (fun parse -> parse.Exposure.HostCandidate) parsedPhis
+        Functions = buildSigmaContextEntries (fun parse -> parse.Exposure.Function) sequencedParsedPhis
+        Modes = buildSigmaContextEntries (fun parse -> parse.Exposure.Mode) sequencedParsedPhis
+        Interfaces = buildSigmaContextEntries (fun parse -> parse.Exposure.Interface) sequencedParsedPhis
+        States = buildSigmaContextEntries (fun parse -> parse.Exposure.State) sequencedParsedPhis
+        Hosts = buildSigmaContextEntries (fun parse -> parse.Exposure.HostCandidate) sequencedParsedPhis
     }
 
 let renderKnownContextGroup title entries =
@@ -342,12 +367,112 @@ let renderSigmaSnapshotMetric label count =
 let renderSigmaSnapshotCounts parsedPhiCount sigmaContext =
     div {
         attr.``class`` "tags are-medium mb-4"
-        renderSigmaSnapshotMetric "Total parsed Φ" parsedPhiCount
+        renderSigmaSnapshotMetric "Included parsed Φ" parsedPhiCount
         renderSigmaSnapshotMetric "Functions" (List.length sigmaContext.Functions)
         renderSigmaSnapshotMetric "Modes" (List.length sigmaContext.Modes)
         renderSigmaSnapshotMetric "Interfaces" (List.length sigmaContext.Interfaces)
         renderSigmaSnapshotMetric "States" (List.length sigmaContext.States)
         renderSigmaSnapshotMetric "Hosts" (List.length sigmaContext.Hosts)
+    }
+
+let renderParsedPhiLedgerPanel parsedPhis excludedPhiIds dispatch =
+    let sequencedParsedPhis = getSequencedParsedPhis parsedPhis
+
+    let excludedPhiCount =
+        sequencedParsedPhis
+        |> List.filter (fun (_, parse) -> isPhiExcluded excludedPhiIds parse.PhiId)
+        |> List.length
+
+    let totalParsedPhiCount = List.length sequencedParsedPhis
+    let includedPhiCount = totalParsedPhiCount - excludedPhiCount
+
+    div {
+        attr.``class`` "box"
+
+        p {
+            attr.``class`` "heading"
+            text "Replay Engine Lite"
+        }
+
+        h2 {
+            attr.``class`` "title is-5"
+            text "Parsed Φ Ledger / Replay Control"
+        }
+
+        div {
+            attr.``class`` "tags are-medium mb-4"
+            renderSigmaSnapshotMetric "Total parsed Φ" totalParsedPhiCount
+            renderSigmaSnapshotMetric "Included Φ" includedPhiCount
+            renderSigmaSnapshotMetric "Excluded Φ" excludedPhiCount
+        }
+
+        match sequencedParsedPhis with
+        | [] ->
+            p {
+                attr.``class`` "has-text-grey"
+                text "Parse a Φ to make it available for replay control."
+            }
+
+        | phis ->
+            div {
+                attr.``class`` "table-container"
+                table {
+                    attr.``class`` "table is-fullwidth is-striped is-hoverable"
+
+                    thead {
+                        tr {
+                            th { text "#" }
+                            th { text "PhiId" }
+                            th { text "Statement" }
+                            th { text "Status" }
+                            th { text "Replay" }
+                        }
+                    }
+
+                    tbody {
+                        forEach phis <| fun (parseSequenceNumber, parse) ->
+                            let isExcluded = isPhiExcluded excludedPhiIds parse.PhiId
+
+                            tr {
+                                td { text (string parseSequenceNumber) }
+                                td {
+                                    code { text parse.PhiId }
+                                }
+                                td { text parse.Statement }
+                                td {
+                                    span {
+                                        attr.``class`` (
+                                            if isExcluded then
+                                                "tag is-warning"
+                                            else
+                                                "tag is-success is-light")
+                                        text (
+                                            if isExcluded then
+                                                "Excluded"
+                                            else
+                                                "Included")
+                                    }
+                                }
+                                td {
+                                    button {
+                                        attr.``class`` (
+                                            if isExcluded then
+                                                "button is-small is-success is-light"
+                                            else
+                                                "button is-small is-warning is-light")
+                                        attr.``type`` "button"
+                                        on.click (fun _ -> dispatch (ToggleExcludeParsedPhi parse.PhiId))
+                                        text (
+                                            if isExcluded then
+                                                "Include"
+                                            else
+                                                "Exclude")
+                                    }
+                                }
+                            }
+                    }
+                }
+            }
     }
 
 let renderSummaryBox title body =
@@ -457,8 +582,8 @@ let renderExposureChain (parse: PhiParse) =
         }
     }
 
-let renderRelevantSigmaContextPanel parsedPhis selectedPhiParse selectedPhiResolution =
-    let sigmaContext = buildSigmaContext parsedPhis
+let renderRelevantSigmaContextPanel sequencedParsedPhis selectedPhiParse selectedPhiResolution =
+    let sigmaContext = buildSigmaContext sequencedParsedPhis
 
     div {
         attr.``class`` "box"
@@ -468,18 +593,18 @@ let renderRelevantSigmaContextPanel parsedPhis selectedPhiParse selectedPhiResol
             text "Current Σ Snapshot"
         }
 
-        renderSigmaSnapshotCounts (List.length parsedPhis) sigmaContext
+        renderSigmaSnapshotCounts (List.length sequencedParsedPhis) sigmaContext
 
         h2 {
             attr.``class`` "title is-5"
             text "T3 — Relevant Σ Context"
         }
 
-        match parsedPhis with
+        match sequencedParsedPhis with
         | [] ->
             p {
                 attr.``class`` "has-text-grey"
-                text "Parse a Φ to reconstruct relevant Σ context."
+                text "Include a parsed Φ to reconstruct relevant Σ context."
             }
 
         | _ ->
@@ -564,6 +689,7 @@ let homePage model dispatch =
         let matchedDpNames = mapIdsToNames (fun (dp: DP) -> dp.Id) (fun dp -> dp.Name) DemoData.demoSigma.DPs resolution.MatchedDPs
         let matchedTfNames = mapIdsToNames (fun (tf: TF) -> tf.Id) (fun tf -> tf.Name) DemoData.demoSigma.TFs resolution.MatchedTFs
         let matchedCtqNames = mapIdsToNames (fun (ctq: CTQ) -> ctq.Id) (fun ctq -> ctq.Name) DemoData.demoSigma.CTQs resolution.MatchedCTQs
+        let includedSequencedParsedPhis = getIncludedSequencedParsedPhis model.excludedPhiIds model.parsedPhis
 
         div {
             attr.``class`` "content"
@@ -807,7 +933,9 @@ let homePage model dispatch =
                                 }
                         }
 
-                        renderRelevantSigmaContextPanel model.parsedPhis model.selectedPhiParse model.selectedPhiResolution
+                        renderParsedPhiLedgerPanel model.parsedPhis model.excludedPhiIds dispatch
+
+                        renderRelevantSigmaContextPanel includedSequencedParsedPhis model.selectedPhiParse model.selectedPhiResolution
                     }
                 }
             }
