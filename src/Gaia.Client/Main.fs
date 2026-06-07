@@ -56,6 +56,25 @@ type DeltaSigmaAnalysis =
         AlreadyKnownAtoms: DeltaSigmaAtomGroups
     }
 
+type CandidateDeltaKind =
+    | AddUnknownRevealMissingHost
+    | AddInterface
+    | AddState
+    | AddMode
+    | ReinforcedSigmaAtom
+    | NoStructuralChange
+
+type CandidateDelta =
+    {
+        Kind: CandidateDeltaKind
+        Target: string
+        ProposedTransition: string
+        Reason: string
+        RelevantSigmaBasis: string list
+        Confidence: string
+        Status: string
+    }
+
 /// The Elmish application's model.
 type Model =
     {
@@ -321,6 +340,100 @@ let buildReplayDeltaSigmaAnalysis phiId wasExcluded beforeSigma afterSigma parse
             emptyDeltaSigmaAtomGroups
 
     createDeltaSigmaAnalysis action reason phiId sourceStatement alreadyKnownAtoms beforeSigma afterSigma
+
+let createCandidateDelta kind target proposedTransition reason relevantSigmaBasis =
+    {
+        Kind = kind
+        Target = target
+        ProposedTransition = proposedTransition
+        Reason = reason
+        RelevantSigmaBasis = relevantSigmaBasis
+        Confidence = "Medium"
+        Status = "Candidate only; not promoted"
+    }
+
+let formatSigmaBasis atomKind (entry: SigmaContextEntry) =
+    atomKind
+    + ": "
+    + entry.Value
+    + " (support "
+    + string entry.SupportCount
+    + "; Φ "
+    + String.concat ", " entry.SupportingPhiIds
+    + ")"
+
+let formatSigmaBasisGroup atomKind entries =
+    entries
+    |> List.map (formatSigmaBasis atomKind)
+
+let buildReinforcedCandidateDeltas atomKind entries =
+    entries
+    |> List.filter (fun entry -> entry.SupportCount > 1)
+    |> List.map (fun entry ->
+        createCandidateDelta
+            ReinforcedSigmaAtom
+            atomKind
+            ("Recognize reinforced " + atomKind + " atom in the current Σ basis.")
+            "Multiple Phi support the same reasoning atom."
+            [ formatSigmaBasis atomKind entry ])
+
+let formulateCandidateDeltas (sigmaContext: SigmaContext) =
+    let candidates =
+        [
+            if not (List.isEmpty sigmaContext.Functions) && List.isEmpty sigmaContext.Hosts then
+                yield
+                    createCandidateDelta
+                        AddUnknownRevealMissingHost
+                        "Host"
+                        "Add an unknown Host placeholder or reveal the missing Host candidate."
+                        "Functions are known but no host candidate has been identified."
+                        (formatSigmaBasisGroup "Function" sigmaContext.Functions)
+
+            if not (List.isEmpty sigmaContext.Interfaces) then
+                yield
+                    createCandidateDelta
+                        AddInterface
+                        "Interface"
+                        "Add exposed Interface atoms as candidate Σ structure."
+                        "Interface-relevant atoms were exposed by parsed Phi."
+                        (formatSigmaBasisGroup "Interface" sigmaContext.Interfaces)
+
+            if not (List.isEmpty sigmaContext.States) then
+                yield
+                    createCandidateDelta
+                        AddState
+                        "State"
+                        "Add exposed State atoms as candidate Σ structure."
+                        "State-relevant atoms were exposed by parsed Phi."
+                        (formatSigmaBasisGroup "State" sigmaContext.States)
+
+            if not (List.isEmpty sigmaContext.Modes) then
+                yield
+                    createCandidateDelta
+                        AddMode
+                        "Mode"
+                        "Add exposed Mode atoms as candidate Σ structure."
+                        "Mode-relevant atoms were exposed by parsed Phi."
+                        (formatSigmaBasisGroup "Mode" sigmaContext.Modes)
+
+            yield! buildReinforcedCandidateDeltas "Function" sigmaContext.Functions
+            yield! buildReinforcedCandidateDeltas "Mode" sigmaContext.Modes
+            yield! buildReinforcedCandidateDeltas "Interface" sigmaContext.Interfaces
+            yield! buildReinforcedCandidateDeltas "State" sigmaContext.States
+            yield! buildReinforcedCandidateDeltas "Host" sigmaContext.Hosts
+        ]
+
+    if List.isEmpty candidates then
+        [
+            createCandidateDelta
+                NoStructuralChange
+                "None"
+                "Keep current Σ unchanged."
+                "No actionable candidate Delta Sigma transition was detected."
+                [ "No included Sigma atom produced a T4 structural candidate." ]
+        ]
+    else
+        candidates
 
 let update message model =
     match message with
@@ -774,6 +887,119 @@ let renderDeltaSigmaAnalysisPanel (lastReplayAction: DeltaSigmaAnalysis option) 
                 }
     }
 
+let formatCandidateDeltaKind = function
+    | AddUnknownRevealMissingHost -> "ADD UNKNOWN / REVEAL MISSING HOST"
+    | AddInterface -> "ADD INTERFACE"
+    | AddState -> "ADD STATE"
+    | AddMode -> "ADD MODE"
+    | ReinforcedSigmaAtom -> "REINFORCED SIGMA ATOM"
+    | NoStructuralChange -> "NO STRUCTURAL CHANGE"
+
+let renderCandidateDeltaBasis basis =
+    match basis with
+    | [] ->
+        p {
+            attr.``class`` "has-text-grey"
+            text "No relevant Sigma basis."
+        }
+    | values ->
+        ul {
+            forEach values <| fun value ->
+                li { text value }
+        }
+
+let renderCandidateDeltaCard candidate =
+    div {
+        attr.``class`` "card mb-4"
+
+        div {
+            attr.``class`` "card-content"
+
+            p {
+                attr.``class`` "heading"
+                text "Candidate type"
+            }
+
+            h3 {
+                attr.``class`` "title is-6"
+                text (formatCandidateDeltaKind candidate.Kind)
+            }
+
+            div {
+                attr.``class`` "columns is-multiline"
+
+                div {
+                    attr.``class`` "column is-6"
+                    p {
+                        strong { text "Target of change: " }
+                        text candidate.Target
+                    }
+                }
+
+                div {
+                    attr.``class`` "column is-6"
+                    p {
+                        strong { text "Confidence: " }
+                        text candidate.Confidence
+                    }
+                }
+
+                div {
+                    attr.``class`` "column is-12"
+                    p {
+                        strong { text "Proposed transition: " }
+                        text candidate.ProposedTransition
+                    }
+                }
+
+                div {
+                    attr.``class`` "column is-12"
+                    p {
+                        strong { text "Why this candidate exists: " }
+                        text candidate.Reason
+                    }
+                }
+
+                div {
+                    attr.``class`` "column is-12"
+                    p {
+                        strong { text "Relevant Sigma basis" }
+                    }
+
+                    renderCandidateDeltaBasis candidate.RelevantSigmaBasis
+                }
+
+                div {
+                    attr.``class`` "column is-12"
+                    span {
+                        attr.``class`` "tag is-warning is-light"
+                        text candidate.Status
+                    }
+                }
+            }
+        }
+    }
+
+let renderCandidateDeltaSigmaPanel sigmaContext =
+    let candidateDeltas = formulateCandidateDeltas sigmaContext
+
+    div {
+        attr.``class`` "box"
+
+        h2 {
+            attr.``class`` "title is-5"
+            text "T4 — Candidate ΔΣ Formulation"
+        }
+
+        p {
+            attr.``class`` "notification is-info is-light"
+            text "T4 formulates candidate changes only. No Σ promotion or governance decision occurs here."
+        }
+
+        forEach candidateDeltas <| fun candidateDelta ->
+            renderCandidateDeltaCard candidateDelta
+    }
+
 let renderSummaryBox title body =
     div {
         attr.``class`` "box"
@@ -1019,6 +1245,7 @@ let homePage model dispatch =
         let matchedTfNames = mapIdsToNames (fun (tf: TF) -> tf.Id) (fun tf -> tf.Name) DemoData.demoSigma.TFs resolution.MatchedTFs
         let matchedCtqNames = mapIdsToNames (fun (ctq: CTQ) -> ctq.Id) (fun ctq -> ctq.Name) DemoData.demoSigma.CTQs resolution.MatchedCTQs
         let includedSequencedParsedPhis = getIncludedSequencedParsedPhis model.excludedPhiIds model.parsedPhis
+        let currentSigmaContext = buildSigmaContext includedSequencedParsedPhis
 
         div {
             attr.``class`` "content"
@@ -1071,6 +1298,14 @@ let homePage model dispatch =
                     span {
                         attr.``class`` "tag is-link is-light"
                         text "T3 Relevant Σ Context"
+                    }
+                    span {
+                        attr.``class`` "tag is-light"
+                        text "->"
+                    }
+                    span {
+                        attr.``class`` "tag is-link is-light"
+                        text "T4 Candidate ΔΣ"
                     }
                 }
 
@@ -1270,6 +1505,8 @@ let homePage model dispatch =
                         renderDeltaSigmaAnalysisPanel model.lastReplayAction
 
                         renderRelevantSigmaContextPanel includedSequencedParsedPhis model.selectedPhiParse model.selectedPhiResolution
+
+                        renderCandidateDeltaSigmaPanel currentSigmaContext
                     }
                 }
                 }
