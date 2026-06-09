@@ -106,6 +106,17 @@ type LedgerEvent =
         Detail: string
     }
 
+type ReplayPreviewState =
+    {
+        ParsedPhiEvents: int
+        IncludedPhiCount: int
+        ExcludedPhiCount: int
+        GovernanceAccepted: int
+        GovernanceRejected: int
+        GovernanceHeld: int
+        TotalLedgerEvents: int
+    }
+
 /// The Elmish application's model.
 type Model =
     {
@@ -128,6 +139,7 @@ type Model =
         lastReplayAction: DeltaSigmaAnalysis option
         candidateDecisions: CandidateDecision list
         LedgerEvents: LedgerEvent list
+        ReplayPreviewSequence: int option
     }
 
 let demoScenarios = DemoData.demoScenarios
@@ -173,6 +185,7 @@ let initModel =
         lastReplayAction = None
         candidateDecisions = []
         LedgerEvents = []
+        ReplayPreviewSequence = None
     }
 
 let appendLedgerEvent eventKind targetId summary detail (model: Model) =
@@ -210,6 +223,8 @@ type Message =
     | AcceptCandidate of string
     | RejectCandidate of string
     | HoldCandidate of string
+    | SelectReplayPreview of int
+    | ClearReplayPreview
 
 let upsertParsedPhi parse parsedPhis =
     if parsedPhis |> List.exists (fun parsedPhi -> parsedPhi.PhiId = parse.PhiId) then
@@ -594,6 +609,10 @@ let update message model =
         { model with error = Some exn.Message }, Cmd.none
     | ClearError ->
         { model with error = None }, Cmd.none
+    | SelectReplayPreview sequenceNumber ->
+        { model with ReplayPreviewSequence = Some sequenceNumber }, Cmd.none
+    | ClearReplayPreview ->
+        { model with ReplayPreviewSequence = None }, Cmd.none
     | SetPhiDraftRawStatement value ->
         { model with phiDraftRawStatement = value }, Cmd.none
 
@@ -2074,7 +2093,195 @@ let renderLedgerCounter label count =
         text (label + ": " + string count)
     }
 
-let renderLedgerTab (ledgerEvents: LedgerEvent list) =
+let addToSet value values =
+    values
+    |> Set.add value
+
+let removeFromSet value values =
+    values
+    |> Set.remove value
+
+let applyReplayGovernanceEvent eventKind targetId governanceDecisions =
+    match eventKind with
+    | "CandidateAccepted" ->
+        governanceDecisions
+        |> Map.add targetId Accepted
+    | "CandidateRejected" ->
+        governanceDecisions
+        |> Map.add targetId Rejected
+    | "CandidateHeld" ->
+        governanceDecisions
+        |> Map.add targetId Held
+    | _ ->
+        governanceDecisions
+
+let buildReplayPreviewState (ledgerEvents: LedgerEvent list) =
+    let parsedPhiEvents, includedPhiIds, excludedPhiIds, governanceDecisions =
+        ledgerEvents
+        |> List.fold
+            (fun (parsedCount, includedIds, excludedIds, decisions) ledgerEvent ->
+                match ledgerEvent.EventKind with
+                | "PhiParsed" ->
+                    parsedCount + 1,
+                    includedIds |> addToSet ledgerEvent.TargetId,
+                    excludedIds |> removeFromSet ledgerEvent.TargetId,
+                    decisions
+                | "PhiExcludedFromReplay" ->
+                    parsedCount,
+                    includedIds |> removeFromSet ledgerEvent.TargetId,
+                    excludedIds |> addToSet ledgerEvent.TargetId,
+                    decisions
+                | "PhiIncludedInReplay" ->
+                    parsedCount,
+                    includedIds |> addToSet ledgerEvent.TargetId,
+                    excludedIds |> removeFromSet ledgerEvent.TargetId,
+                    decisions
+                | "PhiParseIgnoredAlreadyParsed" ->
+                    parsedCount, includedIds, excludedIds, decisions
+                | eventKind ->
+                    parsedCount,
+                    includedIds,
+                    excludedIds,
+                    applyReplayGovernanceEvent eventKind ledgerEvent.TargetId decisions)
+            (0, Set.empty<string>, Set.empty<string>, Map.empty<string, CandidateDecisionValue>)
+
+    let countGovernanceDecision decisionValue =
+        governanceDecisions
+        |> Map.toList
+        |> List.filter (fun (_, decision) -> decision = decisionValue)
+        |> List.length
+
+    {
+        ParsedPhiEvents = parsedPhiEvents
+        IncludedPhiCount = Set.count includedPhiIds
+        ExcludedPhiCount = Set.count excludedPhiIds
+        GovernanceAccepted = countGovernanceDecision Accepted
+        GovernanceRejected = countGovernanceDecision Rejected
+        GovernanceHeld = countGovernanceDecision Held
+        TotalLedgerEvents = List.length ledgerEvents
+    }
+
+let getReplayPreviewEvents selectedSequence ledgerEvents =
+    ledgerEvents
+    |> List.filter (fun ledgerEvent -> ledgerEvent.SequenceNumber <= selectedSequence)
+
+let renderReplayComparisonRow measure selectedValue currentValue =
+    tr {
+        td { text measure }
+        td { text selectedValue }
+        td { text currentValue }
+    }
+
+let formatSignedDelta value =
+    if value > 0 then
+        "+" + string value
+    else
+        string value
+
+let renderReplayDeltaRow measure selectedValue currentValue =
+    tr {
+        td { text measure }
+        td { text (formatSignedDelta (selectedValue - currentValue)) }
+    }
+
+let renderReplayPreviewTables selectedState currentState =
+    div {
+        div {
+            attr.``class`` "table-container mb-4"
+            table {
+                attr.``class`` "table is-fullwidth is-striped is-narrow"
+
+                thead {
+                    tr {
+                        th { text "Measure" }
+                        th { text "At selected event" }
+                        th { text "Current" }
+                    }
+                }
+
+                tbody {
+                    renderReplayComparisonRow "Parsed Phi events" (string selectedState.ParsedPhiEvents) (string currentState.ParsedPhiEvents)
+                    renderReplayComparisonRow "Included Phi count" (string selectedState.IncludedPhiCount) (string currentState.IncludedPhiCount)
+                    renderReplayComparisonRow "Excluded Phi count" (string selectedState.ExcludedPhiCount) (string currentState.ExcludedPhiCount)
+                    renderReplayComparisonRow "Governance accepted" (string selectedState.GovernanceAccepted) (string currentState.GovernanceAccepted)
+                    renderReplayComparisonRow "Governance rejected" (string selectedState.GovernanceRejected) (string currentState.GovernanceRejected)
+                    renderReplayComparisonRow "Governance held" (string selectedState.GovernanceHeld) (string currentState.GovernanceHeld)
+                    renderReplayComparisonRow "Governance pending" "-" "-"
+                    renderReplayComparisonRow "Total ledger events" (string selectedState.TotalLedgerEvents) (string currentState.TotalLedgerEvents)
+                }
+            }
+        }
+
+        h3 {
+            attr.``class`` "title is-6"
+            text "Replay Delta vs Current"
+        }
+
+        div {
+            attr.``class`` "table-container mb-3"
+            table {
+                attr.``class`` "table is-fullwidth is-striped is-narrow"
+
+                thead {
+                    tr {
+                        th { text "Measure" }
+                        th { text "Selected - current" }
+                    }
+                }
+
+                tbody {
+                    renderReplayDeltaRow "Parsed Phi delta" selectedState.ParsedPhiEvents currentState.ParsedPhiEvents
+                    renderReplayDeltaRow "Included Phi delta" selectedState.IncludedPhiCount currentState.IncludedPhiCount
+                    renderReplayDeltaRow "Excluded Phi delta" selectedState.ExcludedPhiCount currentState.ExcludedPhiCount
+                    renderReplayDeltaRow "Accepted decision delta" selectedState.GovernanceAccepted currentState.GovernanceAccepted
+                    renderReplayDeltaRow "Rejected decision delta" selectedState.GovernanceRejected currentState.GovernanceRejected
+                    renderReplayDeltaRow "Held decision delta" selectedState.GovernanceHeld currentState.GovernanceHeld
+                }
+            }
+        }
+    }
+
+let renderReplayPreviewPanel replayPreviewSequence (ledgerEvents: LedgerEvent list) dispatch =
+    div {
+        attr.``class`` "box"
+
+        h2 {
+            attr.``class`` "title is-5"
+            text "Replay Preview Lite"
+        }
+
+        match replayPreviewSequence with
+        | None ->
+            p {
+                attr.``class`` "has-text-grey"
+                text "Select a ledger event to preview the project state at that point."
+            }
+        | Some selectedSequence ->
+            let selectedEvents = getReplayPreviewEvents selectedSequence ledgerEvents
+            let selectedState = buildReplayPreviewState selectedEvents
+            let currentState = buildReplayPreviewState ledgerEvents
+
+            p {
+                attr.``class`` "is-size-7 has-text-grey mb-3"
+                text ("Previewing through ledger event #" + string selectedSequence + ".")
+            }
+
+            button {
+                attr.``class`` "button is-small is-light mb-3"
+                attr.``type`` "button"
+                on.click (fun _ -> dispatch ClearReplayPreview)
+                text "Clear preview"
+            }
+
+            renderReplayPreviewTables selectedState currentState
+
+        p {
+            attr.``class`` "notification is-warning is-light is-size-7"
+            text "Replay Preview Lite reconstructs compact state from ledger events only. Full Sigma/Gamma reconstruction will require richer event payloads or checkpoints."
+        }
+    }
+
+let renderLedgerTab (ledgerEvents: LedgerEvent list) replayPreviewSequence dispatch =
     let totalEvents = List.length ledgerEvents
     let phiEvents = countLedgerEvents isPhiLedgerEvent ledgerEvents
     let replayEvents = countLedgerEvents isReplayLedgerEvent ledgerEvents
@@ -2119,6 +2326,7 @@ let renderLedgerTab (ledgerEvents: LedgerEvent list) =
                                 th { text "Target" }
                                 th { text "Summary" }
                                 th { text "Detail" }
+                                th { text "Action" }
                             }
                         }
 
@@ -2131,11 +2339,25 @@ let renderLedgerTab (ledgerEvents: LedgerEvent list) =
                                     td { text ledgerEvent.TargetId }
                                     td { text ledgerEvent.Summary }
                                     td { text ledgerEvent.Detail }
+                                    td {
+                                        button {
+                                            attr.``class`` (
+                                                if replayPreviewSequence = Some ledgerEvent.SequenceNumber then
+                                                    "button is-small is-link"
+                                                else
+                                                    "button is-small is-link is-light")
+                                            attr.``type`` "button"
+                                            on.click (fun _ -> dispatch (SelectReplayPreview ledgerEvent.SequenceNumber))
+                                            text "Replay here"
+                                        }
+                                    }
                                 }
                         }
                     }
                 }
         }
+
+        renderReplayPreviewPanel replayPreviewSequence ledgerEvents dispatch
     }
 
 let renderTopNavigation activeTab dispatch =
@@ -2635,7 +2857,7 @@ let homePage model dispatch =
                 }
 
             | LedgerTab ->
-                renderLedgerTab model.LedgerEvents
+                renderLedgerTab model.LedgerEvents model.ReplayPreviewSequence dispatch
         }
     | _ ->
         div {
