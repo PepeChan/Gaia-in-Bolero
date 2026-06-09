@@ -1,6 +1,9 @@
 module Gaia.Client.Main
 
 open System
+open System.Globalization
+open System.Text.Json
+open System.Text.Json.Nodes
 open Elmish
 open Bolero
 open Bolero.Html
@@ -17,6 +20,7 @@ type TopNavigationTab =
     | GaiaProbeTab
     | DetailsTab
     | DemoToolsTab
+    | PersistenceTab
     | LedgerTab
 
 type SigmaContextEntry =
@@ -117,12 +121,28 @@ type ReplayPreviewState =
         TotalLedgerEvents: int
     }
 
+type ProjectSnapshot =
+    {
+        SnapshotVersion: string
+        SavedAtUtc: string
+        ProjectName: string
+        PhiIntakes: PhiIntake list
+        ParsedPhis: PhiParse list
+        ExcludedPhiIds: string list
+        CandidateDecisions: CandidateDecision list
+        LedgerEvents: LedgerEvent list
+    }
+
 /// The Elmish application's model.
 type Model =
     {
         page: Page
         activeTopNavigationTab: TopNavigationTab
         error: string option
+        projectName: string
+        exportJson: string
+        importJson: string
+        persistenceStatus: string option
         selectedScenarioId: string option
         scenarioResolution: ResolutionView option
         phiDraftRawStatement: string
@@ -143,6 +163,428 @@ type Model =
     }
 
 let demoScenarios = DemoData.demoScenarios
+let defaultProjectName = "Untitled Project"
+let projectSnapshotVersion = "T6.v0"
+
+exception ProjectJsonReadError of string
+
+let getUtcTimestampString () =
+    DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fff'Z'")
+
+let failProjectJson message : 'T =
+    raise (ProjectJsonReadError message)
+
+let projectJsonSerializerOptions =
+    let options = JsonSerializerOptions()
+    options.WriteIndented <- true
+    options
+
+let jsonStringArray (values: string list) =
+    let array = JsonArray()
+
+    values
+    |> List.iter (fun value -> array.Add(JsonValue.Create(value)))
+
+    array
+
+let candidateDecisionValueToJsonText = function
+    | Pending -> "Pending"
+    | Accepted -> "Accepted"
+    | Rejected -> "Rejected"
+    | Held -> "Held"
+
+let parseCandidateDecisionValue context value =
+    match value with
+    | "Pending" -> Pending
+    | "Accepted" -> Accepted
+    | "Rejected" -> Rejected
+    | "Held" -> Held
+    | _ -> failProjectJson (context + " has unknown candidate decision value '" + value + "'.")
+
+let derivationEntryToJsonText = function
+    | FromFR -> "FromFR"
+    | FromMode -> "FromMode"
+    | FromInterface -> "FromInterface"
+    | FromState -> "FromState"
+    | FromParametric -> "FromParametric"
+    | GammaOnly -> "GammaOnly"
+
+let parseDerivationEntry context value =
+    match value with
+    | "FromFR"
+    | "From FR" -> FromFR
+    | "FromMode"
+    | "From Mode" -> FromMode
+    | "FromInterface"
+    | "From Interface" -> FromInterface
+    | "FromState"
+    | "From State" -> FromState
+    | "FromParametric"
+    | "From Parametric" -> FromParametric
+    | "GammaOnly"
+    | "Gamma Only" -> GammaOnly
+    | _ -> failProjectJson (context + " has unknown derivation entry '" + value + "'.")
+
+let phiIntakeToJson (phi: PhiIntake) =
+    let json = JsonObject()
+    json["PhiId"] <- JsonValue.Create(phi.PhiId)
+    json["Date"] <- JsonValue.Create(phi.Date)
+    json["Source"] <- JsonValue.Create(phi.Source)
+    json["Context"] <- JsonValue.Create(phi.Context)
+    json["Confidence"] <- JsonValue.Create(phi.Confidence)
+    json["Status"] <- JsonValue.Create(phi.Status)
+    json["RawStatement"] <- JsonValue.Create(phi.RawStatement)
+    json["Trigger"] <- JsonValue.Create(phi.Trigger)
+    json["Claim"] <- JsonValue.Create(phi.Claim)
+    json["About"] <- JsonValue.Create(phi.About)
+    json["Condition"] <- JsonValue.Create(phi.Condition)
+    json["Assumption"] <- JsonValue.Create(phi.Assumption)
+    json["TypeText"] <- JsonValue.Create(phi.TypeText)
+    json["Impact"] <- JsonValue.Create(phi.Impact)
+    json["UnresolvedSignal"] <- JsonValue.Create(phi.UnresolvedSignal)
+    json
+
+let exposureToJson (exposure: Exposure) =
+    let json = JsonObject()
+    json["Function"] <- JsonValue.Create(exposure.Function)
+    json["Mode"] <- JsonValue.Create(exposure.Mode)
+    json["Interface"] <- JsonValue.Create(exposure.Interface)
+    json["State"] <- JsonValue.Create(exposure.State)
+    json["HostCandidate"] <- JsonValue.Create(exposure.HostCandidate)
+    json
+
+let phiParseToJson (parse: PhiParse) =
+    let json = JsonObject()
+    json["PhiId"] <- JsonValue.Create(parse.PhiId)
+    json["Date"] <- JsonValue.Create(parse.Date)
+    json["Statement"] <- JsonValue.Create(parse.Statement)
+    json["InScope"] <- JsonValue.Create(parse.InScope)
+    json["OutOfScope"] <- JsonValue.Create(parse.OutOfScope)
+    json["Exposure"] <- exposureToJson parse.Exposure
+    json["ExposureNotes"] <- JsonValue.Create(parse.ExposureNotes)
+    json["DeltaAdd"] <- JsonValue.Create(parse.DeltaAdd)
+    json["DeltaRemove"] <- JsonValue.Create(parse.DeltaRemove)
+    json["DeltaConstrain"] <- JsonValue.Create(parse.DeltaConstrain)
+    json["DeltaSplit"] <- JsonValue.Create(parse.DeltaSplit)
+    json["DeltaRevealMissing"] <- JsonValue.Create(parse.DeltaRevealMissing)
+    json["DeltaNotes"] <- JsonValue.Create(parse.DeltaNotes)
+    json["GammaInconsistencyFlagged"] <- JsonValue.Create(parse.GammaInconsistencyFlagged)
+    json["GammaEvidenceNeeded"] <- JsonValue.Create(parse.GammaEvidenceNeeded)
+    json["GammaHypothesisLogged"] <- JsonValue.Create(parse.GammaHypothesisLogged)
+    json["GammaDetails"] <- JsonValue.Create(parse.GammaDetails)
+    json["Falsifiable"] <- JsonValue.Create(parse.Falsifiable)
+    json["Traceable"] <- JsonValue.Create(parse.Traceable)
+    json["PhaseCorrect"] <- JsonValue.Create(parse.PhaseCorrect)
+    json["ContextBounded"] <- JsonValue.Create(parse.ContextBounded)
+    json["ResultValid"] <- JsonValue.Create(parse.ResultValid)
+    json["ResultIndeterminate"] <- JsonValue.Create(parse.ResultIndeterminate)
+    json["ResultRejected"] <- JsonValue.Create(parse.ResultRejected)
+    json["FormalNoFormalization"] <- JsonValue.Create(parse.FormalNoFormalization)
+    json["OutcomeUpdateSigma"] <- JsonValue.Create(parse.OutcomeUpdateSigma)
+    json["OutcomeRecordGamma"] <- JsonValue.Create(parse.OutcomeRecordGamma)
+    json["OutcomeEscalate"] <- JsonValue.Create(parse.OutcomeEscalate)
+    json["OutcomeHold"] <- JsonValue.Create(parse.OutcomeHold)
+    json["DerivationEntry"] <-
+        match parse.DerivationEntry with
+        | Some entry -> JsonValue.Create(derivationEntryToJsonText entry)
+        | None -> null
+    json
+
+let candidateDecisionToJson (decision: CandidateDecision) =
+    let json = JsonObject()
+    json["CandidateId"] <- JsonValue.Create(decision.CandidateId)
+    json["CandidateType"] <- JsonValue.Create(decision.CandidateType)
+    json["Target"] <- JsonValue.Create(decision.Target)
+    json["Decision"] <- JsonValue.Create(candidateDecisionValueToJsonText decision.Decision)
+    json["Timestamp"] <- JsonValue.Create(decision.Timestamp.ToString("O"))
+    json["Rationale"] <- JsonValue.Create(decision.Rationale)
+    json
+
+let ledgerEventToJson (ledgerEvent: LedgerEvent) =
+    let json = JsonObject()
+    json["EventId"] <- JsonValue.Create(ledgerEvent.EventId)
+    json["SequenceNumber"] <- JsonValue.Create(ledgerEvent.SequenceNumber)
+    json["TimestampUtc"] <- JsonValue.Create(ledgerEvent.TimestampUtc)
+    json["Actor"] <- JsonValue.Create(ledgerEvent.Actor)
+    json["EventKind"] <- JsonValue.Create(ledgerEvent.EventKind)
+    json["TargetId"] <- JsonValue.Create(ledgerEvent.TargetId)
+    json["Summary"] <- JsonValue.Create(ledgerEvent.Summary)
+    json["Detail"] <- JsonValue.Create(ledgerEvent.Detail)
+    json
+
+let jsonArrayFrom values toJson =
+    let array = JsonArray()
+
+    values
+    |> List.iter (fun value -> array.Add(toJson value))
+
+    array
+
+let projectSnapshotToJson (snapshot: ProjectSnapshot) =
+    let json = JsonObject()
+    json["SnapshotVersion"] <- JsonValue.Create(snapshot.SnapshotVersion)
+    json["SavedAtUtc"] <- JsonValue.Create(snapshot.SavedAtUtc)
+    json["ProjectName"] <- JsonValue.Create(snapshot.ProjectName)
+    json["PhiIntakes"] <- jsonArrayFrom snapshot.PhiIntakes phiIntakeToJson
+    json["ParsedPhis"] <- jsonArrayFrom snapshot.ParsedPhis phiParseToJson
+    json["ExcludedPhiIds"] <- jsonStringArray snapshot.ExcludedPhiIds
+    json["CandidateDecisions"] <- jsonArrayFrom snapshot.CandidateDecisions candidateDecisionToJson
+    json["LedgerEvents"] <- jsonArrayFrom snapshot.LedgerEvents ledgerEventToJson
+    json
+
+let readProperty context propertyName (json: JsonObject) =
+    let mutable node: JsonNode = null
+
+    if json.TryGetPropertyValue(propertyName, &node) then
+        node
+    else
+        failProjectJson (context + "." + propertyName + " is missing.")
+
+let asObject context (node: JsonNode) =
+    if isNull node then
+        failProjectJson (context + " must be an object.")
+    else
+        try
+            node.AsObject()
+        with _ ->
+            failProjectJson (context + " must be an object.")
+
+let asArray context (node: JsonNode) =
+    if isNull node then
+        failProjectJson (context + " must be an array.")
+    else
+        try
+            node.AsArray()
+        with _ ->
+            failProjectJson (context + " must be an array.")
+
+let readString context propertyName (json: JsonObject) =
+    let node = readProperty context propertyName json
+
+    if isNull node then
+        failProjectJson (context + "." + propertyName + " must be a string.")
+    else
+        try
+            node.GetValue<string>()
+        with _ ->
+            failProjectJson (context + "." + propertyName + " must be a string.")
+
+let readInt context propertyName (json: JsonObject) =
+    let node = readProperty context propertyName json
+
+    if isNull node then
+        failProjectJson (context + "." + propertyName + " must be a number.")
+    else
+        try
+            node.GetValue<int>()
+        with _ ->
+            failProjectJson (context + "." + propertyName + " must be a whole number.")
+
+let readBool context propertyName (json: JsonObject) =
+    let node = readProperty context propertyName json
+
+    if isNull node then
+        failProjectJson (context + "." + propertyName + " must be true or false.")
+    else
+        try
+            node.GetValue<bool>()
+        with _ ->
+            failProjectJson (context + "." + propertyName + " must be true or false.")
+
+let readDateTime context propertyName (json: JsonObject) =
+    let value = readString context propertyName json
+    let mutable timestamp = DateTime.MinValue
+
+    if DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, &timestamp) then
+        timestamp
+    else
+        failProjectJson (context + "." + propertyName + " must be an ISO timestamp.")
+
+let readStringList context propertyName (json: JsonObject) =
+    let array = readProperty context propertyName json |> asArray (context + "." + propertyName)
+
+    array
+    |> Seq.mapi (fun index node ->
+        let itemContext = context + "." + propertyName + "[" + string index + "]"
+
+        if isNull node then
+            failProjectJson (itemContext + " must be a string.")
+        else
+            try
+                node.GetValue<string>()
+            with _ ->
+                failProjectJson (itemContext + " must be a string."))
+    |> Seq.toList
+
+let readObjectList context propertyName readItem (json: JsonObject) =
+    let array = readProperty context propertyName json |> asArray (context + "." + propertyName)
+
+    array
+    |> Seq.mapi (fun index node ->
+        let itemContext = context + "." + propertyName + "[" + string index + "]"
+        readItem itemContext (asObject itemContext node))
+    |> Seq.toList
+
+let readExposure context (json: JsonObject) =
+    {
+        Function = readString context "Function" json
+        Mode = readString context "Mode" json
+        Interface = readString context "Interface" json
+        State = readString context "State" json
+        HostCandidate = readString context "HostCandidate" json
+    }
+
+let readPhiIntake context (json: JsonObject) =
+    {
+        PhiId = readString context "PhiId" json
+        Date = readString context "Date" json
+        Source = readString context "Source" json
+        Context = readString context "Context" json
+        Confidence = readString context "Confidence" json
+        Status = readString context "Status" json
+        RawStatement = readString context "RawStatement" json
+        Trigger = readString context "Trigger" json
+        Claim = readString context "Claim" json
+        About = readString context "About" json
+        Condition = readString context "Condition" json
+        Assumption = readString context "Assumption" json
+        TypeText = readString context "TypeText" json
+        Impact = readString context "Impact" json
+        UnresolvedSignal = readString context "UnresolvedSignal" json
+    }
+
+let readOptionalDerivationEntry context propertyName (json: JsonObject) =
+    let node = readProperty context propertyName json
+
+    if isNull node then
+        None
+    else
+        try
+            Some (node.GetValue<string>() |> parseDerivationEntry (context + "." + propertyName))
+        with
+        | ProjectJsonReadError message ->
+            failProjectJson message
+        | _ ->
+            failProjectJson (context + "." + propertyName + " must be a string or null.")
+
+let readPhiParse context (json: JsonObject) =
+    let exposure = readProperty context "Exposure" json |> asObject (context + ".Exposure") |> readExposure (context + ".Exposure")
+
+    {
+        PhiId = readString context "PhiId" json
+        Date = readString context "Date" json
+        Statement = readString context "Statement" json
+        InScope = readString context "InScope" json
+        OutOfScope = readString context "OutOfScope" json
+        Exposure = exposure
+        ExposureNotes = readString context "ExposureNotes" json
+        DeltaAdd = readBool context "DeltaAdd" json
+        DeltaRemove = readBool context "DeltaRemove" json
+        DeltaConstrain = readBool context "DeltaConstrain" json
+        DeltaSplit = readBool context "DeltaSplit" json
+        DeltaRevealMissing = readBool context "DeltaRevealMissing" json
+        DeltaNotes = readString context "DeltaNotes" json
+        GammaInconsistencyFlagged = readBool context "GammaInconsistencyFlagged" json
+        GammaEvidenceNeeded = readBool context "GammaEvidenceNeeded" json
+        GammaHypothesisLogged = readBool context "GammaHypothesisLogged" json
+        GammaDetails = readString context "GammaDetails" json
+        Falsifiable = readBool context "Falsifiable" json
+        Traceable = readBool context "Traceable" json
+        PhaseCorrect = readBool context "PhaseCorrect" json
+        ContextBounded = readBool context "ContextBounded" json
+        ResultValid = readBool context "ResultValid" json
+        ResultIndeterminate = readBool context "ResultIndeterminate" json
+        ResultRejected = readBool context "ResultRejected" json
+        FormalNoFormalization = readBool context "FormalNoFormalization" json
+        OutcomeUpdateSigma = readBool context "OutcomeUpdateSigma" json
+        OutcomeRecordGamma = readBool context "OutcomeRecordGamma" json
+        OutcomeEscalate = readBool context "OutcomeEscalate" json
+        OutcomeHold = readBool context "OutcomeHold" json
+        DerivationEntry = readOptionalDerivationEntry context "DerivationEntry" json
+    }
+
+let readCandidateDecision context (json: JsonObject) =
+    {
+        CandidateId = readString context "CandidateId" json
+        CandidateType = readString context "CandidateType" json
+        Target = readString context "Target" json
+        Decision = readString context "Decision" json |> parseCandidateDecisionValue (context + ".Decision")
+        Timestamp = readDateTime context "Timestamp" json
+        Rationale = readString context "Rationale" json
+    }
+
+let readLedgerEvent context (json: JsonObject) =
+    {
+        EventId = readString context "EventId" json
+        SequenceNumber = readInt context "SequenceNumber" json
+        TimestampUtc = readString context "TimestampUtc" json
+        Actor = readString context "Actor" json
+        EventKind = readString context "EventKind" json
+        TargetId = readString context "TargetId" json
+        Summary = readString context "Summary" json
+        Detail = readString context "Detail" json
+    }
+
+let buildProjectSnapshot (model: Model) =
+    {
+        SnapshotVersion = projectSnapshotVersion
+        SavedAtUtc = getUtcTimestampString ()
+        ProjectName = model.projectName
+        PhiIntakes = model.ingestedPhis
+        ParsedPhis = model.parsedPhis
+        ExcludedPhiIds = model.excludedPhiIds
+        CandidateDecisions = model.candidateDecisions
+        LedgerEvents = model.LedgerEvents
+    }
+
+let restoreProjectSnapshot (snapshot: ProjectSnapshot) (model: Model) =
+    {
+        model with
+            projectName =
+                if String.IsNullOrWhiteSpace(snapshot.ProjectName) then
+                    defaultProjectName
+                else
+                    snapshot.ProjectName
+            ingestedPhis = snapshot.PhiIntakes
+            parsedPhis = snapshot.ParsedPhis
+            excludedPhiIds = snapshot.ExcludedPhiIds
+            selectedPhiId = None
+            selectedPhiParse = None
+            selectedPhiResolution = None
+            lastReplayAction = None
+            candidateDecisions = snapshot.CandidateDecisions
+            LedgerEvents = snapshot.LedgerEvents
+            ReplayPreviewSequence = None
+    }
+
+let serializeProjectSnapshot (snapshot: ProjectSnapshot) =
+    (projectSnapshotToJson snapshot).ToJsonString(projectJsonSerializerOptions)
+
+let tryDeserializeProjectSnapshot json =
+    try
+        if String.IsNullOrWhiteSpace(json) then
+            Error "Project JSON is empty."
+        else
+            let root = JsonNode.Parse(json) |> asObject "ProjectSnapshot"
+
+            {
+                SnapshotVersion = readString "ProjectSnapshot" "SnapshotVersion" root
+                SavedAtUtc = readString "ProjectSnapshot" "SavedAtUtc" root
+                ProjectName = readString "ProjectSnapshot" "ProjectName" root
+                PhiIntakes = readObjectList "ProjectSnapshot" "PhiIntakes" readPhiIntake root
+                ParsedPhis = readObjectList "ProjectSnapshot" "ParsedPhis" readPhiParse root
+                ExcludedPhiIds = readStringList "ProjectSnapshot" "ExcludedPhiIds" root
+                CandidateDecisions = readObjectList "ProjectSnapshot" "CandidateDecisions" readCandidateDecision root
+                LedgerEvents = readObjectList "ProjectSnapshot" "LedgerEvents" readLedgerEvent root
+            }
+            |> Ok
+    with
+    | ProjectJsonReadError message ->
+        Error message
+    | :? JsonException as ex ->
+        Error ("Invalid JSON: " + ex.Message)
+    | ex ->
+        Error ("Could not import project JSON: " + ex.Message)
 
 let tryFindScenario scenarioId =
     demoScenarios
@@ -169,6 +611,10 @@ let initModel =
         page = Probe
         activeTopNavigationTab = GaiaProbeTab
         error = None
+        projectName = defaultProjectName
+        exportJson = ""
+        importJson = ""
+        persistenceStatus = None
         selectedScenarioId = selectedScenarioId
         scenarioResolution = scenarioResolution
         phiDraftRawStatement = ""
@@ -176,7 +622,7 @@ let initModel =
         phiDraftSource = ""
         phiDraftQuickTags = ""
         phiDraftConfidence = "Medium"
-        ingestedPhis = DemoData.demoPhiIntakes
+        ingestedPhis = []
         parsedPhis = []
         excludedPhiIds = []
         selectedPhiId = None
@@ -195,7 +641,7 @@ let appendLedgerEvent eventKind targetId summary detail (model: Model) =
         {
             EventId = sprintf "LEDGER-%06d" sequenceNumber
             SequenceNumber = sequenceNumber
-            TimestampUtc = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fff'Z'")
+            TimestampUtc = getUtcTimestampString ()
             Actor = "Demo user"
             EventKind = eventKind
             TargetId = targetId
@@ -204,6 +650,42 @@ let appendLedgerEvent eventKind targetId summary detail (model: Model) =
         }
 
     { model with LedgerEvents = model.LedgerEvents @ [ ledgerEvent ] }
+
+let clearProjectModel (model: Model) =
+    {
+        model with
+            projectName = defaultProjectName
+            exportJson = ""
+            importJson = ""
+            persistenceStatus = None
+            phiDraftRawStatement = ""
+            phiDraftTriggerContext = ""
+            phiDraftSource = ""
+            phiDraftQuickTags = ""
+            phiDraftConfidence = "Medium"
+            ingestedPhis = []
+            parsedPhis = []
+            excludedPhiIds = []
+            selectedPhiId = None
+            selectedPhiParse = None
+            selectedPhiResolution = None
+            lastReplayAction = None
+            candidateDecisions = []
+            LedgerEvents = []
+            ReplayPreviewSequence = None
+    }
+
+let buildSphynxSampleSnapshot () =
+    {
+        SnapshotVersion = projectSnapshotVersion
+        SavedAtUtc = getUtcTimestampString ()
+        ProjectName = "Sphynx Sample Project"
+        PhiIntakes = DemoData.demoPhiIntakes
+        ParsedPhis = []
+        ExcludedPhiIds = []
+        CandidateDecisions = []
+        LedgerEvents = []
+    }
 
 /// The Elmish application's update messages.
 type Message =
@@ -225,6 +707,12 @@ type Message =
     | HoldCandidate of string
     | SelectReplayPreview of int
     | ClearReplayPreview
+    | SetProjectName of string
+    | ExportProjectJson
+    | SetImportJson of string
+    | ImportProjectJson
+    | LoadSphynxSampleProject
+    | ClearProject
 
 let upsertParsedPhi parse parsedPhis =
     if parsedPhis |> List.exists (fun parsedPhi -> parsedPhi.PhiId = parse.PhiId) then
@@ -613,6 +1101,58 @@ let update message model =
         { model with ReplayPreviewSequence = Some sequenceNumber }, Cmd.none
     | ClearReplayPreview ->
         { model with ReplayPreviewSequence = None }, Cmd.none
+    | SetProjectName value ->
+        { model with projectName = value }, Cmd.none
+    | ExportProjectJson ->
+        let exportJson =
+            model
+            |> buildProjectSnapshot
+            |> serializeProjectSnapshot
+
+        { model with
+            exportJson = exportJson
+            persistenceStatus = Some "Project JSON exported." }
+        |> appendLedgerEvent
+            "ProjectExported"
+            model.projectName
+            "Project exported"
+            "Project JSON exported from the Persistence tab."
+        |> fun updatedModel -> updatedModel, Cmd.none
+    | SetImportJson value ->
+        { model with importJson = value }, Cmd.none
+    | ImportProjectJson ->
+        match tryDeserializeProjectSnapshot model.importJson with
+        | Ok snapshot ->
+            model
+            |> restoreProjectSnapshot snapshot
+            |> fun restoredModel ->
+                { restoredModel with
+                    exportJson = ""
+                    persistenceStatus = Some "Project JSON imported." }
+            |> appendLedgerEvent
+                "ProjectImported"
+                snapshot.ProjectName
+                "Project imported"
+                ("Imported snapshot saved at " + snapshot.SavedAtUtc + ".")
+            |> fun updatedModel -> updatedModel, Cmd.none
+        | Result.Error message ->
+            { model with persistenceStatus = Some ("Import failed: " + message) }, Cmd.none
+    | LoadSphynxSampleProject ->
+        model
+        |> restoreProjectSnapshot (buildSphynxSampleSnapshot ())
+        |> fun sampleModel ->
+            { sampleModel with
+                exportJson = ""
+                importJson = ""
+                persistenceStatus = Some "Sphynx sample project loaded." }
+        |> appendLedgerEvent
+            "ProjectSampleLoaded"
+            "SphynxSampleProject"
+            "Sphynx sample project loaded"
+            "Loaded the built-in Sphynx demo Phi set."
+        |> fun updatedModel -> updatedModel, Cmd.none
+    | ClearProject ->
+        { clearProjectModel model with persistenceStatus = Some "Project cleared." }, Cmd.none
     | SetPhiDraftRawStatement value ->
         { model with phiDraftRawStatement = value }, Cmd.none
 
@@ -2409,6 +2949,129 @@ let renderLedgerTab (ledgerEvents: LedgerEvent list) (replayPreviewSequence: int
         renderReplayPreviewPanel replayPreviewSequence ledgerEvents dispatch
     }
 
+let renderPersistenceTab (model: Model) dispatch =
+    div {
+        attr.``class`` "mb-6 pb-5"
+
+        h2 {
+            attr.``class`` "title is-4"
+            text "Persistence"
+        }
+
+        div {
+            attr.``class`` "columns is-variable is-5"
+
+            div {
+                attr.``class`` "column is-4"
+
+                div {
+                    attr.``class`` "box"
+
+                    div {
+                        attr.``class`` "field"
+                        label {
+                            attr.``class`` "label"
+                            text "Project name"
+                        }
+                        div {
+                            attr.``class`` "control"
+                            input {
+                                attr.``class`` "input"
+                                bind.input.string model.projectName (fun value -> dispatch (SetProjectName value))
+                            }
+                        }
+                    }
+
+                    div {
+                        attr.``class`` "buttons"
+                        button {
+                            attr.``class`` "button is-link"
+                            attr.``type`` "button"
+                            on.click (fun _ -> dispatch LoadSphynxSampleProject)
+                            text "Load Sphynx sample"
+                        }
+                        button {
+                            attr.``class`` "button is-warning is-light"
+                            attr.``type`` "button"
+                            on.click (fun _ -> dispatch ClearProject)
+                            text "Clear project"
+                        }
+                        button {
+                            attr.``class`` "button is-info"
+                            attr.``type`` "button"
+                            on.click (fun _ -> dispatch ExportProjectJson)
+                            text "Export JSON"
+                        }
+                        button {
+                            attr.``class`` "button is-success"
+                            attr.``type`` "button"
+                            on.click (fun _ -> dispatch ImportProjectJson)
+                            text "Import JSON"
+                        }
+                    }
+
+                    div {
+                        attr.``class`` "tags mt-4"
+                        span {
+                            attr.``class`` "tag is-light"
+                            text ("Phi intakes: " + string (List.length model.ingestedPhis))
+                        }
+                        span {
+                            attr.``class`` "tag is-light"
+                            text ("Parsed Phis: " + string (List.length model.parsedPhis))
+                        }
+                        span {
+                            attr.``class`` "tag is-light"
+                            text ("Ledger events: " + string (List.length model.LedgerEvents))
+                        }
+                    }
+
+                    match model.persistenceStatus with
+                    | None ->
+                        p {
+                            attr.``class`` "has-text-grey"
+                            text "No persistence action yet."
+                        }
+                    | Some status ->
+                        div {
+                            attr.``class`` "notification is-info is-light"
+                            text status
+                        }
+                }
+            }
+
+            div {
+                attr.``class`` "column is-8"
+
+                div {
+                    attr.``class`` "box"
+                    h3 {
+                        attr.``class`` "title is-5"
+                        text "Export JSON"
+                    }
+                    textarea {
+                        attr.``class`` "textarea"
+                        attr.style "min-height: 18rem; font-family: monospace;"
+                        text model.exportJson
+                    }
+                }
+
+                div {
+                    attr.``class`` "box"
+                    h3 {
+                        attr.``class`` "title is-5"
+                        text "Import JSON"
+                    }
+                    textarea {
+                        attr.``class`` "textarea"
+                        attr.style "min-height: 18rem; font-family: monospace;"
+                        bind.input.string model.importJson (fun value -> dispatch (SetImportJson value))
+                    }
+                }
+            }
+        }
+    }
+
 let renderTopNavigation activeTab dispatch =
     div {
         attr.``class`` "tabs is-toggle mb-5"
@@ -2446,6 +3109,18 @@ let renderTopNavigation activeTab dispatch =
                 a {
                     on.click (fun _ -> dispatch (SelectTopNavigationTab DemoToolsTab))
                     text "Demo Tools"
+                }
+            }
+
+            li {
+                attr.``class`` (
+                    if activeTab = PersistenceTab then
+                        "is-active"
+                    else
+                        "")
+                a {
+                    on.click (fun _ -> dispatch (SelectTopNavigationTab PersistenceTab))
+                    text "Persistence"
                 }
             }
 
@@ -2904,6 +3579,9 @@ let homePage model dispatch =
                     }
                 }
                 }
+
+            | PersistenceTab ->
+                renderPersistenceTab model dispatch
 
             | LedgerTab ->
                 renderLedgerTab model.LedgerEvents model.ReplayPreviewSequence dispatch
