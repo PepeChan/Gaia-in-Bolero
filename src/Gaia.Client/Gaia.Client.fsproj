@@ -7,6 +7,9 @@
     <ProjectReference Include="..\Gaia.Core\Gaia.Core.fsproj" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Types.fs" />
+    <Compile Include="Persistence.fs" />
+    <Compile Include="Ledger.fs" />
     <Compile Include="Main.fs" />
     <Compile Include="Startup.fs" />
   </ItemGroup>
