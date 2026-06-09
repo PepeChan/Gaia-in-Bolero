@@ -65,8 +65,25 @@ type CandidateDeltaKind =
     | ReinforcedSigmaAtom
     | NoStructuralChange
 
+type CandidateDecisionValue =
+    | Pending
+    | Accepted
+    | Rejected
+    | Held
+
+type CandidateDecision =
+    {
+        CandidateId: string
+        CandidateType: string
+        Target: string
+        Decision: CandidateDecisionValue
+        Timestamp: DateTime
+        Rationale: string
+    }
+
 type CandidateDelta =
     {
+        CandidateId: string
         Kind: CandidateDeltaKind
         Target: string
         ProposedTransition: string
@@ -96,6 +113,7 @@ type Model =
         selectedPhiParse: PhiParse option
         selectedPhiResolution: ResolutionView option
         lastReplayAction: DeltaSigmaAnalysis option
+        candidateDecisions: CandidateDecision list
     }
 
 let demoScenarios = DemoData.demoScenarios
@@ -139,6 +157,7 @@ let initModel =
         selectedPhiParse = None
         selectedPhiResolution = None
         lastReplayAction = None
+        candidateDecisions = []
     }
 /// The Elmish application's update messages.
 type Message =
@@ -155,6 +174,9 @@ type Message =
     | IngestPhiDraft
     | ParseIngestedPhi of string
     | ToggleExcludeParsedPhi of string
+    | AcceptCandidate of string
+    | RejectCandidate of string
+    | HoldCandidate of string
 
 let upsertParsedPhi parse parsedPhis =
     if parsedPhis |> List.exists (fun parsedPhi -> parsedPhi.PhiId = parse.PhiId) then
@@ -342,8 +364,28 @@ let buildReplayDeltaSigmaAnalysis phiId wasExcluded beforeSigma afterSigma parse
 
     createDeltaSigmaAnalysis action reason phiId sourceStatement alreadyKnownAtoms beforeSigma afterSigma
 
+let candidateDeltaKindKey = function
+    | AddUnknownRevealMissingHost -> "AddUnknownRevealMissingHost"
+    | AddInterface -> "AddInterface"
+    | AddState -> "AddState"
+    | AddMode -> "AddMode"
+    | ReinforcedSigmaAtom -> "ReinforcedSigmaAtom"
+    | NoStructuralChange -> "NoStructuralChange"
+
+let formatCandidateDeltaKind = function
+    | AddUnknownRevealMissingHost -> "ADD UNKNOWN / REVEAL MISSING HOST"
+    | AddInterface -> "ADD INTERFACE"
+    | AddState -> "ADD STATE"
+    | AddMode -> "ADD MODE"
+    | ReinforcedSigmaAtom -> "REINFORCED SIGMA ATOM"
+    | NoStructuralChange -> "NO STRUCTURAL CHANGE"
+
+let createCandidateId kind target =
+    candidateDeltaKindKey kind + "::" + target
+
 let createCandidateDelta kind target proposedTransition reason relevantSigmaBasis =
     {
+        CandidateId = createCandidateId kind target
         Kind = kind
         Target = target
         ProposedTransition = proposedTransition
@@ -435,6 +477,48 @@ let formulateCandidateDeltas (sigmaContext: SigmaContext) =
         ]
     else
         candidates
+
+let getCurrentCandidateDeltas (model: Model) =
+    model.parsedPhis
+    |> getIncludedSequencedParsedPhis model.excludedPhiIds
+    |> buildSigmaContext
+    |> formulateCandidateDeltas
+
+let getCandidateDecisionRationale = function
+    | Pending -> ""
+    | Accepted -> "Candidate accepted for later Sigma promotion."
+    | Rejected -> "Candidate rejected; no Sigma promotion should occur."
+    | Held -> "Candidate held for later review."
+
+let createCandidateDecision (decision: CandidateDecisionValue) (candidate: CandidateDelta) =
+    {
+        CandidateId = candidate.CandidateId
+        CandidateType = formatCandidateDeltaKind candidate.Kind
+        Target = candidate.Target
+        Decision = decision
+        Timestamp = DateTime.UtcNow
+        Rationale = getCandidateDecisionRationale decision
+    }
+
+let upsertCandidateDecision (candidateDecision: CandidateDecision) (candidateDecisions: CandidateDecision list) =
+    if candidateDecisions |> List.exists (fun decision -> decision.CandidateId = candidateDecision.CandidateId) then
+        candidateDecisions
+        |> List.map (fun decision ->
+            if decision.CandidateId = candidateDecision.CandidateId then
+                candidateDecision
+            else
+                decision)
+    else
+        candidateDecisions @ [ candidateDecision ]
+
+let decideCandidate candidateId (decision: CandidateDecisionValue) (model: Model) =
+    match getCurrentCandidateDeltas model |> List.tryFind (fun candidate -> candidate.CandidateId = candidateId) with
+    | Some candidate ->
+        let candidateDecision = createCandidateDecision decision candidate
+
+        { model with candidateDecisions = upsertCandidateDecision candidateDecision model.candidateDecisions }, Cmd.none
+    | None ->
+        model, Cmd.none
 
 let update message model =
     match message with
@@ -535,6 +619,15 @@ let update message model =
         { model with
             excludedPhiIds = excludedPhiIds
             lastReplayAction = Some lastReplayAction }, Cmd.none
+
+    | AcceptCandidate candidateId ->
+        decideCandidate candidateId Accepted model
+
+    | RejectCandidate candidateId ->
+        decideCandidate candidateId Rejected model
+
+    | HoldCandidate candidateId ->
+        decideCandidate candidateId Held model
 
     | IngestPhiDraft ->
         let intake =
@@ -888,14 +981,6 @@ let renderDeltaSigmaAnalysisPanel (lastReplayAction: DeltaSigmaAnalysis option) 
                 }
     }
 
-let formatCandidateDeltaKind = function
-    | AddUnknownRevealMissingHost -> "ADD UNKNOWN / REVEAL MISSING HOST"
-    | AddInterface -> "ADD INTERFACE"
-    | AddState -> "ADD STATE"
-    | AddMode -> "ADD MODE"
-    | ReinforcedSigmaAtom -> "REINFORCED SIGMA ATOM"
-    | NoStructuralChange -> "NO STRUCTURAL CHANGE"
-
 let renderCandidateDeltaBasis basis =
     match basis with
     | [] ->
@@ -909,7 +994,87 @@ let renderCandidateDeltaBasis basis =
                 li { text value }
         }
 
-let renderCandidateDeltaCard candidate =
+let tryFindCandidateDecision candidateId (candidateDecisions: CandidateDecision list) =
+    candidateDecisions
+    |> List.tryFind (fun decision -> decision.CandidateId = candidateId)
+
+let getCandidateDecisionValue candidateId candidateDecisions =
+    tryFindCandidateDecision candidateId candidateDecisions
+    |> Option.map (fun decision -> decision.Decision)
+    |> Option.defaultValue Pending
+
+let formatCandidateDecisionValue = function
+    | Pending -> "Pending"
+    | Accepted -> "Accepted"
+    | Rejected -> "Rejected"
+    | Held -> "Held"
+
+let candidateDecisionTagClass = function
+    | Pending -> "tag is-light"
+    | Accepted -> "tag is-success is-light"
+    | Rejected -> "tag is-danger is-light"
+    | Held -> "tag is-warning is-light"
+
+let candidateDecisionButtonClass decisionValue activeDecision buttonStyle =
+    if decisionValue = activeDecision then
+        "button is-small " + buttonStyle
+    else
+        "button is-small " + buttonStyle + " is-light"
+
+let renderCandidateGovernanceActions (candidate: CandidateDelta) decisionValue dispatch =
+    div {
+        attr.``class`` "buttons are-small mb-0"
+        button {
+            attr.``class`` (candidateDecisionButtonClass decisionValue Accepted "is-success")
+            attr.``type`` "button"
+            on.click (fun _ -> dispatch (AcceptCandidate candidate.CandidateId))
+            text "Accept"
+        }
+
+        button {
+            attr.``class`` (candidateDecisionButtonClass decisionValue Rejected "is-danger")
+            attr.``type`` "button"
+            on.click (fun _ -> dispatch (RejectCandidate candidate.CandidateId))
+            text "Reject"
+        }
+
+        button {
+            attr.``class`` (candidateDecisionButtonClass decisionValue Held "is-warning")
+            attr.``type`` "button"
+            on.click (fun _ -> dispatch (HoldCandidate candidate.CandidateId))
+            text "Hold"
+        }
+    }
+
+let formatCandidateDecisionTimestamp (timestamp: DateTime) =
+    timestamp.ToString("yyyy-MM-dd HH:mm:ss") + " UTC"
+
+let renderCandidateDecisionMetadata (candidateDecision: CandidateDecision option) =
+    match candidateDecision with
+    | None ->
+        p {
+            attr.``class`` "is-size-7 has-text-grey"
+            text "No T5 decision recorded yet."
+        }
+    | Some decision ->
+        div {
+            p {
+                attr.``class`` "is-size-7 has-text-grey mb-1"
+                strong { text "Decision timestamp: " }
+                text (formatCandidateDecisionTimestamp decision.Timestamp)
+            }
+
+            p {
+                attr.``class`` "is-size-7 has-text-grey"
+                strong { text "Rationale: " }
+                text decision.Rationale
+            }
+        }
+
+let renderCandidateDeltaCard (candidate: CandidateDelta) (candidateDecisions: CandidateDecision list) dispatch =
+    let candidateDecision = tryFindCandidateDecision candidate.CandidateId candidateDecisions
+    let decisionValue = getCandidateDecisionValue candidate.CandidateId candidateDecisions
+
     div {
         attr.``class`` "card mb-4"
 
@@ -924,6 +1089,12 @@ let renderCandidateDeltaCard candidate =
             h3 {
                 attr.``class`` "title is-6"
                 text (formatCandidateDeltaKind candidate.Kind)
+            }
+
+            p {
+                attr.``class`` "is-size-7 has-text-grey mb-3"
+                strong { text "Candidate ID: " }
+                code { text candidate.CandidateId }
             }
 
             div {
@@ -977,11 +1148,29 @@ let renderCandidateDeltaCard candidate =
                         text candidate.Status
                     }
                 }
+
+                div {
+                    attr.``class`` "column is-12"
+                    p {
+                        strong { text "T5 governance decision: " }
+                        span {
+                            attr.``class`` (candidateDecisionTagClass decisionValue)
+                            text (formatCandidateDecisionValue decisionValue)
+                        }
+                    }
+
+                    div {
+                        attr.``class`` "mt-2 mb-2"
+                        renderCandidateGovernanceActions candidate decisionValue dispatch
+                    }
+
+                    renderCandidateDecisionMetadata candidateDecision
+                }
             }
         }
     }
 
-let renderCandidateDeltaSigmaPanel sigmaContext =
+let renderCandidateDeltaSigmaPanel sigmaContext (candidateDecisions: CandidateDecision list) dispatch =
     let candidateDeltas = formulateCandidateDeltas sigmaContext
 
     div {
@@ -994,11 +1183,11 @@ let renderCandidateDeltaSigmaPanel sigmaContext =
 
         p {
             attr.``class`` "notification is-info is-light"
-            text "T4 formulates candidate changes only. No Σ promotion or governance decision occurs here."
+            text "T4 formulates candidate changes only. T5 records governance decisions here without Σ promotion."
         }
 
         forEach candidateDeltas <| fun candidateDelta ->
-            renderCandidateDeltaCard candidateDelta
+            renderCandidateDeltaCard candidateDelta candidateDecisions dispatch
     }
 
 let renderSummaryBox title body =
@@ -1585,6 +1774,85 @@ let renderT4CandidateSummaryTable sigmaContext =
         }
     }
 
+let countCandidateDecisions decisionValue (candidateDeltas: CandidateDelta list) (candidateDecisions: CandidateDecision list) =
+    candidateDeltas
+    |> List.sumBy (fun candidate ->
+        if getCandidateDecisionValue candidate.CandidateId candidateDecisions = decisionValue then
+            1
+        else
+            0)
+
+let renderCandidateDecisionCount label count =
+    span {
+        attr.``class`` "tag is-light"
+        text (label + ": " + string count)
+    }
+
+let renderCandidateDecisionTag decisionValue =
+    span {
+        attr.``class`` (candidateDecisionTagClass decisionValue)
+        text (formatCandidateDecisionValue decisionValue)
+    }
+
+let renderT5GovernanceSummaryTable sigmaContext (candidateDecisions: CandidateDecision list) dispatch =
+    let candidateDeltas = formulateCandidateDeltas sigmaContext
+    let pendingCount = countCandidateDecisions Pending candidateDeltas candidateDecisions
+    let acceptedCount = countCandidateDecisions Accepted candidateDeltas candidateDecisions
+    let rejectedCount = countCandidateDecisions Rejected candidateDeltas candidateDecisions
+    let heldCount = countCandidateDecisions Held candidateDeltas candidateDecisions
+
+    div {
+        attr.``class`` "mb-5"
+
+        h3 {
+            attr.``class`` "title is-6"
+            text "T5 Governance Summary"
+        }
+
+        div {
+            attr.``class`` "tags mb-3"
+            renderCandidateDecisionCount "Pending" pendingCount
+            renderCandidateDecisionCount "Accepted" acceptedCount
+            renderCandidateDecisionCount "Rejected" rejectedCount
+            renderCandidateDecisionCount "Held" heldCount
+        }
+
+        div {
+            attr.``class`` "table-container mb-2"
+            table {
+                attr.``class`` "table is-fullwidth is-striped is-narrow"
+
+                thead {
+                    tr {
+                        th { text "Candidate type" }
+                        th { text "Target" }
+                        th { text "Basis count" }
+                        th { text "Decision" }
+                        th { text "Action" }
+                    }
+                }
+
+                tbody {
+                    forEach candidateDeltas <| fun candidate ->
+                        let decisionValue = getCandidateDecisionValue candidate.CandidateId candidateDecisions
+
+                        tr {
+                            td { text (formatCandidateDeltaKind candidate.Kind) }
+                            td { text candidate.Target }
+                            td { text (string (List.length candidate.RelevantSigmaBasis)) }
+                            td { renderCandidateDecisionTag decisionValue }
+                            td { renderCandidateGovernanceActions candidate decisionValue dispatch }
+                        }
+                }
+            }
+        }
+
+        p {
+            attr.``class`` "is-size-7 has-text-grey"
+            text "T5 records governance decisions only. Candidate promotion to Sigma is intentionally not performed here."
+        }
+    }
+
 let renderLatestDeltaSummaryTable lastReplayAction =
     div {
         h3 {
@@ -1625,7 +1893,54 @@ let renderLatestDeltaSummaryTable lastReplayAction =
             }
     }
 
-let renderOperationalSummaryTablesPanel sequencedParsedPhis sigmaContext lastReplayAction =
+let renderT5DecisionHistoryPanel (candidateDecisions: CandidateDecision list) =
+    div {
+        attr.``class`` "box"
+
+        h2 {
+            attr.``class`` "title is-5"
+            text "T5 — Decision History"
+        }
+
+        match candidateDecisions with
+        | [] ->
+            p {
+                attr.``class`` "has-text-grey"
+                text "No T5 decisions recorded yet."
+            }
+        | decisions ->
+            div {
+                attr.``class`` "table-container"
+                table {
+                    attr.``class`` "table is-fullwidth is-striped is-narrow"
+
+                    thead {
+                        tr {
+                            th { text "CandidateId" }
+                            th { text "Candidate type" }
+                            th { text "Target" }
+                            th { text "Decision" }
+                            th { text "Timestamp" }
+                            th { text "Rationale" }
+                        }
+                    }
+
+                    tbody {
+                        forEach decisions <| fun decision ->
+                            tr {
+                                td { code { text decision.CandidateId } }
+                                td { text decision.CandidateType }
+                                td { text decision.Target }
+                                td { renderCandidateDecisionTag decision.Decision }
+                                td { text (formatCandidateDecisionTimestamp decision.Timestamp) }
+                                td { text decision.Rationale }
+                            }
+                    }
+                }
+            }
+    }
+
+let renderOperationalSummaryTablesPanel sequencedParsedPhis sigmaContext lastReplayAction (candidateDecisions: CandidateDecision list) dispatch =
     div {
         attr.``class`` "box"
 
@@ -1643,6 +1958,8 @@ let renderOperationalSummaryTablesPanel sequencedParsedPhis sigmaContext lastRep
         renderTopReinforcedAtomsTable sigmaContext
 
         renderT4CandidateSummaryTable sigmaContext
+
+        renderT5GovernanceSummaryTable sigmaContext candidateDecisions dispatch
 
         renderLatestDeltaSummaryTable lastReplayAction
     }
@@ -1751,6 +2068,22 @@ let homePage model dispatch =
                     span {
                         attr.``class`` "tag is-link is-light"
                         text "Current Σ Snapshot"
+                    }
+                    span {
+                        attr.``class`` "tag is-light"
+                        text "->"
+                    }
+                    span {
+                        attr.``class`` "tag is-link is-light"
+                        text "T4 Candidate ΔΣ"
+                    }
+                    span {
+                        attr.``class`` "tag is-light"
+                        text "->"
+                    }
+                    span {
+                        attr.``class`` "tag is-link is-light"
+                        text "T5 Governance"
                     }
                 }
 
@@ -1904,7 +2237,7 @@ let homePage model dispatch =
 
                         renderCurrentSigmaSnapshotPanel includedSequencedParsedPhis currentSigmaContext
 
-                        renderOperationalSummaryTablesPanel includedSequencedParsedPhis currentSigmaContext model.lastReplayAction
+                        renderOperationalSummaryTablesPanel includedSequencedParsedPhis currentSigmaContext model.lastReplayAction model.candidateDecisions dispatch
 
                         renderParsedPhiLedgerPanel model.parsedPhis model.excludedPhiIds dispatch
                     }
@@ -1949,6 +2282,14 @@ let homePage model dispatch =
                         attr.``class`` "tag is-link is-light"
                         text "T4 Candidate ΔΣ"
                     }
+                    span {
+                        attr.``class`` "tag is-light"
+                        text "->"
+                    }
+                    span {
+                        attr.``class`` "tag is-link is-light"
+                        text "T5 Governance"
+                    }
                 }
 
                 renderParseDetailsPanel model.selectedPhiParse model.selectedPhiResolution
@@ -1957,7 +2298,9 @@ let homePage model dispatch =
 
                 renderRelevantSigmaContextPanel includedSequencedParsedPhis model.selectedPhiParse model.selectedPhiResolution
 
-                renderCandidateDeltaSigmaPanel currentSigmaContext
+                renderCandidateDeltaSigmaPanel currentSigmaContext model.candidateDecisions dispatch
+
+                renderT5DecisionHistoryPanel model.candidateDecisions
                 }
 
             | DemoToolsTab -> div {
