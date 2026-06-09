@@ -39,10 +39,23 @@ type Model =
         candidateDecisions: CandidateDecision list
         LedgerEvents: LedgerEvent list
         ReplayPreviewSequence: int option
+        evidenceRecords: EvidenceRecord list
+        evidenceCaptureKind: string
+        evidenceTargetKind: string
+        evidenceTargetId: string
+        evidenceTitle: string
+        evidenceNotes: string
+        evidenceContentRef: string
+        evidenceStatus: string option
     }
 
 let demoScenarios = DemoData.demoScenarios
 let defaultProjectName = "Untitled Project"
+let evidenceCaptureKinds = [ "Manual note"; "Screenshot placeholder"; "File reference"; "External observation" ]
+let evidenceTargetKinds = [ "Phi"; "Function"; "Mode"; "Interface"; "State"; "Host" ]
+let defaultEvidenceCaptureKind = "Manual note"
+let defaultEvidenceTargetKind = "Phi"
+
 let buildProjectSnapshot (model: Model) =
     {
         SnapshotVersion = projectSnapshotVersion
@@ -53,6 +66,7 @@ let buildProjectSnapshot (model: Model) =
         ExcludedPhiIds = model.excludedPhiIds
         CandidateDecisions = model.candidateDecisions
         LedgerEvents = model.LedgerEvents
+        EvidenceRecords = model.evidenceRecords
     }
 
 let restoreProjectSnapshot (snapshot: ProjectSnapshot) (model: Model) =
@@ -73,6 +87,12 @@ let restoreProjectSnapshot (snapshot: ProjectSnapshot) (model: Model) =
             candidateDecisions = snapshot.CandidateDecisions
             LedgerEvents = snapshot.LedgerEvents
             ReplayPreviewSequence = None
+            evidenceRecords = snapshot.EvidenceRecords
+            evidenceTargetId = ""
+            evidenceTitle = ""
+            evidenceNotes = ""
+            evidenceContentRef = ""
+            evidenceStatus = None
     }
 
 let tryFindScenario scenarioId =
@@ -121,6 +141,14 @@ let initModel =
         candidateDecisions = []
         LedgerEvents = []
         ReplayPreviewSequence = None
+        evidenceRecords = []
+        evidenceCaptureKind = defaultEvidenceCaptureKind
+        evidenceTargetKind = defaultEvidenceTargetKind
+        evidenceTargetId = ""
+        evidenceTitle = ""
+        evidenceNotes = ""
+        evidenceContentRef = ""
+        evidenceStatus = None
     }
 
 let appendLedgerEvent eventKind targetId summary detail (model: Model) =
@@ -149,6 +177,14 @@ let clearProjectModel (model: Model) =
             candidateDecisions = []
             LedgerEvents = []
             ReplayPreviewSequence = None
+            evidenceRecords = []
+            evidenceCaptureKind = defaultEvidenceCaptureKind
+            evidenceTargetKind = defaultEvidenceTargetKind
+            evidenceTargetId = ""
+            evidenceTitle = ""
+            evidenceNotes = ""
+            evidenceContentRef = ""
+            evidenceStatus = None
     }
 
 let buildSphynxSampleSnapshot () =
@@ -161,6 +197,7 @@ let buildSphynxSampleSnapshot () =
         ExcludedPhiIds = []
         CandidateDecisions = []
         LedgerEvents = []
+        EvidenceRecords = []
     }
 
 /// The Elmish application's update messages.
@@ -189,6 +226,13 @@ type Message =
     | ImportProjectJson
     | LoadSphynxSampleProject
     | ClearProject
+    | SetEvidenceCaptureKind of string
+    | SetEvidenceTargetKind of string
+    | SetEvidenceTargetId of string
+    | SetEvidenceTitle of string
+    | SetEvidenceNotes of string
+    | SetEvidenceContentRef of string
+    | CreateEvidenceRecord
 
 let upsertParsedPhi parse parsedPhis =
     if parsedPhis |> List.exists (fun parsedPhi -> parsedPhi.PhiId = parse.PhiId) then
@@ -252,6 +296,64 @@ let buildSigmaContext sequencedParsedPhis =
         States = buildSigmaContextEntries (fun parse -> parse.Exposure.State) sequencedParsedPhis
         Hosts = buildSigmaContextEntries (fun parse -> parse.Exposure.HostCandidate) sequencedParsedPhis
     }
+
+let getCurrentSigmaContext (model: Model) =
+    model.parsedPhis
+    |> getIncludedSequencedParsedPhis model.excludedPhiIds
+    |> buildSigmaContext
+
+let formatPhiEvidenceTarget (phi: PhiIntake) =
+    if String.IsNullOrWhiteSpace(phi.RawStatement) then
+        phi.PhiId
+    else
+        phi.PhiId + " - " + phi.RawStatement
+
+let formatSigmaEvidenceTarget atomKind (entry: SigmaContextEntry) =
+    entry.Value
+    + " ("
+    + atomKind
+    + "; support "
+    + string entry.SupportCount
+    + "; Phi "
+    + String.concat ", " entry.SupportingPhiIds
+    + ")"
+
+let getEvidenceTargetOptionsForKind targetKind (model: Model) =
+    let sigmaContext = getCurrentSigmaContext model
+
+    match targetKind with
+    | "Phi" ->
+        model.ingestedPhis
+        |> List.map (fun phi -> phi.PhiId, formatPhiEvidenceTarget phi)
+    | "Function" ->
+        sigmaContext.Functions
+        |> List.map (fun entry -> entry.Value, formatSigmaEvidenceTarget "Function" entry)
+    | "Mode" ->
+        sigmaContext.Modes
+        |> List.map (fun entry -> entry.Value, formatSigmaEvidenceTarget "Mode" entry)
+    | "Interface" ->
+        sigmaContext.Interfaces
+        |> List.map (fun entry -> entry.Value, formatSigmaEvidenceTarget "Interface" entry)
+    | "State" ->
+        sigmaContext.States
+        |> List.map (fun entry -> entry.Value, formatSigmaEvidenceTarget "State" entry)
+    | "Host" ->
+        sigmaContext.Hosts
+        |> List.map (fun entry -> entry.Value, formatSigmaEvidenceTarget "Host" entry)
+    | _ ->
+        []
+
+let getCurrentEvidenceTargetOptions (model: Model) =
+    getEvidenceTargetOptionsForKind model.evidenceTargetKind model
+
+let tryResolveEvidenceTargetLabel (model: Model) =
+    model
+    |> getCurrentEvidenceTargetOptions
+    |> List.tryFind (fun (targetId, _) -> targetId = model.evidenceTargetId)
+    |> Option.map snd
+
+let createEvidenceId evidenceRecords =
+    sprintf "EVD-%06d" (List.length evidenceRecords + 1)
 
 let emptyDeltaSigmaAtomGroups =
     {
@@ -629,6 +731,65 @@ let update message model =
         |> fun updatedModel -> updatedModel, Cmd.none
     | ClearProject ->
         { clearProjectModel model with persistenceStatus = Some "Project cleared." }, Cmd.none
+    | SetEvidenceCaptureKind value ->
+        { model with evidenceCaptureKind = value }, Cmd.none
+    | SetEvidenceTargetKind value ->
+        { model with
+            evidenceTargetKind = value
+            evidenceTargetId = "" }, Cmd.none
+    | SetEvidenceTargetId value ->
+        { model with evidenceTargetId = value }, Cmd.none
+    | SetEvidenceTitle value ->
+        { model with evidenceTitle = value }, Cmd.none
+    | SetEvidenceNotes value ->
+        { model with evidenceNotes = value }, Cmd.none
+    | SetEvidenceContentRef value ->
+        { model with evidenceContentRef = value }, Cmd.none
+    | CreateEvidenceRecord ->
+        let title = model.evidenceTitle.Trim()
+
+        if String.IsNullOrWhiteSpace(title) then
+            { model with evidenceStatus = Some "Evidence title is required." }, Cmd.none
+        elif String.IsNullOrWhiteSpace(model.evidenceTargetKind) || String.IsNullOrWhiteSpace(model.evidenceTargetId) then
+            { model with evidenceStatus = Some "Select an evidence target." }, Cmd.none
+        else
+            match tryResolveEvidenceTargetLabel model with
+            | None ->
+                { model with evidenceStatus = Some "Select a valid evidence target." }, Cmd.none
+            | Some targetLabel ->
+                let evidenceId = createEvidenceId model.evidenceRecords
+
+                let evidenceRecord =
+                    {
+                        EvidenceId = evidenceId
+                        TimestampUtc = getUtcTimestampString ()
+                        Actor = "Demo user"
+                        CaptureKind = model.evidenceCaptureKind
+                        TargetKind = model.evidenceTargetKind
+                        TargetId = model.evidenceTargetId
+                        TargetLabel = targetLabel
+                        Title = title
+                        Notes = model.evidenceNotes
+                        ContentRef = model.evidenceContentRef
+                    }
+
+                let detail =
+                    model.evidenceCaptureKind
+                    + " | "
+                    + title
+                    + " | "
+                    + model.evidenceTargetKind
+                    + " | "
+                    + targetLabel
+
+                { model with
+                    evidenceRecords = model.evidenceRecords @ [ evidenceRecord ]
+                    evidenceTitle = ""
+                    evidenceNotes = ""
+                    evidenceContentRef = ""
+                    evidenceStatus = Some ("Evidence captured: " + evidenceId) }
+                |> appendLedgerEvent "EvidenceCaptured" evidenceId "Evidence captured" detail
+                |> fun updatedModel -> updatedModel, Cmd.none
     | SetPhiDraftRawStatement value ->
         { model with phiDraftRawStatement = value }, Cmd.none
 
@@ -2328,6 +2489,220 @@ let renderLedgerTab (ledgerEvents: LedgerEvent list) (replayPreviewSequence: int
         renderReplayPreviewPanel replayPreviewSequence ledgerEvents dispatch
     }
 
+let renderEvidenceLibrary (evidenceRecords: EvidenceRecord list) =
+    div {
+        attr.``class`` "box"
+
+        h2 {
+            attr.``class`` "title is-5"
+            text "Evidence Library"
+        }
+
+        match evidenceRecords with
+        | [] ->
+            p {
+                attr.``class`` "has-text-grey"
+                text "No evidence captured yet."
+            }
+        | records ->
+            div {
+                attr.``class`` "table-container"
+                table {
+                    attr.``class`` "table is-fullwidth is-striped is-narrow"
+
+                    thead {
+                        tr {
+                            th { text "EvidenceId" }
+                            th { text "Time UTC" }
+                            th { text "Kind" }
+                            th { text "Target" }
+                            th { text "Title" }
+                            th { text "Notes" }
+                            th { text "ContentRef" }
+                        }
+                    }
+
+                    tbody {
+                        forEach records <| fun evidenceRecord ->
+                            tr {
+                                td { text evidenceRecord.EvidenceId }
+                                td { text evidenceRecord.TimestampUtc }
+                                td { text evidenceRecord.CaptureKind }
+                                td { text (evidenceRecord.TargetKind + ": " + evidenceRecord.TargetLabel) }
+                                td { text evidenceRecord.Title }
+                                td { text evidenceRecord.Notes }
+                                td { text evidenceRecord.ContentRef }
+                            }
+                    }
+                }
+            }
+    }
+
+let renderEvidenceTab (model: Model) dispatch =
+    let targetOptions = getCurrentEvidenceTargetOptions model
+
+    div {
+        attr.``class`` "mb-6 pb-5"
+
+        h2 {
+            attr.``class`` "title is-4"
+            text "Evidence"
+        }
+
+        div {
+            attr.``class`` "columns is-variable is-5"
+
+            div {
+                attr.``class`` "column is-4"
+
+                div {
+                    attr.``class`` "box"
+
+                    h2 {
+                        attr.``class`` "title is-5"
+                        text "1sec Stamp"
+                    }
+
+                    div {
+                        attr.``class`` "field"
+                        label {
+                            attr.``class`` "label"
+                            text "Capture kind"
+                        }
+                        div {
+                            attr.``class`` "control"
+                            div {
+                                attr.``class`` "select is-fullwidth"
+                                select {
+                                    bind.input.string model.evidenceCaptureKind (fun value -> dispatch (SetEvidenceCaptureKind value))
+                                    forEach evidenceCaptureKinds <| fun captureKind ->
+                                        option { text captureKind }
+                                }
+                            }
+                        }
+                    }
+
+                    div {
+                        attr.``class`` "field"
+                        label {
+                            attr.``class`` "label"
+                            text "Target kind"
+                        }
+                        div {
+                            attr.``class`` "control"
+                            div {
+                                attr.``class`` "select is-fullwidth"
+                                select {
+                                    bind.input.string model.evidenceTargetKind (fun value -> dispatch (SetEvidenceTargetKind value))
+                                    forEach evidenceTargetKinds <| fun targetKind ->
+                                        option { text targetKind }
+                                }
+                            }
+                        }
+                    }
+
+                    div {
+                        attr.``class`` "field"
+                        label {
+                            attr.``class`` "label"
+                            text "Target item"
+                        }
+                        div {
+                            attr.``class`` "control"
+                            div {
+                                attr.``class`` "select is-fullwidth"
+                                select {
+                                    bind.input.string model.evidenceTargetId (fun value -> dispatch (SetEvidenceTargetId value))
+
+                                    option {
+                                        attr.value ""
+                                        text (
+                                            if List.isEmpty targetOptions then
+                                                "No targets available"
+                                            else
+                                                "Select target item")
+                                    }
+
+                                    forEach targetOptions <| fun (targetId, targetLabel) ->
+                                        option {
+                                            attr.value targetId
+                                            text targetLabel
+                                        }
+                                }
+                            }
+                        }
+                    }
+
+                    div {
+                        attr.``class`` "field"
+                        label {
+                            attr.``class`` "label"
+                            text "Title"
+                        }
+                        div {
+                            attr.``class`` "control"
+                            input {
+                                attr.``class`` "input"
+                                bind.input.string model.evidenceTitle (fun value -> dispatch (SetEvidenceTitle value))
+                            }
+                        }
+                    }
+
+                    div {
+                        attr.``class`` "field"
+                        label {
+                            attr.``class`` "label"
+                            text "Notes"
+                        }
+                        div {
+                            attr.``class`` "control"
+                            textarea {
+                                attr.``class`` "textarea"
+                                bind.input.string model.evidenceNotes (fun value -> dispatch (SetEvidenceNotes value))
+                            }
+                        }
+                    }
+
+                    div {
+                        attr.``class`` "field"
+                        label {
+                            attr.``class`` "label"
+                            text "Content reference"
+                        }
+                        div {
+                            attr.``class`` "control"
+                            input {
+                                attr.``class`` "input"
+                                bind.input.string model.evidenceContentRef (fun value -> dispatch (SetEvidenceContentRef value))
+                            }
+                        }
+                    }
+
+                    button {
+                        attr.``class`` "button is-link is-fullwidth"
+                        attr.``type`` "button"
+                        on.click (fun _ -> dispatch CreateEvidenceRecord)
+                        text "Create 1sec Stamp"
+                    }
+
+                    match model.evidenceStatus with
+                    | None ->
+                        empty()
+                    | Some status ->
+                        div {
+                            attr.``class`` "notification is-info is-light mt-4"
+                            text status
+                        }
+                }
+            }
+
+            div {
+                attr.``class`` "column is-8"
+                renderEvidenceLibrary model.evidenceRecords
+            }
+        }
+    }
+
 let renderPersistenceTab (model: Model) dispatch =
     div {
         attr.``class`` "mb-6 pb-5"
@@ -2402,6 +2777,10 @@ let renderPersistenceTab (model: Model) dispatch =
                         span {
                             attr.``class`` "tag is-light"
                             text ("Ledger events: " + string (List.length model.LedgerEvents))
+                        }
+                        span {
+                            attr.``class`` "tag is-light"
+                            text ("Evidence records: " + string (List.length model.evidenceRecords))
                         }
                     }
 
@@ -2488,6 +2867,18 @@ let renderTopNavigation activeTab dispatch =
                 a {
                     on.click (fun _ -> dispatch (SelectTopNavigationTab DemoToolsTab))
                     text "Demo Tools"
+                }
+            }
+
+            li {
+                attr.``class`` (
+                    if activeTab = EvidenceTab then
+                        "is-active"
+                    else
+                        "")
+                a {
+                    on.click (fun _ -> dispatch (SelectTopNavigationTab EvidenceTab))
+                    text "Evidence"
                 }
             }
 
@@ -2958,6 +3349,9 @@ let homePage model dispatch =
                     }
                 }
                 }
+
+            | EvidenceTab ->
+                renderEvidenceTab model dispatch
 
             | PersistenceTab ->
                 renderPersistenceTab model dispatch

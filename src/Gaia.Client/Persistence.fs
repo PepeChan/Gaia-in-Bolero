@@ -152,6 +152,20 @@ let ledgerEventToJson (ledgerEvent: LedgerEvent) =
     json["Detail"] <- JsonValue.Create(ledgerEvent.Detail)
     json
 
+let evidenceRecordToJson (evidenceRecord: EvidenceRecord) =
+    let json = JsonObject()
+    json["EvidenceId"] <- JsonValue.Create(evidenceRecord.EvidenceId)
+    json["TimestampUtc"] <- JsonValue.Create(evidenceRecord.TimestampUtc)
+    json["Actor"] <- JsonValue.Create(evidenceRecord.Actor)
+    json["CaptureKind"] <- JsonValue.Create(evidenceRecord.CaptureKind)
+    json["TargetKind"] <- JsonValue.Create(evidenceRecord.TargetKind)
+    json["TargetId"] <- JsonValue.Create(evidenceRecord.TargetId)
+    json["TargetLabel"] <- JsonValue.Create(evidenceRecord.TargetLabel)
+    json["Title"] <- JsonValue.Create(evidenceRecord.Title)
+    json["Notes"] <- JsonValue.Create(evidenceRecord.Notes)
+    json["ContentRef"] <- JsonValue.Create(evidenceRecord.ContentRef)
+    json
+
 let jsonArrayFrom values toJson =
     let array = JsonArray()
 
@@ -170,7 +184,16 @@ let projectSnapshotToJson (snapshot: ProjectSnapshot) =
     json["ExcludedPhiIds"] <- jsonStringArray snapshot.ExcludedPhiIds
     json["CandidateDecisions"] <- jsonArrayFrom snapshot.CandidateDecisions candidateDecisionToJson
     json["LedgerEvents"] <- jsonArrayFrom snapshot.LedgerEvents ledgerEventToJson
+    json["EvidenceRecords"] <- jsonArrayFrom snapshot.EvidenceRecords evidenceRecordToJson
     json
+
+let tryReadProperty propertyName (json: JsonObject) =
+    let mutable node: JsonNode = null
+
+    if json.TryGetPropertyValue(propertyName, &node) then
+        Some node
+    else
+        None
 
 let readProperty context propertyName (json: JsonObject) =
     let mutable node: JsonNode = null
@@ -264,6 +287,19 @@ let readObjectList context propertyName readItem (json: JsonObject) =
         let itemContext = context + "." + propertyName + "[" + string index + "]"
         readItem itemContext (asObject itemContext node))
     |> Seq.toList
+
+let readOptionalObjectList context propertyName readItem (json: JsonObject) =
+    match tryReadProperty propertyName json with
+    | None ->
+        []
+    | Some node ->
+        let array = node |> asArray (context + "." + propertyName)
+
+        array
+        |> Seq.mapi (fun index node ->
+            let itemContext = context + "." + propertyName + "[" + string index + "]"
+            readItem itemContext (asObject itemContext node))
+        |> Seq.toList
 
 let readExposure context (json: JsonObject) =
     {
@@ -365,6 +401,20 @@ let readLedgerEvent context (json: JsonObject) =
         Detail = readString context "Detail" json
     }
 
+let readEvidenceRecord context (json: JsonObject) =
+    {
+        EvidenceId = readString context "EvidenceId" json
+        TimestampUtc = readString context "TimestampUtc" json
+        Actor = readString context "Actor" json
+        CaptureKind = readString context "CaptureKind" json
+        TargetKind = readString context "TargetKind" json
+        TargetId = readString context "TargetId" json
+        TargetLabel = readString context "TargetLabel" json
+        Title = readString context "Title" json
+        Notes = readString context "Notes" json
+        ContentRef = readString context "ContentRef" json
+    }
+
 let serializeProjectSnapshot (snapshot: ProjectSnapshot) =
     (projectSnapshotToJson snapshot).ToJsonString(projectJsonSerializerOptions)
 
@@ -384,6 +434,7 @@ let tryDeserializeProjectSnapshot json =
                 ExcludedPhiIds = readStringList "ProjectSnapshot" "ExcludedPhiIds" root
                 CandidateDecisions = readObjectList "ProjectSnapshot" "CandidateDecisions" readCandidateDecision root
                 LedgerEvents = readObjectList "ProjectSnapshot" "LedgerEvents" readLedgerEvent root
+                EvidenceRecords = readOptionalObjectList "ProjectSnapshot" "EvidenceRecords" readEvidenceRecord root
             }
             |> Ok
     with

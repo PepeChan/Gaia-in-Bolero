@@ -12,6 +12,7 @@ type TopNavigationTab =
     | GaiaProbeTab
     | DetailsTab
     | DemoToolsTab
+    | EvidenceTab
     | PersistenceTab
     | LedgerTab
 
@@ -113,6 +114,20 @@ type ReplayPreviewState =
         TotalLedgerEvents: int
     }
 
+type EvidenceRecord =
+    {
+        EvidenceId: string
+        TimestampUtc: string
+        Actor: string
+        CaptureKind: string
+        TargetKind: string
+        TargetId: string
+        TargetLabel: string
+        Title: string
+        Notes: string
+        ContentRef: string
+    }
+
 type ProjectSnapshot =
     {
         SnapshotVersion: string
@@ -123,6 +138,7 @@ type ProjectSnapshot =
         ExcludedPhiIds: string list
         CandidateDecisions: CandidateDecision list
         LedgerEvents: LedgerEvent list
+        EvidenceRecords: EvidenceRecord list
     }
 
 type AdmissibilityResult =
