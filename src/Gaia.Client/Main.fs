@@ -17,6 +17,7 @@ type TopNavigationTab =
     | GaiaProbeTab
     | DetailsTab
     | DemoToolsTab
+    | LedgerTab
 
 type SigmaContextEntry =
     {
@@ -93,6 +94,18 @@ type CandidateDelta =
         Status: string
     }
 
+type LedgerEvent =
+    {
+        EventId: string
+        SequenceNumber: int
+        TimestampUtc: string
+        Actor: string
+        EventKind: string
+        TargetId: string
+        Summary: string
+        Detail: string
+    }
+
 /// The Elmish application's model.
 type Model =
     {
@@ -114,6 +127,7 @@ type Model =
         selectedPhiResolution: ResolutionView option
         lastReplayAction: DeltaSigmaAnalysis option
         candidateDecisions: CandidateDecision list
+        LedgerEvents: LedgerEvent list
     }
 
 let demoScenarios = DemoData.demoScenarios
@@ -158,7 +172,26 @@ let initModel =
         selectedPhiResolution = None
         lastReplayAction = None
         candidateDecisions = []
+        LedgerEvents = []
     }
+
+let appendLedgerEvent eventKind targetId summary detail (model: Model) =
+    let sequenceNumber = List.length model.LedgerEvents + 1
+
+    let ledgerEvent =
+        {
+            EventId = sprintf "LEDGER-%06d" sequenceNumber
+            SequenceNumber = sequenceNumber
+            TimestampUtc = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fff'Z'")
+            Actor = "Demo user"
+            EventKind = eventKind
+            TargetId = targetId
+            Summary = summary
+            Detail = detail
+        }
+
+    { model with LedgerEvents = model.LedgerEvents @ [ ledgerEvent ] }
+
 /// The Elmish application's update messages.
 type Message =
     | SetPage of Page
@@ -516,7 +549,30 @@ let decideCandidate candidateId (decision: CandidateDecisionValue) (model: Model
     | Some candidate ->
         let candidateDecision = createCandidateDecision decision candidate
 
-        { model with candidateDecisions = upsertCandidateDecision candidateDecision model.candidateDecisions }, Cmd.none
+        match decision with
+        | Pending ->
+            model, Cmd.none
+        | Accepted
+        | Rejected
+        | Held ->
+            let eventKind, summary =
+                match decision with
+                | Accepted -> "CandidateAccepted", "Candidate accepted"
+                | Rejected -> "CandidateRejected", "Candidate rejected"
+                | Held -> "CandidateHeld", "Candidate held"
+                | Pending -> "", ""
+
+            let detail =
+                "Candidate type: "
+                + candidateDecision.CandidateType
+                + "; Target: "
+                + candidateDecision.Target
+                + "; Rationale: "
+                + candidateDecision.Rationale
+
+            { model with candidateDecisions = upsertCandidateDecision candidateDecision model.candidateDecisions }
+            |> appendLedgerEvent eventKind candidateDecision.CandidateId summary detail
+            |> fun updatedModel -> updatedModel, Cmd.none
     | None ->
         model, Cmd.none
 
@@ -556,39 +612,50 @@ let update message model =
     | ParseIngestedPhi phiId ->
         match model.ingestedPhis |> List.tryFind (fun phi -> phi.PhiId = phiId) with
         | Some phi ->
-            let beforeSigma =
-                model.parsedPhis
-                |> getIncludedSequencedParsedPhis model.excludedPhiIds
-                |> buildSigmaContext
+            if model.parsedPhis |> List.exists (fun parse -> parse.PhiId = phiId) then
+                model
+                |> appendLedgerEvent
+                    "PhiParseIgnoredAlreadyParsed"
+                    phi.PhiId
+                    "Phi parse ignored; already parsed"
+                    phi.RawStatement
+                |> fun updatedModel -> updatedModel, Cmd.none
+            else
+                let beforeSigma =
+                    model.parsedPhis
+                    |> getIncludedSequencedParsedPhis model.excludedPhiIds
+                    |> buildSigmaContext
 
-            let parse = Engine.parseIntake phi
-            let resolution = Engine.resolveParse DemoData.demoSigma parse
-            let parsedPhis = upsertParsedPhi parse model.parsedPhis
+                let parse = Engine.parseIntake phi
+                let resolution = Engine.resolveParse DemoData.demoSigma parse
+                let parsedPhis = upsertParsedPhi parse model.parsedPhis
 
-            let afterSigma =
-                parsedPhis
-                |> getIncludedSequencedParsedPhis model.excludedPhiIds
-                |> buildSigmaContext
+                let afterSigma =
+                    parsedPhis
+                    |> getIncludedSequencedParsedPhis model.excludedPhiIds
+                    |> buildSigmaContext
 
-            let alreadyKnownAtoms =
-                buildAlreadyKnownAtomGroups parse.PhiId beforeSigma parse
+                let alreadyKnownAtoms =
+                    buildAlreadyKnownAtomGroups parse.PhiId beforeSigma parse
 
-            let lastReplayAction =
-                createDeltaSigmaAnalysis
-                    ("Parsed " + parse.PhiId)
-                    "This Phi was parsed, so its exposed atoms can enter current Sigma."
-                    parse.PhiId
-                    parse.Statement
-                    alreadyKnownAtoms
-                    beforeSigma
-                    afterSigma
+                let lastReplayAction =
+                    createDeltaSigmaAnalysis
+                        ("Parsed " + parse.PhiId)
+                        "This Phi was parsed, so its exposed atoms can enter current Sigma."
+                        parse.PhiId
+                        parse.Statement
+                        alreadyKnownAtoms
+                        beforeSigma
+                        afterSigma
 
-            { model with
-                selectedPhiId = Some phi.PhiId
-                selectedPhiParse = Some parse
-                selectedPhiResolution = Some resolution
-                parsedPhis = parsedPhis
-                lastReplayAction = Some lastReplayAction }, Cmd.none
+                { model with
+                    selectedPhiId = Some phi.PhiId
+                    selectedPhiParse = Some parse
+                    selectedPhiResolution = Some resolution
+                    parsedPhis = parsedPhis
+                    lastReplayAction = Some lastReplayAction }
+                |> appendLedgerEvent "PhiParsed" parse.PhiId "Phi parsed" parse.Statement
+                |> fun updatedModel -> updatedModel, Cmd.none
 
         | None ->
             model, Cmd.none
@@ -616,9 +683,23 @@ let update message model =
         let lastReplayAction =
             buildReplayDeltaSigmaAnalysis phiId wasExcluded beforeSigma afterSigma model.parsedPhis
 
+        let eventKind, summary =
+            if wasExcluded then
+                "PhiIncludedInReplay", "Phi included in replay"
+            else
+                "PhiExcludedFromReplay", "Phi excluded from replay"
+
+        let detail =
+            model.parsedPhis
+            |> List.tryFind (fun parse -> parse.PhiId = phiId)
+            |> Option.map (fun parse -> parse.Statement)
+            |> Option.defaultValue "Source statement unavailable."
+
         { model with
             excludedPhiIds = excludedPhiIds
-            lastReplayAction = Some lastReplayAction }, Cmd.none
+            lastReplayAction = Some lastReplayAction }
+        |> appendLedgerEvent eventKind phiId summary detail
+        |> fun updatedModel -> updatedModel, Cmd.none
 
     | AcceptCandidate candidateId ->
         decideCandidate candidateId Accepted model
@@ -630,10 +711,12 @@ let update message model =
         decideCandidate candidateId Held model
 
     | IngestPhiDraft ->
+        let timestamp = DateTime.UtcNow
+
         let intake =
             {
-                PhiId = "PHI-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss")
-                Date = DateTime.UtcNow.ToString("yyyy-MM-dd")
+                PhiId = "PHI-" + timestamp.ToString("yyyyMMdd-HHmmss")
+                Date = timestamp.ToString("yyyy-MM-dd")
                 Source = model.phiDraftSource
                 Context = model.phiDraftTriggerContext
                 Confidence = model.phiDraftConfidence
@@ -655,7 +738,9 @@ let update message model =
             phiDraftTriggerContext = ""
             phiDraftSource = ""
             phiDraftQuickTags = ""
-            phiDraftConfidence = "Medium" }, Cmd.none
+            phiDraftConfidence = "Medium" }
+        |> appendLedgerEvent "PhiIngested" intake.PhiId "Phi ingested" intake.RawStatement
+        |> fun updatedModel -> updatedModel, Cmd.none
 
 /// Connects the routing system to the Elmish application.
 let router = Router.infer SetPage (fun model -> model.page)
@@ -1964,6 +2049,95 @@ let renderOperationalSummaryTablesPanel sequencedParsedPhis sigmaContext lastRep
         renderLatestDeltaSummaryTable lastReplayAction
     }
 
+let isPhiLedgerEvent eventKind =
+    eventKind = "PhiIngested"
+    || eventKind = "PhiParsed"
+    || eventKind = "PhiParseIgnoredAlreadyParsed"
+
+let isReplayLedgerEvent eventKind =
+    eventKind = "PhiExcludedFromReplay"
+    || eventKind = "PhiIncludedInReplay"
+
+let isGovernanceLedgerEvent eventKind =
+    eventKind = "CandidateAccepted"
+    || eventKind = "CandidateRejected"
+    || eventKind = "CandidateHeld"
+
+let countLedgerEvents predicate (ledgerEvents: LedgerEvent list) =
+    ledgerEvents
+    |> List.filter (fun ledgerEvent -> predicate ledgerEvent.EventKind)
+    |> List.length
+
+let renderLedgerCounter label count =
+    span {
+        attr.``class`` "tag is-light"
+        text (label + ": " + string count)
+    }
+
+let renderLedgerTab (ledgerEvents: LedgerEvent list) =
+    let totalEvents = List.length ledgerEvents
+    let phiEvents = countLedgerEvents isPhiLedgerEvent ledgerEvents
+    let replayEvents = countLedgerEvents isReplayLedgerEvent ledgerEvents
+    let governanceEvents = countLedgerEvents isGovernanceLedgerEvent ledgerEvents
+
+    div {
+        attr.``class`` "mb-6 pb-5"
+
+        h2 {
+            attr.``class`` "title is-4"
+            text "Clio Ledger Lite"
+        }
+
+        div {
+            attr.``class`` "box"
+
+            div {
+                attr.``class`` "tags mb-3"
+                renderLedgerCounter "Total events" totalEvents
+                renderLedgerCounter "Phi events" phiEvents
+                renderLedgerCounter "Replay events" replayEvents
+                renderLedgerCounter "Governance events" governanceEvents
+            }
+
+            match ledgerEvents with
+            | [] ->
+                p {
+                    attr.``class`` "has-text-grey"
+                    text "No ledger events recorded yet."
+                }
+            | events ->
+                div {
+                    attr.``class`` "table-container"
+                    table {
+                        attr.``class`` "table is-fullwidth is-striped is-narrow"
+
+                        thead {
+                            tr {
+                                th { text "#" }
+                                th { text "Time UTC" }
+                                th { text "Event kind" }
+                                th { text "Target" }
+                                th { text "Summary" }
+                                th { text "Detail" }
+                            }
+                        }
+
+                        tbody {
+                            forEach events <| fun ledgerEvent ->
+                                tr {
+                                    td { text (string ledgerEvent.SequenceNumber) }
+                                    td { text ledgerEvent.TimestampUtc }
+                                    td { text ledgerEvent.EventKind }
+                                    td { text ledgerEvent.TargetId }
+                                    td { text ledgerEvent.Summary }
+                                    td { text ledgerEvent.Detail }
+                                }
+                        }
+                    }
+                }
+        }
+    }
+
 let renderTopNavigation activeTab dispatch =
     div {
         attr.``class`` "tabs is-toggle mb-5"
@@ -2001,6 +2175,18 @@ let renderTopNavigation activeTab dispatch =
                 a {
                     on.click (fun _ -> dispatch (SelectTopNavigationTab DemoToolsTab))
                     text "Demo Tools"
+                }
+            }
+
+            li {
+                attr.``class`` (
+                    if activeTab = LedgerTab then
+                        "is-active"
+                    else
+                        "")
+                a {
+                    on.click (fun _ -> dispatch (SelectTopNavigationTab LedgerTab))
+                    text "Ledger"
                 }
             }
         }
@@ -2446,7 +2632,10 @@ let homePage model dispatch =
                         }
                     }
                 }
-            }
+                }
+
+            | LedgerTab ->
+                renderLedgerTab model.LedgerEvents
         }
     | _ ->
         div {
