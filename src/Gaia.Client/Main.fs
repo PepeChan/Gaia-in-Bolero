@@ -2241,13 +2241,34 @@ let renderReplayPreviewTables selectedState currentState =
         }
     }
 
-let renderReplayPreviewPanel replayPreviewSequence (ledgerEvents: LedgerEvent list) dispatch =
+let renderReplayPreviewPanel (replayPreviewSequence: int option) (ledgerEvents: LedgerEvent list) dispatch =
     div {
         attr.``class`` "box"
 
-        h2 {
-            attr.``class`` "title is-5"
-            text "Replay Preview Lite"
+        div {
+            attr.``class`` "level mb-3"
+
+            div {
+                attr.``class`` "level-left"
+                h2 {
+                    attr.``class`` "title is-5 mb-0"
+                    text "Replay Preview Lite"
+                }
+            }
+
+            match replayPreviewSequence with
+            | None ->
+                empty()
+            | Some _ ->
+                div {
+                    attr.``class`` "level-right"
+                    button {
+                        attr.``class`` "button is-small is-light"
+                        attr.``type`` "button"
+                        on.click (fun _ -> dispatch ClearReplayPreview)
+                        text "Clear preview"
+                    }
+                }
         }
 
         match replayPreviewSequence with
@@ -2260,17 +2281,34 @@ let renderReplayPreviewPanel replayPreviewSequence (ledgerEvents: LedgerEvent li
             let selectedEvents = getReplayPreviewEvents selectedSequence ledgerEvents
             let selectedState = buildReplayPreviewState selectedEvents
             let currentState = buildReplayPreviewState ledgerEvents
+            let selectedLedgerEvent = ledgerEvents |> List.tryFind (fun ledgerEvent -> ledgerEvent.SequenceNumber = selectedSequence)
 
-            p {
-                attr.``class`` "is-size-7 has-text-grey mb-3"
-                text ("Previewing through ledger event #" + string selectedSequence + ".")
-            }
+            div {
+                attr.``class`` "tags mb-3"
+                span {
+                    attr.``class`` "tag is-link"
+                    text ("Selected #" + string selectedSequence)
+                }
 
-            button {
-                attr.``class`` "button is-small is-light mb-3"
-                attr.``type`` "button"
-                on.click (fun _ -> dispatch ClearReplayPreview)
-                text "Clear preview"
+                match selectedLedgerEvent with
+                | None ->
+                    span {
+                        attr.``class`` "tag is-warning is-light"
+                        text "Selected ledger event not found"
+                    }
+                | Some ledgerEvent ->
+                    span {
+                        attr.``class`` "tag is-light"
+                        text ledgerEvent.EventId
+                    }
+                    span {
+                        attr.``class`` "tag is-light"
+                        text ledgerEvent.EventKind
+                    }
+                    span {
+                        attr.``class`` "tag is-light"
+                        text ledgerEvent.TargetId
+                    }
             }
 
             renderReplayPreviewTables selectedState currentState
@@ -2281,7 +2319,7 @@ let renderReplayPreviewPanel replayPreviewSequence (ledgerEvents: LedgerEvent li
         }
     }
 
-let renderLedgerTab (ledgerEvents: LedgerEvent list) replayPreviewSequence dispatch =
+let renderLedgerTab (ledgerEvents: LedgerEvent list) (replayPreviewSequence: int option) dispatch =
     let totalEvents = List.length ledgerEvents
     let phiEvents = countLedgerEvents isPhiLedgerEvent ledgerEvents
     let replayEvents = countLedgerEvents isReplayLedgerEvent ledgerEvents
@@ -2332,7 +2370,14 @@ let renderLedgerTab (ledgerEvents: LedgerEvent list) replayPreviewSequence dispa
 
                         tbody {
                             forEach events <| fun ledgerEvent ->
+                                let isSelectedForPreview = replayPreviewSequence = Some ledgerEvent.SequenceNumber
+
                                 tr {
+                                    attr.``class`` (
+                                        if isSelectedForPreview then
+                                            "is-selected"
+                                        else
+                                            "")
                                     td { text (string ledgerEvent.SequenceNumber) }
                                     td { text ledgerEvent.TimestampUtc }
                                     td { text ledgerEvent.EventKind }
@@ -2342,13 +2387,17 @@ let renderLedgerTab (ledgerEvents: LedgerEvent list) replayPreviewSequence dispa
                                     td {
                                         button {
                                             attr.``class`` (
-                                                if replayPreviewSequence = Some ledgerEvent.SequenceNumber then
+                                                if isSelectedForPreview then
                                                     "button is-small is-link"
                                                 else
                                                     "button is-small is-link is-light")
                                             attr.``type`` "button"
                                             on.click (fun _ -> dispatch (SelectReplayPreview ledgerEvent.SequenceNumber))
-                                            text "Replay here"
+                                            text (
+                                                if isSelectedForPreview then
+                                                    "Selected"
+                                                else
+                                                    "Replay here")
                                         }
                                     }
                                 }
