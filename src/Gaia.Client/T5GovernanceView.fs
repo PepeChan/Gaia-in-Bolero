@@ -64,6 +64,7 @@ let renderT5GovernanceSummaryTable sigmaContext (candidateDecisions: CandidateDe
                         th { text "Candidate type" }
                         th { text "Target" }
                         th { text "Basis count" }
+                        th { text "Provenance" }
                         th { text "Decision" }
                         th { text "Action" }
                     }
@@ -77,6 +78,7 @@ let renderT5GovernanceSummaryTable sigmaContext (candidateDecisions: CandidateDe
                             td { text (formatCandidateDeltaKind candidate.Kind) }
                             td { text candidate.Target }
                             td { text (string (List.length candidate.RelevantSigmaBasis)) }
+                            td { text candidate.Provenance }
                             td { renderCandidateDecisionTag decisionValue }
                             td { renderCandidateGovernanceActions candidate decisionValue dispatch }
                         }
@@ -90,7 +92,7 @@ let renderT5GovernanceSummaryTable sigmaContext (candidateDecisions: CandidateDe
         }
     }
 
-let cognitionReviewTargetFilters = [ "All"; "Host"; "Interface"; "State"; "Mode"; "Reinforced Atom" ]
+let cognitionReviewTargetFilters = [ "All"; "Host"; "Interface"; "State"; "Mode"; "Constraint"; "Reinforced Atom" ]
 let cognitionReviewDecisionFilters = [ "All"; "Pending"; "Accepted"; "Rejected"; "Held" ]
 
 let getTopMissingContextRows sequencedParsedPhis =
@@ -121,7 +123,8 @@ let candidateMatchesTargetFilter filterValue (candidate: CandidateDelta) =
     | "Host"
     | "Interface"
     | "State"
-    | "Mode" -> candidate.Kind <> ReinforcedSigmaAtom && candidate.Target = filterValue
+    | "Mode"
+    | "Constraint" -> candidate.Kind <> ReinforcedSigmaAtom && candidate.Target = filterValue
     | _ -> true
 
 let candidateMatchesDecisionFilter filterValue decisionValue =
@@ -142,6 +145,7 @@ let candidateMatchesTextFilter searchText (candidate: CandidateDelta) =
             candidate.Target
             candidate.ProposedTransition
             candidate.Reason
+            candidate.Provenance
             yield! candidate.RelevantSigmaBasis
             yield! getCandidateSupportingPhiIds candidate
             yield! getCandidateAtomValues candidate
@@ -167,6 +171,8 @@ let interpretReviewCandidate (candidate: CandidateDelta) =
     | AddInterface -> "This interface appears available for boundary reasoning."
     | AddState -> "This state appears available for condition and behavior reasoning."
     | AddMode -> "This mode appears available for operational-context reasoning."
+    | AddHost -> "This host appears available for allocation and system-boundary reasoning."
+    | AddConstraint -> "This constraint appears available for design-limit reasoning."
     | ReinforcedSigmaAtom -> "This atom appears in multiple Phi and may be an architectural theme."
     | NoStructuralChange -> "No actionable candidate transition is currently visible."
 
@@ -528,7 +534,7 @@ let renderReviewCandidateCard
                 attr.``class`` "columns is-variable is-3 is-vcentered mb-2"
 
                 div {
-                    attr.``class`` "column is-6"
+                    attr.``class`` "column is-4"
                     p {
                         attr.``class`` "heading mb-1"
                         text "Candidate"
@@ -568,6 +574,18 @@ let renderReviewCandidateCard
                         text "Decision"
                     }
                     renderCandidateDecisionTag decisionValue
+                }
+
+                div {
+                    attr.``class`` "column is-2"
+                    p {
+                        attr.``class`` "heading mb-1"
+                        text "Provenance"
+                    }
+                    span {
+                        attr.``class`` "tag is-info is-light"
+                        text candidate.Provenance
+                    }
                 }
             }
 

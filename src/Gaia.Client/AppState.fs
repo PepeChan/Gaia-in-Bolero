@@ -23,11 +23,16 @@ type Model =
         phiDraftSource: string
         phiDraftQuickTags: string
         phiDraftConfidence: string
+        phiContextSnipDraft: string
+        existingPhiContextTargetId: string
+        phiContextEntryDraftKind: string
+        phiContextEntryDraftValue: string
         phiBatchParseStatus: string option
         cognitionReviewTargetFilter: string
         cognitionReviewDecisionFilter: string
         cognitionReviewTextFilter: string
         ingestedPhis: PhiIntake list
+        phiContextEntries: PhiContextEntry list
         parsedPhis: PhiParse list
         excludedPhiIds: string list
         selectedPhiId: string option
@@ -51,11 +56,27 @@ type Model =
 let demoScenarios = DemoData.demoScenarios
 let defaultProjectName = "Untitled Project"
 let evidenceCaptureKinds = [ "Manual note"; "Screenshot placeholder"; "File reference"; "External observation" ]
-let evidenceTargetKinds = [ "Phi"; "Function"; "Mode"; "Interface"; "State"; "Host" ]
+let evidenceTargetKinds = [ "Phi"; "Function"; "Mode"; "Interface"; "State"; "Host"; "Constraint" ]
 let defaultEvidenceCaptureKind = "Manual note"
 let defaultEvidenceTargetKind = "Phi"
 let defaultCognitionReviewTargetFilter = "All"
 let defaultCognitionReviewDecisionFilter = "All"
+let phiContextEntryKinds =
+    [
+        "HostHint"
+        "InterfaceHint"
+        "ModeHint"
+        "StateHint"
+        "ConstraintHint"
+        "Assumption"
+        "Concern"
+        "RiskHint"
+        "AllocationHint"
+        "EvidenceRef"
+        "Tag"
+    ]
+
+let defaultPhiContextEntryKind = "HostHint"
 
 let buildProjectSnapshot (model: Model) =
     {
@@ -63,6 +84,7 @@ let buildProjectSnapshot (model: Model) =
         SavedAtUtc = getUtcTimestampString ()
         ProjectName = model.projectName
         PhiIntakes = model.ingestedPhis
+        PhiContextEntries = model.phiContextEntries
         ParsedPhis = model.parsedPhis
         ExcludedPhiIds = model.excludedPhiIds
         CandidateDecisions = model.candidateDecisions
@@ -79,6 +101,7 @@ let restoreProjectSnapshot (snapshot: ProjectSnapshot) (model: Model) =
                 else
                     snapshot.ProjectName
             ingestedPhis = snapshot.PhiIntakes
+            phiContextEntries = snapshot.PhiContextEntries
             parsedPhis = snapshot.ParsedPhis
             excludedPhiIds = snapshot.ExcludedPhiIds
             selectedPhiId = None
@@ -99,6 +122,10 @@ let restoreProjectSnapshot (snapshot: ProjectSnapshot) (model: Model) =
             evidenceNotes = ""
             evidenceContentRef = ""
             evidenceStatus = None
+            phiContextSnipDraft = ""
+            existingPhiContextTargetId = ""
+            phiContextEntryDraftKind = defaultPhiContextEntryKind
+            phiContextEntryDraftValue = ""
     }
 
 let tryFindScenario scenarioId =
@@ -137,11 +164,16 @@ let initModel =
         phiDraftSource = ""
         phiDraftQuickTags = ""
         phiDraftConfidence = "Medium"
+        phiContextSnipDraft = ""
+        existingPhiContextTargetId = ""
+        phiContextEntryDraftKind = defaultPhiContextEntryKind
+        phiContextEntryDraftValue = ""
         phiBatchParseStatus = None
         cognitionReviewTargetFilter = defaultCognitionReviewTargetFilter
         cognitionReviewDecisionFilter = defaultCognitionReviewDecisionFilter
         cognitionReviewTextFilter = ""
         ingestedPhis = []
+        phiContextEntries = []
         parsedPhis = []
         excludedPhiIds = []
         selectedPhiId = None
@@ -174,11 +206,16 @@ let clearProjectModel (model: Model) =
             phiDraftSource = ""
             phiDraftQuickTags = ""
             phiDraftConfidence = "Medium"
+            phiContextSnipDraft = ""
+            existingPhiContextTargetId = ""
+            phiContextEntryDraftKind = defaultPhiContextEntryKind
+            phiContextEntryDraftValue = ""
             phiBatchParseStatus = None
             cognitionReviewTargetFilter = defaultCognitionReviewTargetFilter
             cognitionReviewDecisionFilter = defaultCognitionReviewDecisionFilter
             cognitionReviewTextFilter = ""
             ingestedPhis = []
+            phiContextEntries = []
             parsedPhis = []
             excludedPhiIds = []
             selectedPhiId = None
@@ -205,6 +242,7 @@ let buildSphynxSampleSnapshot () =
         SavedAtUtc = getUtcTimestampString ()
         ProjectName = "Sphynx Sample Project"
         PhiIntakes = DemoData.demoPhiIntakes
+        PhiContextEntries = []
         ParsedPhis = []
         ExcludedPhiIds = []
         CandidateDecisions = []
@@ -224,6 +262,11 @@ type Message =
     | SetPhiDraftSource of string
     | SetPhiDraftQuickTags of string
     | SetPhiDraftConfidence of string
+    | SetPhiContextSnipDraft of string
+    | SetExistingPhiContextTargetId of string
+    | SetPhiContextEntryDraftKind of string
+    | SetPhiContextEntryDraftValue of string
+    | AddContextEntryToExistingPhi
     | IngestPhiDraft
     | ParseIngestedPhi of string
     | ParseAllIncludedPhi

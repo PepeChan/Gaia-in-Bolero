@@ -7,7 +7,7 @@ open Gaia.Client.Types
 open Gaia.Client.Ledger
 open Gaia.Client.AppState
 
-let upsertParsedPhi parse parsedPhis =
+let upsertParsedPhi (parse: PhiParse) (parsedPhis: PhiParse list) =
     if parsedPhis |> List.exists (fun parsedPhi -> parsedPhi.PhiId = parse.PhiId) then
         parsedPhis
         |> List.map (fun parsedPhi ->
@@ -22,16 +22,267 @@ let isPhiExcluded excludedPhiIds phiId =
     excludedPhiIds
     |> List.contains phiId
 
-let getSequencedParsedPhis parsedPhis =
+let getSequencedParsedPhis (parsedPhis: PhiParse list) =
     parsedPhis
     |> List.mapi (fun index parse -> index + 1, parse)
 
-let getIncludedSequencedParsedPhis excludedPhiIds parsedPhis =
+let getIncludedSequencedParsedPhis excludedPhiIds (parsedPhis: PhiParse list) =
     parsedPhis
     |> getSequencedParsedPhis
     |> List.filter (fun (_, parse) -> not (isPhiExcluded excludedPhiIds parse.PhiId))
 
-let buildSigmaContextEntries getValue sequencedParsedPhis =
+let splitTags (value: string) =
+    if String.IsNullOrWhiteSpace(value) then
+        []
+    else
+        value.Split([| ','; ';'; '\n'; '\r' |], StringSplitOptions.RemoveEmptyEntries)
+        |> Array.map (fun tag -> tag.Trim())
+        |> Array.filter (fun tag -> tag <> "")
+        |> Array.toList
+
+let buildPhiContext phi phiContextEntries =
+    {
+        Phi = phi
+        ExistingTags = splitTags phi.TypeText
+        PhiContextEntries =
+            phiContextEntries
+            |> List.filter (fun entry -> entry.PhiId = phi.PhiId)
+    }
+
+let private normalizeContextKey (value: string) =
+    if String.IsNullOrWhiteSpace(value) then
+        ""
+    else
+        value.Trim().ToLowerInvariant().Replace(" ", "").Replace("-", "").Replace("_", "")
+
+let canonicalPhiContextKind (kind: string) =
+    match normalizeContextKey kind with
+    | "host"
+    | "hosthint" -> "HostHint"
+    | "interface"
+    | "interfacehint" -> "InterfaceHint"
+    | "mode"
+    | "modehint" -> "ModeHint"
+    | "state"
+    | "statehint" -> "StateHint"
+    | "constraint"
+    | "constrainthint" -> "ConstraintHint"
+    | "assumption" -> "Assumption"
+    | "concern" -> "Concern"
+    | "risk"
+    | "riskhint" -> "RiskHint"
+    | "allocation"
+    | "allocationhint" -> "AllocationHint"
+    | "evidence"
+    | "evidenceref" -> "EvidenceRef"
+    | "tag" -> "Tag"
+    | _ ->
+        if String.IsNullOrWhiteSpace(kind) then
+            "Tag"
+        else
+            kind.Trim()
+
+let createPhiContextId phiId (sequenceNumber: int) =
+    phiId + "-CTX-" + sequenceNumber.ToString("0000")
+
+let createPhiContextEntry contextId phiId kind value provenance =
+    {
+        ContextId = contextId
+        PhiId = phiId
+        Kind = canonicalPhiContextKind kind
+        Value = value
+        Provenance = provenance
+    }
+
+let parsePhiContextSnipLines phiId startingSequence provenance (snipText: string) =
+    if String.IsNullOrWhiteSpace(snipText) then
+        []
+    else
+        snipText.Split([| '\n'; '\r' |], StringSplitOptions.RemoveEmptyEntries)
+        |> Array.map (fun line -> line.Trim())
+        |> Array.filter (fun line -> line <> "")
+        |> Array.mapi (fun index line ->
+            let separatorIndex = line.IndexOf("=")
+
+            let kind, value =
+                if separatorIndex > 0 then
+                    line.Substring(0, separatorIndex).Trim(), line.Substring(separatorIndex + 1).Trim()
+                else
+                    "Tag", line.Trim()
+
+            createPhiContextEntry (createPhiContextId phiId (startingSequence + index)) phiId kind value provenance)
+        |> Array.filter (fun entry -> not (String.IsNullOrWhiteSpace(entry.Value)))
+        |> Array.toList
+
+let createNextPhiContextEntry phiId kind value provenance existingEntries =
+    let nextSequence =
+        existingEntries
+        |> List.filter (fun entry -> entry.PhiId = phiId)
+        |> List.length
+        |> (+) 1
+
+    createPhiContextEntry (createPhiContextId phiId nextSequence) phiId kind value provenance
+
+let formatPhiContextEntryLedgerDetail (entry: PhiContextEntry) =
+    "PhiId: "
+    + entry.PhiId
+    + "; ContextId: "
+    + entry.ContextId
+    + "; Kind: "
+    + entry.Kind
+    + "; Value: "
+    + entry.Value
+    + "; Provenance: "
+    + entry.Provenance
+
+let appendPhiContextEntryLedgerEvent entry model =
+    model
+    |> appendLedgerEvent
+        "PhiContextEntryCreated"
+        entry.ContextId
+        "Phi context entry created"
+        (formatPhiContextEntryLedgerDetail entry)
+
+let appendPhiContextEntryLedgerEvents entries model =
+    entries
+    |> List.fold (fun workingModel entry -> appendPhiContextEntryLedgerEvent entry workingModel) model
+
+let tryFindContextEntryValue kind (phiContext: PhiContext) =
+    phiContext.PhiContextEntries
+    |> List.tryFind (fun entry -> canonicalPhiContextKind entry.Kind = kind && not (String.IsNullOrWhiteSpace(entry.Value)))
+    |> Option.map (fun entry -> entry.Value.Trim())
+
+let tryFindTagValue kind (phiContext: PhiContext) =
+    let normalizedKind = normalizeContextKey kind
+
+    phiContext.ExistingTags
+    |> List.tryPick (fun tag ->
+        let separatorIndex = tag.IndexOf("=")
+
+        if separatorIndex <= 0 then
+            None
+        else
+            let key = tag.Substring(0, separatorIndex) |> normalizeContextKey
+            let value = tag.Substring(separatorIndex + 1).Trim()
+
+            if key = normalizedKind && value <> "" then
+                Some value
+            else
+                None)
+
+let chooseContextAwareValue baseValue contextValue tagValue =
+    if not (String.IsNullOrWhiteSpace(baseValue)) then
+        let provenance =
+            if Option.isSome contextValue || Option.isSome tagValue then
+                "Combined"
+            else
+                "Text"
+
+        baseValue, provenance
+    else
+        match contextValue, tagValue with
+        | Some value, _ -> value, "ContextEntry"
+        | None, Some value -> value, "Tag"
+        | None, None -> "", "Text"
+
+let parsePhiContext (phiContext: PhiContext) =
+    let baseParse = Engine.parseIntake phiContext.Phi
+
+    let hostValue, hostProvenance =
+        chooseContextAwareValue
+            baseParse.Exposure.HostCandidate
+            (tryFindContextEntryValue "HostHint" phiContext)
+            (tryFindTagValue "host" phiContext)
+
+    let interfaceValue, interfaceProvenance =
+        chooseContextAwareValue
+            baseParse.Exposure.Interface
+            (tryFindContextEntryValue "InterfaceHint" phiContext)
+            (tryFindTagValue "interface" phiContext)
+
+    let modeValue, modeProvenance =
+        chooseContextAwareValue
+            baseParse.Exposure.Mode
+            (tryFindContextEntryValue "ModeHint" phiContext)
+            (tryFindTagValue "mode" phiContext)
+
+    let stateValue, stateProvenance =
+        chooseContextAwareValue
+            baseParse.Exposure.State
+            (tryFindContextEntryValue "StateHint" phiContext)
+            (tryFindTagValue "state" phiContext)
+
+    let hasConstraintContext =
+        phiContext.PhiContextEntries
+        |> List.exists (fun entry -> canonicalPhiContextKind entry.Kind = "ConstraintHint" && not (String.IsNullOrWhiteSpace(entry.Value)))
+
+    let provenanceSummary =
+        [
+            "Function=Text"
+            "Host=" + hostProvenance
+            "Interface=" + interfaceProvenance
+            "Mode=" + modeProvenance
+            "State=" + stateProvenance
+            if hasConstraintContext then
+                "Constraint=ContextEntry"
+        ]
+        |> String.concat "; "
+
+    { baseParse with
+        Exposure =
+            { baseParse.Exposure with
+                HostCandidate = hostValue
+                Interface = interfaceValue
+                Mode = modeValue
+                State = stateValue }
+        ExposureNotes =
+            baseParse.ExposureNotes
+            + " Context-aware T2 v1 parsed PhiContext. Candidate provenance: "
+            + provenanceSummary
+            + "."
+        DeltaConstrain = baseParse.DeltaConstrain || hasConstraintContext
+        ContextBounded = baseParse.ContextBounded || not (List.isEmpty phiContext.PhiContextEntries) || not (List.isEmpty phiContext.ExistingTags) }
+
+let private getExposureProvenance atomKind (parse: PhiParse) =
+    let marker = atomKind + "="
+    let notes = if isNull parse.ExposureNotes then "" else parse.ExposureNotes
+    let index = notes.IndexOf(marker, StringComparison.OrdinalIgnoreCase)
+
+    if index < 0 then
+        "Text"
+    else
+        let startIndex = index + marker.Length
+        let remaining = notes.Substring(startIndex)
+        let stopIndexes =
+            [ remaining.IndexOf(";"); remaining.IndexOf(".") ]
+            |> List.filter (fun stopIndex -> stopIndex >= 0)
+
+        let value =
+            match stopIndexes with
+            | [] -> remaining
+            | indexes -> remaining.Substring(0, List.min indexes)
+
+        let trimmed = value.Trim()
+
+        if trimmed = "" then
+            "Text"
+        else
+            trimmed
+
+let private combineProvenance values =
+    let distinct =
+        values
+        |> List.filter (fun value -> not (String.IsNullOrWhiteSpace(value)))
+        |> List.distinct
+
+    match distinct with
+    | [] -> "Text"
+    | [ value ] -> value
+    | values when values |> List.contains "Combined" -> "Combined"
+    | values when values |> List.contains "Text" && values.Length > 1 -> "Combined"
+    | _ -> String.concat ", " distinct
+
+let buildSigmaContextEntries atomKind (getValue: PhiParse -> string) (sequencedParsedPhis: (int * PhiParse) list) =
     sequencedParsedPhis
     |> List.choose (fun (parseSequenceNumber, parse) ->
         let value = getValue parse
@@ -47,6 +298,7 @@ let buildSigmaContextEntries getValue sequencedParsedPhis =
                     ParseSequenceNumber = parseSequenceNumber
                     SupportCount = 1
                     SupportingPhiIds = [ parse.PhiId ]
+                    Provenance = getExposureProvenance atomKind parse
                 })
     |> List.groupBy (fun entry -> entry.Value)
     |> List.map (fun (_, entries) ->
@@ -59,21 +311,67 @@ let buildSigmaContextEntries getValue sequencedParsedPhis =
 
         { firstEntry with
             SupportCount = List.length supportingPhiIds
-            SupportingPhiIds = supportingPhiIds })
+            SupportingPhiIds = supportingPhiIds
+            Provenance = entries |> List.map (fun entry -> entry.Provenance) |> combineProvenance })
 
-let buildSigmaContext sequencedParsedPhis =
+let buildSigmaContext (sequencedParsedPhis: (int * PhiParse) list) =
     {
-        Functions = buildSigmaContextEntries (fun parse -> parse.Exposure.Function) sequencedParsedPhis
-        Modes = buildSigmaContextEntries (fun parse -> parse.Exposure.Mode) sequencedParsedPhis
-        Interfaces = buildSigmaContextEntries (fun parse -> parse.Exposure.Interface) sequencedParsedPhis
-        States = buildSigmaContextEntries (fun parse -> parse.Exposure.State) sequencedParsedPhis
-        Hosts = buildSigmaContextEntries (fun parse -> parse.Exposure.HostCandidate) sequencedParsedPhis
+        Functions = buildSigmaContextEntries "Function" (fun parse -> parse.Exposure.Function) sequencedParsedPhis
+        Modes = buildSigmaContextEntries "Mode" (fun parse -> parse.Exposure.Mode) sequencedParsedPhis
+        Interfaces = buildSigmaContextEntries "Interface" (fun parse -> parse.Exposure.Interface) sequencedParsedPhis
+        States = buildSigmaContextEntries "State" (fun parse -> parse.Exposure.State) sequencedParsedPhis
+        Hosts = buildSigmaContextEntries "Host" (fun parse -> parse.Exposure.HostCandidate) sequencedParsedPhis
+        Constraints = []
     }
+
+let buildConstraintContextEntries (contextEntries: PhiContextEntry list) (sequencedParsedPhis: (int * PhiParse) list) =
+    let includedPhiIds =
+        sequencedParsedPhis
+        |> List.map (fun (_, parse) -> parse.PhiId)
+        |> Set.ofList
+
+    let parseByPhiId =
+        sequencedParsedPhis
+        |> List.map (fun (parseSequenceNumber, parse) -> parse.PhiId, (parseSequenceNumber, parse))
+        |> Map.ofList
+
+    contextEntries
+    |> List.choose (fun entry ->
+        if canonicalPhiContextKind entry.Kind <> "ConstraintHint" || String.IsNullOrWhiteSpace(entry.Value) || not (Set.contains entry.PhiId includedPhiIds) then
+            None
+        else
+            parseByPhiId
+            |> Map.tryFind entry.PhiId
+            |> Option.map (fun (parseSequenceNumber, parse) ->
+                {
+                    Value = entry.Value
+                    SourcePhiId = entry.PhiId
+                    SourcePhiStatement = parse.Statement
+                    ParseSequenceNumber = parseSequenceNumber
+                    SupportCount = 1
+                    SupportingPhiIds = [ entry.PhiId ]
+                    Provenance = "ContextEntry"
+                }))
+    |> List.groupBy (fun entry -> entry.Value)
+    |> List.map (fun (_, entries) ->
+        let firstEntry = entries |> List.head
+        let supportingPhiIds = entries |> List.map (fun entry -> entry.SourcePhiId) |> List.distinct
+
+        { firstEntry with
+            SupportCount = List.length supportingPhiIds
+            SupportingPhiIds = supportingPhiIds
+            Provenance = entries |> List.map (fun entry -> entry.Provenance) |> combineProvenance })
+
+let buildSigmaContextWithContextEntries (contextEntries: PhiContextEntry list) (sequencedParsedPhis: (int * PhiParse) list) =
+    let sigmaContext = buildSigmaContext sequencedParsedPhis
+
+    { sigmaContext with
+        Constraints = buildConstraintContextEntries contextEntries sequencedParsedPhis }
 
 let getCurrentSigmaContext (model: Model) =
     model.parsedPhis
     |> getIncludedSequencedParsedPhis model.excludedPhiIds
-    |> buildSigmaContext
+    |> buildSigmaContextWithContextEntries model.phiContextEntries
 
 let formatPhiEvidenceTarget (phi: PhiIntake) =
     if String.IsNullOrWhiteSpace(phi.RawStatement) then
@@ -113,6 +411,9 @@ let getEvidenceTargetOptionsForKind targetKind (model: Model) =
     | "Host" ->
         sigmaContext.Hosts
         |> List.map (fun entry -> entry.Value, formatSigmaEvidenceTarget "Host" entry)
+    | "Constraint" ->
+        sigmaContext.Constraints
+        |> List.map (fun entry -> entry.Value, formatSigmaEvidenceTarget "Constraint" entry)
     | _ ->
         []
 
@@ -135,6 +436,7 @@ let emptyDeltaSigmaAtomGroups =
         InterfaceAtoms = []
         StateAtoms = []
         HostAtoms = []
+        ConstraintAtoms = []
     }
 
 let getPhiAtomGroups (parse: PhiParse) =
@@ -150,9 +452,10 @@ let getPhiAtomGroups (parse: PhiParse) =
         InterfaceAtoms = asAtom parse.Exposure.Interface
         StateAtoms = asAtom parse.Exposure.State
         HostAtoms = asAtom parse.Exposure.HostCandidate
+        ConstraintAtoms = []
     }
 
-let getAddedAtomValues beforeEntries afterEntries =
+let getAddedAtomValues (beforeEntries: SigmaContextEntry list) (afterEntries: SigmaContextEntry list) =
     let beforeValues =
         beforeEntries
         |> List.map (fun entry -> entry.Value)
@@ -172,9 +475,10 @@ let buildDeltaSigmaAtomGroups (beforeSigma: SigmaContext) (afterSigma: SigmaCont
         InterfaceAtoms = getAddedAtomValues beforeSigma.Interfaces afterSigma.Interfaces
         StateAtoms = getAddedAtomValues beforeSigma.States afterSigma.States
         HostAtoms = getAddedAtomValues beforeSigma.Hosts afterSigma.Hosts
+        ConstraintAtoms = getAddedAtomValues beforeSigma.Constraints afterSigma.Constraints
     }
 
-let getAlreadyKnownAtomValues sourcePhiId beforeEntries atomValues =
+let getAlreadyKnownAtomValues sourcePhiId (beforeEntries: SigmaContextEntry list) atomValues =
     atomValues
     |> List.filter (fun atomValue ->
         beforeEntries
@@ -193,6 +497,7 @@ let buildAlreadyKnownAtomGroups sourcePhiId (beforeSigma: SigmaContext) (parse: 
         InterfaceAtoms = getAlreadyKnownAtomValues sourcePhiId beforeSigma.Interfaces parseAtoms.InterfaceAtoms
         StateAtoms = getAlreadyKnownAtomValues sourcePhiId beforeSigma.States parseAtoms.StateAtoms
         HostAtoms = getAlreadyKnownAtomValues sourcePhiId beforeSigma.Hosts parseAtoms.HostAtoms
+        ConstraintAtoms = []
     }
 
 let hasDeltaSigmaAtomChanges atomGroups =
@@ -202,6 +507,7 @@ let hasDeltaSigmaAtomChanges atomGroups =
         atomGroups.InterfaceAtoms
         atomGroups.StateAtoms
         atomGroups.HostAtoms
+        atomGroups.ConstraintAtoms
     ]
     |> List.exists (fun atoms -> not (List.isEmpty atoms))
 
@@ -221,7 +527,7 @@ let createDeltaSigmaAnalysis action reason sourcePhiId sourceStatement alreadyKn
         AlreadyKnownAtoms = alreadyKnownAtoms
     }
 
-let buildReplayDeltaSigmaAnalysis phiId wasExcluded beforeSigma afterSigma parsedPhis =
+let buildReplayDeltaSigmaAnalysis phiId wasExcluded beforeSigma afterSigma (parsedPhis: PhiParse list) =
     let sourceStatement =
         parsedPhis
         |> List.tryFind (fun parse -> parse.PhiId = phiId)
@@ -256,6 +562,8 @@ let candidateDeltaKindKey = function
     | AddInterface -> "AddInterface"
     | AddState -> "AddState"
     | AddMode -> "AddMode"
+    | AddHost -> "AddHost"
+    | AddConstraint -> "AddConstraint"
     | ReinforcedSigmaAtom -> "ReinforcedSigmaAtom"
     | NoStructuralChange -> "NoStructuralChange"
 
@@ -264,13 +572,15 @@ let formatCandidateDeltaKind = function
     | AddInterface -> "ADD INTERFACE"
     | AddState -> "ADD STATE"
     | AddMode -> "ADD MODE"
+    | AddHost -> "ADD HOST"
+    | AddConstraint -> "ADD CONSTRAINT"
     | ReinforcedSigmaAtom -> "REINFORCED SIGMA ATOM"
     | NoStructuralChange -> "NO STRUCTURAL CHANGE"
 
 let createCandidateId kind target =
     candidateDeltaKindKey kind + "::" + target
 
-let createCandidateDelta kind target proposedTransition reason relevantSigmaBasis =
+let createCandidateDelta kind target proposedTransition reason relevantSigmaBasis provenance =
     {
         CandidateId = createCandidateId kind target
         Kind = kind
@@ -278,6 +588,7 @@ let createCandidateDelta kind target proposedTransition reason relevantSigmaBasi
         ProposedTransition = proposedTransition
         Reason = reason
         RelevantSigmaBasis = relevantSigmaBasis
+        Provenance = provenance
         Confidence = "Medium"
         Status = "Candidate only; not promoted"
     }
@@ -290,11 +601,18 @@ let formatSigmaBasis atomKind (entry: SigmaContextEntry) =
     + string entry.SupportCount
     + "; Φ "
     + String.concat ", " entry.SupportingPhiIds
-    + ")"
+    + ") ["
+    + entry.Provenance
+    + "]"
 
 let formatSigmaBasisGroup atomKind entries =
     entries
     |> List.map (formatSigmaBasis atomKind)
+
+let summarizeEntryProvenance entries =
+    entries
+    |> List.map (fun (entry: SigmaContextEntry) -> entry.Provenance)
+    |> combineProvenance
 
 let buildReinforcedCandidateDeltas atomKind entries =
     entries
@@ -305,7 +623,8 @@ let buildReinforcedCandidateDeltas atomKind entries =
             atomKind
             ("Recognize reinforced " + atomKind + " atom in the current Σ basis.")
             "Multiple Phi support the same reasoning atom."
-            [ formatSigmaBasis atomKind entry ])
+            [ formatSigmaBasis atomKind entry ]
+            entry.Provenance)
 
 let formulateCandidateDeltas (sigmaContext: SigmaContext) =
     let candidates =
@@ -318,6 +637,7 @@ let formulateCandidateDeltas (sigmaContext: SigmaContext) =
                         "Add an unknown Host placeholder or reveal the missing Host candidate."
                         "Functions are known but no host candidate has been identified."
                         (formatSigmaBasisGroup "Function" sigmaContext.Functions)
+                        (summarizeEntryProvenance sigmaContext.Functions)
 
             if not (List.isEmpty sigmaContext.Interfaces) then
                 yield
@@ -327,6 +647,7 @@ let formulateCandidateDeltas (sigmaContext: SigmaContext) =
                         "Add exposed Interface atoms as candidate Σ structure."
                         "Interface-relevant atoms were exposed by parsed Phi."
                         (formatSigmaBasisGroup "Interface" sigmaContext.Interfaces)
+                        (summarizeEntryProvenance sigmaContext.Interfaces)
 
             if not (List.isEmpty sigmaContext.States) then
                 yield
@@ -336,6 +657,7 @@ let formulateCandidateDeltas (sigmaContext: SigmaContext) =
                         "Add exposed State atoms as candidate Σ structure."
                         "State-relevant atoms were exposed by parsed Phi."
                         (formatSigmaBasisGroup "State" sigmaContext.States)
+                        (summarizeEntryProvenance sigmaContext.States)
 
             if not (List.isEmpty sigmaContext.Modes) then
                 yield
@@ -345,6 +667,27 @@ let formulateCandidateDeltas (sigmaContext: SigmaContext) =
                         "Add exposed Mode atoms as candidate Σ structure."
                         "Mode-relevant atoms were exposed by parsed Phi."
                         (formatSigmaBasisGroup "Mode" sigmaContext.Modes)
+                        (summarizeEntryProvenance sigmaContext.Modes)
+
+            if not (List.isEmpty sigmaContext.Hosts) then
+                yield
+                    createCandidateDelta
+                        AddHost
+                        "Host"
+                        "Add exposed Host atoms as candidate Σ structure."
+                        "Host-relevant atoms were exposed by parsed Phi or attached Phi Context."
+                        (formatSigmaBasisGroup "Host" sigmaContext.Hosts)
+                        (summarizeEntryProvenance sigmaContext.Hosts)
+
+            if not (List.isEmpty sigmaContext.Constraints) then
+                yield
+                    createCandidateDelta
+                        AddConstraint
+                        "Constraint"
+                        "Add exposed Constraint atoms as candidate Σ structure."
+                        "Constraint-relevant context entries were attached to parsed Phi."
+                        (formatSigmaBasisGroup "Constraint" sigmaContext.Constraints)
+                        (summarizeEntryProvenance sigmaContext.Constraints)
 
             yield! buildReinforcedCandidateDeltas "Function" sigmaContext.Functions
             yield! buildReinforcedCandidateDeltas "Mode" sigmaContext.Modes
@@ -361,6 +704,7 @@ let formulateCandidateDeltas (sigmaContext: SigmaContext) =
                 "Keep current Σ unchanged."
                 "No actionable candidate Delta Sigma transition was detected."
                 [ "No included Sigma atom produced a T4 structural candidate." ]
+                "Text"
         ]
     else
         candidates
@@ -368,7 +712,7 @@ let formulateCandidateDeltas (sigmaContext: SigmaContext) =
 let getCurrentCandidateDeltas (model: Model) =
     model.parsedPhis
     |> getIncludedSequencedParsedPhis model.excludedPhiIds
-    |> buildSigmaContext
+    |> buildSigmaContextWithContextEntries model.phiContextEntries
     |> formulateCandidateDeltas
 
 let getCandidateDecisionRationale = function
@@ -637,16 +981,17 @@ let parsePhiIntoModel (phi: PhiIntake) (model: Model) =
     let beforeSigma =
         model.parsedPhis
         |> getIncludedSequencedParsedPhis model.excludedPhiIds
-        |> buildSigmaContext
+        |> buildSigmaContextWithContextEntries model.phiContextEntries
 
-    let parse = Engine.parseIntake phi
+    let phiContext = buildPhiContext phi model.phiContextEntries
+    let parse = parsePhiContext phiContext
     let resolution = Engine.resolveParse DemoData.demoSigma parse
     let parsedPhis = upsertParsedPhi parse model.parsedPhis
 
     let afterSigma =
         parsedPhis
         |> getIncludedSequencedParsedPhis model.excludedPhiIds
-        |> buildSigmaContext
+        |> buildSigmaContextWithContextEntries model.phiContextEntries
 
     let alreadyKnownAtoms =
         buildAlreadyKnownAtomGroups parse.PhiId beforeSigma parse

@@ -283,6 +283,46 @@ let update (jsRuntime: IJSRuntime) message model =
     | SetPhiDraftConfidence value ->
         { model with phiDraftConfidence = value }, Cmd.none
 
+    | SetPhiContextSnipDraft value ->
+        { model with phiContextSnipDraft = value }, Cmd.none
+
+    | SetExistingPhiContextTargetId value ->
+        { model with existingPhiContextTargetId = value }, Cmd.none
+
+    | SetPhiContextEntryDraftKind value ->
+        { model with phiContextEntryDraftKind = value }, Cmd.none
+
+    | SetPhiContextEntryDraftValue value ->
+        { model with phiContextEntryDraftValue = value }, Cmd.none
+
+    | AddContextEntryToExistingPhi ->
+        let phiId = model.existingPhiContextTargetId
+        let value = model.phiContextEntryDraftValue.Trim()
+
+        if String.IsNullOrWhiteSpace(phiId) || String.IsNullOrWhiteSpace(value) then
+            model, Cmd.none
+        else
+            let entry =
+                createNextPhiContextEntry phiId model.phiContextEntryDraftKind value "Manual" model.phiContextEntries
+
+            let contextModel =
+                { model with
+                    phiContextEntries = model.phiContextEntries @ [ entry ]
+                    phiContextEntryDraftValue = "" }
+
+            let refreshedModel =
+                if model.parsedPhis |> List.exists (fun parse -> parse.PhiId = phiId) then
+                    model.ingestedPhis
+                    |> List.tryFind (fun phi -> phi.PhiId = phiId)
+                    |> Option.map (fun phi -> parsePhiIntoModel phi contextModel |> fst)
+                    |> Option.defaultValue contextModel
+                else
+                    contextModel
+
+            refreshedModel
+            |> appendPhiContextEntryLedgerEvent entry
+            |> fun updatedModel -> updatedModel, Cmd.none
+
     | ParseIngestedPhi phiId ->
         match model.ingestedPhis |> List.tryFind (fun phi -> phi.PhiId = phiId) with
         | Some phi ->
@@ -324,7 +364,7 @@ let update (jsRuntime: IJSRuntime) message model =
         let beforeSigma =
             model.parsedPhis
             |> getIncludedSequencedParsedPhis model.excludedPhiIds
-            |> buildSigmaContext
+            |> buildSigmaContextWithContextEntries model.phiContextEntries
 
         let wasExcluded = model.excludedPhiIds |> List.contains phiId
 
@@ -338,7 +378,7 @@ let update (jsRuntime: IJSRuntime) message model =
         let afterSigma =
             model.parsedPhis
             |> getIncludedSequencedParsedPhis excludedPhiIds
-            |> buildSigmaContext
+            |> buildSigmaContextWithContextEntries model.phiContextEntries
 
         let lastReplayAction =
             buildReplayDeltaSigmaAnalysis phiId wasExcluded beforeSigma afterSigma model.parsedPhis
@@ -413,10 +453,13 @@ let update (jsRuntime: IJSRuntime) message model =
 
     | IngestPhiDraft ->
         let timestamp = DateTime.UtcNow
+        let phiId = "PHI-" + timestamp.ToString("yyyyMMdd-HHmmss")
+        let contextEntries =
+            parsePhiContextSnipLines phiId 1 "OneSecSnip" model.phiContextSnipDraft
 
         let intake =
             {
-                PhiId = "PHI-" + timestamp.ToString("yyyyMMdd-HHmmss")
+                PhiId = phiId
                 Date = timestamp.ToString("yyyy-MM-dd")
                 Source = model.phiDraftSource
                 Context = model.phiDraftTriggerContext
@@ -428,7 +471,7 @@ let update (jsRuntime: IJSRuntime) message model =
                 About = ""
                 Condition = ""
                 Assumption = ""
-                TypeText = ""
+                TypeText = model.phiDraftQuickTags
                 Impact = ""
                 UnresolvedSignal = ""
             }
@@ -440,7 +483,10 @@ let update (jsRuntime: IJSRuntime) message model =
             phiDraftSource = ""
             phiDraftQuickTags = ""
             phiDraftConfidence = "Medium"
+            phiContextSnipDraft = ""
+            phiContextEntries = model.phiContextEntries @ contextEntries
             phiBatchParseStatus = None }
         |> appendLedgerEvent "PhiIngested" intake.PhiId "Phi ingested" intake.RawStatement
+        |> appendPhiContextEntryLedgerEvents contextEntries
         |> fun updatedModel -> updatedModel, Cmd.none
 

@@ -31,6 +31,7 @@ let getSigmaSummaryRows (sigmaContext: SigmaContext) =
         "Interfaces", sigmaContext.Interfaces
         "States", sigmaContext.States
         "Hosts", sigmaContext.Hosts
+        "Constraints", sigmaContext.Constraints
     ]
 
 let hasExposureValue value =
@@ -151,6 +152,7 @@ let countDeltaSigmaAtoms (atomGroups: DeltaSigmaAtomGroups) =
         atomGroups.InterfaceAtoms
         atomGroups.StateAtoms
         atomGroups.HostAtoms
+        atomGroups.ConstraintAtoms
     ]
     |> List.sumBy (fun atoms -> List.length atoms)
 
@@ -324,6 +326,7 @@ let renderT4CandidateSummaryTable sigmaContext =
                         th { text "Candidate type" }
                         th { text "Target" }
                         th { text "Basis count" }
+                        th { text "Provenance" }
                         th { text "Status" }
                     }
                 }
@@ -334,6 +337,7 @@ let renderT4CandidateSummaryTable sigmaContext =
                             td { text (formatCandidateDeltaKind candidate.Kind) }
                             td { text candidate.Target }
                             td { text (string (List.length candidate.RelevantSigmaBasis)) }
+                            td { text candidate.Provenance }
                             td { text "Candidate only" }
                         }
                 }

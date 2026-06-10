@@ -78,7 +78,7 @@ let renderMatchedGroup title names =
             }
     }
 
-let renderKnownContextGroup title entries =
+let renderKnownContextGroup title (entries: SigmaContextEntry list) =
     div {
         attr.``class`` "box"
         h3 {
@@ -110,6 +110,10 @@ let renderKnownContextGroup title entries =
                         p {
                             attr.``class`` "is-size-7 has-text-grey"
                             text ("Parse sequence number: " + string entry.ParseSequenceNumber)
+                        }
+                        p {
+                            attr.``class`` "is-size-7 has-text-grey"
+                            text ("Provenance: " + entry.Provenance)
                         }
                     }
             }
@@ -267,6 +271,7 @@ let renderDeltaSigmaAtomColumn title (atomGroups: DeltaSigmaAtomGroups) =
         renderDeltaSigmaAtomGroup "Interfaces" atomGroups.InterfaceAtoms
         renderDeltaSigmaAtomGroup "States" atomGroups.StateAtoms
         renderDeltaSigmaAtomGroup "Hosts" atomGroups.HostAtoms
+        renderDeltaSigmaAtomGroup "Constraints" atomGroups.ConstraintAtoms
     }
 
 let renderDeltaSigmaAnalysisPanel (lastReplayAction: DeltaSigmaAnalysis option) =
@@ -480,6 +485,11 @@ let renderRelevantSigmaContextPanel sequencedParsedPhis selectedPhiParse selecte
                 div {
                     attr.``class`` "column is-6"
                     renderKnownContextGroup "Known Hosts" sigmaContext.Hosts
+                }
+
+                div {
+                    attr.``class`` "column is-6"
+                    renderKnownContextGroup "Known Constraints" sigmaContext.Constraints
                 }
             }
 

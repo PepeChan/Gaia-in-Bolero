@@ -143,6 +143,17 @@ let renderCandidateDeltaCard (candidate: CandidateDelta) (candidateDecisions: Ca
                 }
 
                 div {
+                    attr.``class`` "column is-6"
+                    p {
+                        strong { text "Candidate provenance: " }
+                        span {
+                            attr.``class`` "tag is-info is-light"
+                            text candidate.Provenance
+                        }
+                    }
+                }
+
+                div {
                     attr.``class`` "column is-12"
                     p {
                         strong { text "Proposed transition: " }

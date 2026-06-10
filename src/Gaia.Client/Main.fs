@@ -28,12 +28,6 @@ let router = Router.infer SetPage (fun model -> model.page)
 
 type Main = Template<"wwwroot/main.html">
 
-
-
-
-
-
-
 let renderPersistenceTab (model: Model) dispatch =
     div {
         attr.``class`` "mb-6 pb-5"
@@ -296,7 +290,7 @@ let homePage model dispatch =
         let matchedTfNames = mapIdsToNames (fun (tf: TF) -> tf.Id) (fun tf -> tf.Name) DemoData.demoSigma.TFs resolution.MatchedTFs
         let matchedCtqNames = mapIdsToNames (fun (ctq: CTQ) -> ctq.Id) (fun ctq -> ctq.Name) DemoData.demoSigma.CTQs resolution.MatchedCTQs
         let includedSequencedParsedPhis = getIncludedSequencedParsedPhis model.excludedPhiIds model.parsedPhis
-        let currentSigmaContext = buildSigmaContext includedSequencedParsedPhis
+        let currentSigmaContext = buildSigmaContextWithContextEntries model.phiContextEntries includedSequencedParsedPhis
 
         div {
             attr.``class`` "content"
@@ -449,6 +443,26 @@ let homePage model dispatch =
                                 attr.``class`` "field"
                                 label {
                                     attr.``class`` "label"
+                                    text "Context entries / 1-second snip"
+                                }
+                                div {
+                                    attr.``class`` "control"
+                                    textarea {
+                                        attr.``class`` "textarea"
+                                        attr.placeholder "host=Tablet Module\ninterface=Display ↔ Base\nmode=Standby\nconstraint=Max 45 C\nassumption=Passive Cooling\nevidence=Test Report 17"
+                                        bind.input.string model.phiContextSnipDraft (fun v -> dispatch (SetPhiContextSnipDraft v))
+                                    }
+                                }
+                                p {
+                                    attr.``class`` "help"
+                                    text "Entries are stored as Phi context, with Provenance=OneSecSnip. Raw Phi text remains unchanged."
+                                }
+                            }
+
+                            div {
+                                attr.``class`` "field"
+                                label {
+                                    attr.``class`` "label"
                                     text "Confidence"
                                 }
                                 div {
@@ -518,6 +532,21 @@ let homePage model dispatch =
                                                 attr.``class`` "is-size-7 has-text-grey"
                                                 text ("Source: " + phi.Source + " | Confidence: " + phi.Confidence)
                                             }
+                                            let contextEntries =
+                                                model.phiContextEntries
+                                                |> List.filter (fun entry -> entry.PhiId = phi.PhiId)
+
+                                            match contextEntries with
+                                            | [] -> empty()
+                                            | entries ->
+                                                div {
+                                                    attr.``class`` "tags mb-2"
+                                                    forEach entries <| fun entry ->
+                                                        span {
+                                                            attr.``class`` "tag is-info is-light"
+                                                            text (entry.Kind + ": " + entry.Value)
+                                                        }
+                                                }
                                             button {
                                                 attr.``class`` "button is-small is-link is-light"
                                                 attr.``type`` "button"
@@ -525,6 +554,82 @@ let homePage model dispatch =
                                                 text "Parse Φ"
                                             }
                                         }
+                                }
+
+                            if not (List.isEmpty model.ingestedPhis) then
+                                hr {}
+
+                                h3 {
+                                    attr.``class`` "title is-6"
+                                    text "Add Context Entry"
+                                }
+
+                                div {
+                                    attr.``class`` "field"
+                                    label {
+                                        attr.``class`` "label is-size-7"
+                                        text "Existing Φ"
+                                    }
+                                    div {
+                                        attr.``class`` "control"
+                                        div {
+                                            attr.``class`` "select is-fullwidth is-small"
+                                            select {
+                                                bind.input.string model.existingPhiContextTargetId (fun v -> dispatch (SetExistingPhiContextTargetId v))
+                                                option {
+                                                    attr.value ""
+                                                    text "Select Φ"
+                                                }
+                                                forEach model.ingestedPhis <| fun phi ->
+                                                    option {
+                                                        attr.value phi.PhiId
+                                                        text phi.PhiId
+                                                    }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                div {
+                                    attr.``class`` "field"
+                                    label {
+                                        attr.``class`` "label is-size-7"
+                                        text "Kind"
+                                    }
+                                    div {
+                                        attr.``class`` "control"
+                                        div {
+                                            attr.``class`` "select is-fullwidth is-small"
+                                            select {
+                                                bind.input.string model.phiContextEntryDraftKind (fun v -> dispatch (SetPhiContextEntryDraftKind v))
+                                                forEach phiContextEntryKinds <| fun kind ->
+                                                    option { text kind }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                div {
+                                    attr.``class`` "field"
+                                    label {
+                                        attr.``class`` "label is-size-7"
+                                        text "Value"
+                                    }
+                                    div {
+                                        attr.``class`` "control"
+                                        input {
+                                            attr.``class`` "input is-small"
+                                            attr.placeholder "Tablet Module, Display ↔ Base, Max 45 C..."
+                                            bind.input.string model.phiContextEntryDraftValue (fun v -> dispatch (SetPhiContextEntryDraftValue v))
+                                        }
+                                    }
+                                }
+
+                                button {
+                                    attr.``class`` "button is-small is-info is-light is-fullwidth"
+                                    attr.``type`` "button"
+                                    on.click (fun _ -> dispatch AddContextEntryToExistingPhi)
+                                    text "Add Context Entry"
                                 }
                         }
                     }

@@ -130,6 +130,15 @@ let phiParseToJson (parse: PhiParse) =
         | None -> null
     json
 
+let phiContextEntryToJson (entry: PhiContextEntry) =
+    let json = JsonObject()
+    json["ContextId"] <- JsonValue.Create(entry.ContextId)
+    json["PhiId"] <- JsonValue.Create(entry.PhiId)
+    json["Kind"] <- JsonValue.Create(entry.Kind)
+    json["Value"] <- JsonValue.Create(entry.Value)
+    json["Provenance"] <- JsonValue.Create(entry.Provenance)
+    json
+
 let candidateDecisionToJson (decision: CandidateDecision) =
     let json = JsonObject()
     json["CandidateId"] <- JsonValue.Create(decision.CandidateId)
@@ -180,6 +189,7 @@ let projectSnapshotToJson (snapshot: ProjectSnapshot) =
     json["SavedAtUtc"] <- JsonValue.Create(snapshot.SavedAtUtc)
     json["ProjectName"] <- JsonValue.Create(snapshot.ProjectName)
     json["PhiIntakes"] <- jsonArrayFrom snapshot.PhiIntakes phiIntakeToJson
+    json["PhiContextEntries"] <- jsonArrayFrom snapshot.PhiContextEntries phiContextEntryToJson
     json["ParsedPhis"] <- jsonArrayFrom snapshot.ParsedPhis phiParseToJson
     json["ExcludedPhiIds"] <- jsonStringArray snapshot.ExcludedPhiIds
     json["CandidateDecisions"] <- jsonArrayFrom snapshot.CandidateDecisions candidateDecisionToJson
@@ -379,6 +389,15 @@ let readPhiParse context (json: JsonObject) =
         DerivationEntry = readOptionalDerivationEntry context "DerivationEntry" json
     }
 
+let readPhiContextEntry context (json: JsonObject) =
+    {
+        ContextId = readString context "ContextId" json
+        PhiId = readString context "PhiId" json
+        Kind = readString context "Kind" json
+        Value = readString context "Value" json
+        Provenance = readString context "Provenance" json
+    }
+
 let readCandidateDecision context (json: JsonObject) =
     {
         CandidateId = readString context "CandidateId" json
@@ -430,6 +449,7 @@ let tryDeserializeProjectSnapshot json =
                 SavedAtUtc = readString "ProjectSnapshot" "SavedAtUtc" root
                 ProjectName = readString "ProjectSnapshot" "ProjectName" root
                 PhiIntakes = readObjectList "ProjectSnapshot" "PhiIntakes" readPhiIntake root
+                PhiContextEntries = readOptionalObjectList "ProjectSnapshot" "PhiContextEntries" readPhiContextEntry root
                 ParsedPhis = readObjectList "ProjectSnapshot" "ParsedPhis" readPhiParse root
                 ExcludedPhiIds = readStringList "ProjectSnapshot" "ExcludedPhiIds" root
                 CandidateDecisions = readObjectList "ProjectSnapshot" "CandidateDecisions" readCandidateDecision root

@@ -24,6 +24,7 @@ type SigmaContextEntry =
         ParseSequenceNumber: int
         SupportCount: int
         SupportingPhiIds: string list
+        Provenance: string
     }
 
 type SigmaContext =
@@ -33,6 +34,7 @@ type SigmaContext =
         Interfaces: SigmaContextEntry list
         States: SigmaContextEntry list
         Hosts: SigmaContextEntry list
+        Constraints: SigmaContextEntry list
     }
 
 type DeltaSigmaAtomGroups =
@@ -42,6 +44,7 @@ type DeltaSigmaAtomGroups =
         InterfaceAtoms: string list
         StateAtoms: string list
         HostAtoms: string list
+        ConstraintAtoms: string list
     }
 
 type DeltaSigmaAnalysis =
@@ -60,6 +63,8 @@ type CandidateDeltaKind =
     | AddInterface
     | AddState
     | AddMode
+    | AddHost
+    | AddConstraint
     | ReinforcedSigmaAtom
     | NoStructuralChange
 
@@ -87,8 +92,25 @@ type CandidateDelta =
         ProposedTransition: string
         Reason: string
         RelevantSigmaBasis: string list
+        Provenance: string
         Confidence: string
         Status: string
+    }
+
+type PhiContextEntry =
+    {
+        ContextId: string
+        PhiId: string
+        Kind: string
+        Value: string
+        Provenance: string
+    }
+
+type PhiContext =
+    {
+        Phi: PhiIntake
+        ExistingTags: string list
+        PhiContextEntries: PhiContextEntry list
     }
 
 type LedgerEvent =
@@ -134,6 +156,7 @@ type ProjectSnapshot =
         SavedAtUtc: string
         ProjectName: string
         PhiIntakes: PhiIntake list
+        PhiContextEntries: PhiContextEntry list
         ParsedPhis: PhiParse list
         ExcludedPhiIds: string list
         CandidateDecisions: CandidateDecision list

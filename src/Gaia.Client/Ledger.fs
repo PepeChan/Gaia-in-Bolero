@@ -27,6 +27,7 @@ let isPhiLedgerEvent eventKind =
     eventKind = "PhiIngested"
     || eventKind = "PhiParsed"
     || eventKind = "PhiParseIgnoredAlreadyParsed"
+    || eventKind = "PhiContextEntryCreated"
 
 let isReplayLedgerEvent eventKind =
     eventKind = "PhiExcludedFromReplay"
