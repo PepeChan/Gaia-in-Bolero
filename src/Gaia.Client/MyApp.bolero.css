@@ -15,3 +15,65 @@
   margin-right: auto;
   margin-bottom: 5px;
 }
+
+.cognition-review-card > .card-content {
+  max-height: 72vh;
+  overflow-y: auto;
+}
+
+.cognition-review-section {
+  border-top: 1px solid #dbdbdb;
+  margin-top: 1rem;
+  padding-top: 1rem;
+}
+
+.cognition-review-helper {
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+}
+
+.sigma-basis-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.sigma-basis-item {
+  background: #fff;
+  border: 1px solid #dbdbdb;
+  border-radius: 6px;
+  padding: 1rem;
+}
+
+.sigma-basis-atom {
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.sigma-basis-detail-block {
+  border-top: 1px solid #f0f0f0;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+}
+
+.sigma-basis-phi-tags {
+  gap: 0.35rem;
+}
+
+.sigma-basis-phi-tag {
+  font-size: 0.875rem;
+  height: auto;
+  line-height: 1.25;
+  max-width: 100%;
+  padding-bottom: 0.35rem;
+  padding-top: 0.35rem;
+  white-space: normal;
+}
+
+.sigma-basis-preview {
+  color: #4a4a4a;
+}
+
+.sigma-basis-preview p:last-child {
+  overflow-wrap: anywhere;
+}

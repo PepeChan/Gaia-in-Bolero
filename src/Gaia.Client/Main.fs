@@ -43,6 +43,7 @@ type Model =
         selectedPhiResolution: ResolutionView option
         lastReplayAction: DeltaSigmaAnalysis option
         candidateDecisions: CandidateDecision list
+        sigmaBasisItemDecisions: Map<string, CandidateDecisionValue>
         LedgerEvents: LedgerEvent list
         ReplayPreviewSequence: int option
         evidenceRecords: EvidenceRecord list
@@ -97,6 +98,7 @@ let restoreProjectSnapshot (snapshot: ProjectSnapshot) (model: Model) =
             cognitionReviewDecisionFilter = defaultCognitionReviewDecisionFilter
             cognitionReviewTextFilter = ""
             candidateDecisions = snapshot.CandidateDecisions
+            sigmaBasisItemDecisions = Map.empty
             LedgerEvents = snapshot.LedgerEvents
             ReplayPreviewSequence = None
             evidenceRecords = snapshot.EvidenceRecords
@@ -155,6 +157,7 @@ let initModel =
         selectedPhiResolution = None
         lastReplayAction = None
         candidateDecisions = []
+        sigmaBasisItemDecisions = Map.empty
         LedgerEvents = []
         ReplayPreviewSequence = None
         evidenceRecords = []
@@ -195,6 +198,7 @@ let clearProjectModel (model: Model) =
             selectedPhiResolution = None
             lastReplayAction = None
             candidateDecisions = []
+            sigmaBasisItemDecisions = Map.empty
             LedgerEvents = []
             ReplayPreviewSequence = None
             evidenceRecords = []
@@ -300,6 +304,8 @@ type Message =
     | AcceptCandidate of string
     | RejectCandidate of string
     | HoldCandidate of string
+    | SetSigmaBasisItemDecision of string * CandidateDecisionValue
+    | SetSigmaBasisItemDecisions of string list * CandidateDecisionValue
     | SelectReplayPreview of int
     | ClearReplayPreview
     | SetProjectName of string
@@ -1150,6 +1156,16 @@ let update (jsRuntime: IJSRuntime) message model =
 
     | HoldCandidate candidateId ->
         decideCandidate candidateId Held model
+
+    | SetSigmaBasisItemDecision (basisItemKey, decision) ->
+        { model with sigmaBasisItemDecisions = model.sigmaBasisItemDecisions |> Map.add basisItemKey decision }, Cmd.none
+
+    | SetSigmaBasisItemDecisions (basisItemKeys, decision) ->
+        let sigmaBasisItemDecisions =
+            basisItemKeys
+            |> List.fold (fun decisions basisItemKey -> decisions |> Map.add basisItemKey decision) model.sigmaBasisItemDecisions
+
+        { model with sigmaBasisItemDecisions = sigmaBasisItemDecisions }, Cmd.none
 
     | IngestPhiDraft ->
         let timestamp = DateTime.UtcNow
@@ -2444,13 +2460,105 @@ let getCandidateAtomValues candidate =
     |> List.filter (fun value -> not (String.IsNullOrWhiteSpace(value)))
     |> List.distinct
 
+type SigmaBasisItemReview =
+    {
+        Key: string
+        Kind: string
+        AtomValue: string
+        SupportCount: int
+        SupportingPhiIds: string list
+        RawPhiPreview: string option
+        SourceText: string
+    }
+
+let normalizeBasisItemKeyPart (value: string) =
+    if String.IsNullOrWhiteSpace(value) then
+        "none"
+    else
+        value.Trim().ToLowerInvariant().Split([| ' '; '\t'; '\r'; '\n' |], StringSplitOptions.RemoveEmptyEntries)
+        |> String.concat " "
+
+let createSigmaBasisItemKey candidateId atomKind atomValue =
+    candidateId
+    + "::"
+    + normalizeBasisItemKeyPart atomKind
+    + "::"
+    + normalizeBasisItemKeyPart atomValue
+
+let extractAtomKindFromBasis fallbackKind (basis: string) =
+    let index = basis.IndexOf(": ", StringComparison.Ordinal)
+
+    if index > 0 then
+        basis.Substring(0, index).Trim()
+    else
+        fallbackKind
+
+let extractSupportCountFromBasis basis =
+    let supportText =
+        getTextAfter "(support " basis
+        |> getTextBefore ";"
+        |> fun value -> value.Trim()
+
+    let mutable supportCount = 0
+
+    if Int32.TryParse(supportText, &supportCount) then
+        supportCount
+    else
+        0
+
+let buildPhiStatementMap sequencedParsedPhis =
+    sequencedParsedPhis
+    |> List.map (fun (_, parse: PhiParse) -> parse.PhiId, parse.Statement)
+    |> Map.ofList
+
+let tryFindRawPhiPreview phiStatementById supportingPhiIds =
+    supportingPhiIds
+    |> List.tryPick (fun phiId ->
+        phiStatementById
+        |> Map.tryFind phiId
+        |> Option.bind (fun statement ->
+            if String.IsNullOrWhiteSpace(statement) then
+                None
+            else
+                Some statement))
+
+let buildSigmaBasisItemReviews (candidate: CandidateDelta) sequencedParsedPhis =
+    let phiStatementById = buildPhiStatementMap sequencedParsedPhis
+
+    candidate.RelevantSigmaBasis
+    |> List.map (fun basis ->
+        let atomKind = extractAtomKindFromBasis candidate.Target basis
+        let atomValue = extractAtomValueFromBasis basis
+        let supportingPhiIds = extractSupportingPhiIdsFromBasis basis
+        let parsedSupportCount = extractSupportCountFromBasis basis
+        let supportCount =
+            if parsedSupportCount > 0 then
+                parsedSupportCount
+            else
+                List.length supportingPhiIds
+
+        {
+            Key = createSigmaBasisItemKey candidate.CandidateId atomKind atomValue
+            Kind = atomKind
+            AtomValue = atomValue
+            SupportCount = supportCount
+            SupportingPhiIds = supportingPhiIds
+            RawPhiPreview = tryFindRawPhiPreview phiStatementById supportingPhiIds
+            SourceText = basis
+        })
+
+let getSigmaBasisItemDecisionValue basisItemKey sigmaBasisItemDecisions =
+    sigmaBasisItemDecisions
+    |> Map.tryFind basisItemKey
+    |> Option.defaultValue Pending
+
 let normalizeReviewText (value: string) =
     if String.IsNullOrWhiteSpace(value) then
         ""
     else
         value.Trim().ToLowerInvariant()
 
-let candidateMatchesTargetFilter filterValue candidate =
+let candidateMatchesTargetFilter filterValue (candidate: CandidateDelta) =
     match filterValue with
     | "All" -> true
     | "Reinforced Atom" -> candidate.Kind = ReinforcedSigmaAtom
@@ -2469,7 +2577,7 @@ let candidateMatchesDecisionFilter filterValue decisionValue =
     | "Held" -> decisionValue = Held
     | _ -> true
 
-let candidateMatchesTextFilter searchText candidate =
+let candidateMatchesTextFilter searchText (candidate: CandidateDelta) =
     if searchText = "" then
         true
     else
@@ -2497,7 +2605,7 @@ let getFilteredReviewCandidates (model: Model) sigmaContext =
         && candidateMatchesDecisionFilter model.cognitionReviewDecisionFilter decisionValue
         && candidateMatchesTextFilter searchText candidate)
 
-let interpretReviewCandidate candidate =
+let interpretReviewCandidate (candidate: CandidateDelta) =
     match candidate.Kind with
     | AddUnknownRevealMissingHost -> "Functions and states exist, but no host has been identified."
     | AddInterface -> "This interface appears available for boundary reasoning."
@@ -2532,30 +2640,154 @@ let renderLimitedPhiChips phiIds =
                 }
         }
 
-let renderLimitedBasis basis =
-    let visibleBasis = basis |> List.truncate 3
-    let remainingCount = List.length basis - List.length visibleBasis
+let renderPhiChips phiIds =
+    match phiIds with
+    | [] ->
+        p {
+            attr.``class`` "has-text-grey mb-0"
+            text "No supporting Phi IDs available."
+        }
+    | values ->
+        div {
+            attr.``class`` "tags mb-0 sigma-basis-phi-tags"
+            forEach values <| fun phiId ->
+                span {
+                    attr.``class`` "tag is-link is-light sigma-basis-phi-tag"
+                    text phiId
+                }
+        }
 
+let renderLimitedBasis basis =
     match basis with
     | [] ->
         p {
-            attr.``class`` "is-size-7 has-text-grey"
+            attr.``class`` "has-text-grey"
             text "No relevant Sigma basis."
         }
-    | _ ->
+    | values ->
         div {
-            forEach visibleBasis <| fun basisValue ->
+            forEach values <| fun basisValue ->
                 p {
-                    attr.``class`` "is-size-7 mb-1"
+                    attr.``class`` "mb-2"
                     text basisValue
                 }
-
-            if remainingCount > 0 then
-                p {
-                    attr.``class`` "is-size-7 has-text-grey"
-                    text ("+" + string remainingCount + " more basis entries")
-                }
         }
+
+let renderSigmaBasisItemActions basisItemKey decisionValue dispatch =
+    div {
+        attr.``class`` "buttons are-small mb-0"
+        button {
+            attr.``class`` (candidateDecisionButtonClass decisionValue Accepted "is-success")
+            attr.``type`` "button"
+            on.click (fun _ -> dispatch (SetSigmaBasisItemDecision (basisItemKey, Accepted)))
+            text "Accept"
+        }
+
+        button {
+            attr.``class`` (candidateDecisionButtonClass decisionValue Rejected "is-danger")
+            attr.``type`` "button"
+            on.click (fun _ -> dispatch (SetSigmaBasisItemDecision (basisItemKey, Rejected)))
+            text "Reject"
+        }
+
+        button {
+            attr.``class`` (candidateDecisionButtonClass decisionValue Held "is-warning")
+            attr.``type`` "button"
+            on.click (fun _ -> dispatch (SetSigmaBasisItemDecision (basisItemKey, Held)))
+            text "Hold"
+        }
+    }
+
+let renderSigmaBasisItemBulkActions basisItemKeys dispatch =
+    div {
+        attr.``class`` "buttons are-small mb-0"
+        button {
+            attr.``class`` "button is-small is-success is-light"
+            attr.``type`` "button"
+            on.click (fun _ -> dispatch (SetSigmaBasisItemDecisions (basisItemKeys, Accepted)))
+            text "Accept all basis items"
+        }
+
+        button {
+            attr.``class`` "button is-small is-danger is-light"
+            attr.``type`` "button"
+            on.click (fun _ -> dispatch (SetSigmaBasisItemDecisions (basisItemKeys, Rejected)))
+            text "Reject all basis items"
+        }
+
+        button {
+            attr.``class`` "button is-small is-warning is-light"
+            attr.``type`` "button"
+            on.click (fun _ -> dispatch (SetSigmaBasisItemDecisions (basisItemKeys, Held)))
+            text "Hold all basis items"
+        }
+    }
+
+let renderSigmaBasisItemReview (basisItem: SigmaBasisItemReview) (sigmaBasisItemDecisions: Map<string, CandidateDecisionValue>) dispatch =
+    let decisionValue = getSigmaBasisItemDecisionValue basisItem.Key sigmaBasisItemDecisions
+
+    div {
+        attr.``class`` "sigma-basis-item"
+
+        div {
+            attr.``class`` "columns is-variable is-3 mb-2"
+
+            div {
+                attr.``class`` "column is-8"
+                div {
+                    attr.``class`` "tags mb-2"
+                    span {
+                        attr.``class`` "tag is-light"
+                        text ("Kind: " + basisItem.Kind)
+                    }
+                    span {
+                        attr.``class`` "tag is-info is-light"
+                        text ("Support count: " + string basisItem.SupportCount)
+                    }
+                }
+
+                p {
+                    attr.``class`` "sigma-basis-atom mb-0"
+                    strong { text "Atom value: " }
+                    text basisItem.AtomValue
+                }
+            }
+
+            div {
+                attr.``class`` "column is-4"
+                p {
+                    attr.``class`` "mb-2"
+                    strong { text "Item review state: " }
+                    renderCandidateDecisionTag decisionValue
+                }
+                renderSigmaBasisItemActions basisItem.Key decisionValue dispatch
+            }
+        }
+
+        div {
+            attr.``class`` "sigma-basis-detail-block"
+            p {
+                attr.``class`` "has-text-weight-semibold mb-2"
+                text "Supporting Phi IDs"
+            }
+            renderPhiChips basisItem.SupportingPhiIds
+        }
+
+        match basisItem.RawPhiPreview with
+        | None -> empty()
+        | Some preview ->
+            div {
+                attr.``class`` "sigma-basis-detail-block sigma-basis-preview"
+                p {
+                    attr.``class`` "has-text-weight-semibold mb-1"
+                    text "Raw Phi preview"
+                }
+                p {
+                    attr.``class`` "mb-0"
+                    text preview
+                }
+            }
+    }
 
 let renderTopMissingContextReview sequencedParsedPhis =
     div {
@@ -2720,21 +2952,27 @@ let renderCognitionReviewFilters (model: Model) dispatch =
         }
     }
 
-let renderReviewCandidateCard (candidate: CandidateDelta) (candidateDecisions: CandidateDecision list) dispatch =
+let renderReviewCandidateCard
+    (candidate: CandidateDelta)
+    (candidateDecisions: CandidateDecision list)
+    (sigmaBasisItemDecisions: Map<string, CandidateDecisionValue>)
+    sequencedParsedPhis
+    dispatch =
     let decisionValue = getCandidateDecisionValue candidate.CandidateId candidateDecisions
-    let supportingPhiIds = getCandidateSupportingPhiIds candidate
+    let basisItems = buildSigmaBasisItemReviews candidate sequencedParsedPhis
+    let basisItemKeys = basisItems |> List.map (fun basisItem -> basisItem.Key)
 
     div {
-        attr.``class`` "card mb-3"
+        attr.``class`` "card mb-4 cognition-review-card"
 
         div {
             attr.``class`` "card-content"
 
             div {
-                attr.``class`` "columns is-variable is-3 is-vcentered"
+                attr.``class`` "columns is-variable is-3 is-vcentered mb-2"
 
                 div {
-                    attr.``class`` "column is-5"
+                    attr.``class`` "column is-6"
                     p {
                         attr.``class`` "heading mb-1"
                         text "Candidate"
@@ -2768,7 +3006,7 @@ let renderReviewCandidateCard (candidate: CandidateDelta) (candidateDecisions: C
                 }
 
                 div {
-                    attr.``class`` "column is-3"
+                    attr.``class`` "column is-2"
                     p {
                         attr.``class`` "heading mb-1"
                         text "Decision"
@@ -2778,34 +3016,93 @@ let renderReviewCandidateCard (candidate: CandidateDelta) (candidateDecisions: C
             }
 
             div {
-                attr.``class`` "columns is-variable is-3"
+                attr.``class`` "cognition-review-section"
 
                 div {
-                    attr.``class`` "column is-6"
-                    p {
-                        attr.``class`` "has-text-weight-semibold is-size-7 mb-2"
-                        text "Relevant Sigma basis"
+                    attr.``class`` "columns is-variable is-3"
+
+                    div {
+                        attr.``class`` "column is-8"
+                        h5 {
+                            attr.``class`` "title is-6 mb-2"
+                            text "Section 1: Candidate class decision"
+                        }
+
+                        p {
+                            attr.``class`` "mb-2"
+                            strong { text "Proposed transition: " }
+                            text candidate.ProposedTransition
+                        }
+
+                        p {
+                            attr.``class`` "mb-0"
+                            strong { text "Why this candidate exists: " }
+                            text candidate.Reason
+                        }
                     }
-                    renderLimitedBasis candidate.RelevantSigmaBasis
+
+                    div {
+                        attr.``class`` "column is-4"
+                        p {
+                            attr.``class`` "mb-2"
+                            strong { text "Candidate class decision: " }
+                            renderCandidateDecisionTag decisionValue
+                        }
+
+                        renderCandidateGovernanceActions candidate decisionValue dispatch
+                    }
+                }
+            }
+
+            div {
+                attr.``class`` "cognition-review-section cognition-review-basis-section"
+
+                div {
+                    attr.``class`` "level is-mobile mb-2"
+                    div {
+                        attr.``class`` "level-left"
+                        div {
+                            h5 {
+                                attr.``class`` "title is-6 mb-1"
+                                text "Section 2: Basis item review"
+                            }
+                            p {
+                                attr.``class`` "has-text-grey mb-0"
+                                text "Local/session review state"
+                            }
+                        }
+                    }
+                    div {
+                        attr.``class`` "level-right"
+                        span {
+                            attr.``class`` "tag is-light"
+                            text ("Basis items: " + string (List.length basisItems))
+                        }
+                    }
+                }
+
+                p {
+                    attr.``class`` "notification is-info is-light cognition-review-helper"
+                    text "Class-level governance affects the candidate type. Basis item review records human review intent for individual Sigma atoms. Persistent atom-level promotion will be added later."
                 }
 
                 div {
-                    attr.``class`` "column is-3"
-                    p {
-                        attr.``class`` "has-text-weight-semibold is-size-7 mb-2"
-                        text "Supporting Phi IDs"
-                    }
-                    renderLimitedPhiChips supportingPhiIds
+                    attr.``class`` "mb-3"
+                    renderSigmaBasisItemBulkActions basisItemKeys dispatch
                 }
 
-                div {
-                    attr.``class`` "column is-3"
+                match basisItems with
+                | [] ->
                     p {
-                        attr.``class`` "has-text-weight-semibold is-size-7 mb-2"
-                        text "Action"
+                        attr.``class`` "has-text-grey"
+                        text "No relevant Sigma basis."
                     }
-                    renderCandidateGovernanceActions candidate decisionValue dispatch
-                }
+                | items ->
+                    div {
+                        attr.``class`` "sigma-basis-list"
+                        forEach items <| fun basisItem ->
+                            renderSigmaBasisItemReview basisItem sigmaBasisItemDecisions dispatch
+                    }
             }
         }
     }
@@ -2823,7 +3120,7 @@ let renderCognitionReviewPanel (model: Model) sequencedParsedPhis sigmaContext d
 
         p {
             attr.``class`` "is-size-7 has-text-grey mb-4"
-            text "Current v0 governance applies to candidate class; atom-level governance will be added later."
+            text "Candidate-class decisions persist. Basis item decisions are local/session review state in this v0."
         }
 
         div {
@@ -2858,7 +3155,12 @@ let renderCognitionReviewPanel (model: Model) sequencedParsedPhis sigmaContext d
             }
         | candidates ->
             forEach candidates <| fun candidate ->
-                renderReviewCandidateCard candidate model.candidateDecisions dispatch
+                renderReviewCandidateCard
+                    candidate
+                    model.candidateDecisions
+                    model.sigmaBasisItemDecisions
+                    sequencedParsedPhis
+                    dispatch
     }
 
 let renderLatestDeltaSummaryTable lastReplayAction =
