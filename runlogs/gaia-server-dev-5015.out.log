@@ -1454,3 +1454,157 @@ info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
       Executed endpoint '/bolero-reload'
 info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
       Request finished HTTP/1.1 GET http://localhost:5015/bolero-reload?id=WJ6XJ0l618FFsTzEamzNMg - 101 - - 3964285.3430ms
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint '/bolero-reload'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://localhost:5015/bolero-reload?id=C3OcF2Szhp21irTcPOb3IQ - 101 - - 3819009.2231ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 POST http://localhost:5015/bolero-reload/negotiate?negotiateVersion=1 - - 0
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint '/bolero-reload/negotiate'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint '/bolero-reload/negotiate'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 POST http://localhost:5015/bolero-reload/negotiate?negotiateVersion=1 - 200 316 application/json 2.3485ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://localhost:5015/bolero-reload?id=otaM0NiDBW7EO7Z6--dJkw - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint '/bolero-reload'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint '/bolero-reload'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://localhost:5015/bolero-reload?id=otaM0NiDBW7EO7Z6--dJkw - 101 - - 2454049.2736ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 POST http://localhost:5015/bolero-reload/negotiate?negotiateVersion=1 - - 0
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint '/bolero-reload/negotiate'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint '/bolero-reload/negotiate'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 POST http://localhost:5015/bolero-reload/negotiate?negotiateVersion=1 - 200 316 application/json 0.6097ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://localhost:5015/bolero-reload?id=ef_i_PzSgTMZTitu7fnXew - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint '/bolero-reload'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint '/bolero-reload'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://localhost:5015/bolero-reload?id=ef_i_PzSgTMZTitu7fnXew - 101 - - 64058.5365ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 POST http://localhost:5015/bolero-reload/negotiate?negotiateVersion=1 - - 0
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint '/bolero-reload/negotiate'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint '/bolero-reload/negotiate'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 POST http://localhost:5015/bolero-reload/negotiate?negotiateVersion=1 - 200 316 application/json 0.6576ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://localhost:5015/bolero-reload?id=-PyRHVwbn8Rl5Y6P0GWoYg - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint '/bolero-reload'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint '/bolero-reload'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://localhost:5015/bolero-reload?id=-PyRHVwbn8Rl5Y6P0GWoYg - 101 - - 57214.6537ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 POST http://localhost:5015/bolero-reload/negotiate?negotiateVersion=1 - - 0
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint '/bolero-reload/negotiate'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint '/bolero-reload/negotiate'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 POST http://localhost:5015/bolero-reload/negotiate?negotiateVersion=1 - 200 316 application/json 0.4509ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://localhost:5015/bolero-reload?id=A9GLw1J1jABM2x8JiShJ3w - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint '/bolero-reload'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint '/bolero-reload'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://localhost:5015/bolero-reload?id=A9GLw1J1jABM2x8JiShJ3w - 101 - - 3409.0908ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://localhost:5015/ - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint '/{*path} (/{*path})'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint '/{*path} (/{*path})'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://localhost:5015/ - 200 - text/html;+charset=utf-8 4.6240ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://localhost:5015/Gaia.Client.styles.css - - -
+info: Microsoft.AspNetCore.StaticFiles.StaticFileMiddleware[6]
+      The file /Gaia.Client.styles.css was not modified
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://localhost:5015/Gaia.Client.styles.css - 304 - text/css 0.6675ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://localhost:5015/_framework/blazor.web.js - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Blazor web static files'
+info: Microsoft.AspNetCore.StaticFiles.StaticFileMiddleware[6]
+      The file /_framework/blazor.web.js was not modified
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Blazor web static files'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://localhost:5015/_framework/blazor.web.js - 304 - text/javascript 0.6010ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://localhost:5015/_framework/blazor.boot.json - - -
+info: Microsoft.AspNetCore.StaticFiles.StaticFileMiddleware[6]
+      The file /_framework/blazor.boot.json was not modified
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://localhost:5015/_framework/blazor.boot.json - 304 - application/json 0.3937ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 POST http://localhost:5015/bolero-reload/negotiate?negotiateVersion=1 - - 0
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint '/bolero-reload/negotiate'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint '/bolero-reload/negotiate'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 POST http://localhost:5015/bolero-reload/negotiate?negotiateVersion=1 - 200 316 application/json 0.6332ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://localhost:5015/bolero-reload?id=-_NVrvgYr4PN_cOtjfPLTw - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint '/bolero-reload'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://localhost:5015/ - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint '/{*path} (/{*path})'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint '/{*path} (/{*path})'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://localhost:5015/ - 200 - text/html;+charset=utf-8 2.4059ms
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint '/bolero-reload'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://localhost:5015/bolero-reload?id=-_NVrvgYr4PN_cOtjfPLTw - 101 - - 2298.8943ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://localhost:5015/_framework/blazor.web.js - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Blazor web static files'
+info: Microsoft.AspNetCore.StaticFiles.StaticFileMiddleware[6]
+      The file /_framework/blazor.web.js was not modified
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Blazor web static files'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://localhost:5015/_framework/blazor.web.js - 304 - text/javascript 0.4720ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://localhost:5015/_framework/blazor.boot.json - - -
+info: Microsoft.AspNetCore.StaticFiles.StaticFileMiddleware[6]
+      The file /_framework/blazor.boot.json was not modified
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://localhost:5015/_framework/blazor.boot.json - 304 - application/json 0.3736ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 POST http://localhost:5015/bolero-reload/negotiate?negotiateVersion=1 - - 0
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint '/bolero-reload/negotiate'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint '/bolero-reload/negotiate'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 POST http://localhost:5015/bolero-reload/negotiate?negotiateVersion=1 - 200 316 application/json 0.3934ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://localhost:5015/bolero-reload?id=BekGUik6SPQHpwRUkRcaQw - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint '/bolero-reload'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint '/bolero-reload'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://localhost:5015/bolero-reload?id=BekGUik6SPQHpwRUkRcaQw - 101 - - 385.2552ms

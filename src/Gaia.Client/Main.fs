@@ -31,6 +31,10 @@ type Model =
         phiDraftSource: string
         phiDraftQuickTags: string
         phiDraftConfidence: string
+        phiBatchParseStatus: string option
+        cognitionReviewTargetFilter: string
+        cognitionReviewDecisionFilter: string
+        cognitionReviewTextFilter: string
         ingestedPhis: PhiIntake list
         parsedPhis: PhiParse list
         excludedPhiIds: string list
@@ -57,6 +61,8 @@ let evidenceCaptureKinds = [ "Manual note"; "Screenshot placeholder"; "File refe
 let evidenceTargetKinds = [ "Phi"; "Function"; "Mode"; "Interface"; "State"; "Host" ]
 let defaultEvidenceCaptureKind = "Manual note"
 let defaultEvidenceTargetKind = "Phi"
+let defaultCognitionReviewTargetFilter = "All"
+let defaultCognitionReviewDecisionFilter = "All"
 
 let buildProjectSnapshot (model: Model) =
     {
@@ -86,6 +92,10 @@ let restoreProjectSnapshot (snapshot: ProjectSnapshot) (model: Model) =
             selectedPhiParse = None
             selectedPhiResolution = None
             lastReplayAction = None
+            phiBatchParseStatus = None
+            cognitionReviewTargetFilter = defaultCognitionReviewTargetFilter
+            cognitionReviewDecisionFilter = defaultCognitionReviewDecisionFilter
+            cognitionReviewTextFilter = ""
             candidateDecisions = snapshot.CandidateDecisions
             LedgerEvents = snapshot.LedgerEvents
             ReplayPreviewSequence = None
@@ -133,6 +143,10 @@ let initModel =
         phiDraftSource = ""
         phiDraftQuickTags = ""
         phiDraftConfidence = "Medium"
+        phiBatchParseStatus = None
+        cognitionReviewTargetFilter = defaultCognitionReviewTargetFilter
+        cognitionReviewDecisionFilter = defaultCognitionReviewDecisionFilter
+        cognitionReviewTextFilter = ""
         ingestedPhis = []
         parsedPhis = []
         excludedPhiIds = []
@@ -169,6 +183,10 @@ let clearProjectModel (model: Model) =
             phiDraftSource = ""
             phiDraftQuickTags = ""
             phiDraftConfidence = "Medium"
+            phiBatchParseStatus = None
+            cognitionReviewTargetFilter = defaultCognitionReviewTargetFilter
+            cognitionReviewDecisionFilter = defaultCognitionReviewDecisionFilter
+            cognitionReviewTextFilter = ""
             ingestedPhis = []
             parsedPhis = []
             excludedPhiIds = []
@@ -274,7 +292,11 @@ type Message =
     | SetPhiDraftConfidence of string
     | IngestPhiDraft
     | ParseIngestedPhi of string
+    | ParseAllIncludedPhi
     | ToggleExcludeParsedPhi of string
+    | SetCognitionReviewTargetFilter of string
+    | SetCognitionReviewDecisionFilter of string
+    | SetCognitionReviewTextFilter of string
     | AcceptCandidate of string
     | RejectCandidate of string
     | HoldCandidate of string
@@ -720,6 +742,99 @@ let upsertCandidateDecision (candidateDecision: CandidateDecision) (candidateDec
     else
         candidateDecisions @ [ candidateDecision ]
 
+let parsePhiIntoModel (phi: PhiIntake) (model: Model) =
+    let beforeSigma =
+        model.parsedPhis
+        |> getIncludedSequencedParsedPhis model.excludedPhiIds
+        |> buildSigmaContext
+
+    let parse = Engine.parseIntake phi
+    let resolution = Engine.resolveParse DemoData.demoSigma parse
+    let parsedPhis = upsertParsedPhi parse model.parsedPhis
+
+    let afterSigma =
+        parsedPhis
+        |> getIncludedSequencedParsedPhis model.excludedPhiIds
+        |> buildSigmaContext
+
+    let alreadyKnownAtoms =
+        buildAlreadyKnownAtomGroups parse.PhiId beforeSigma parse
+
+    let lastReplayAction =
+        createDeltaSigmaAnalysis
+            ("Parsed " + parse.PhiId)
+            "This Phi was parsed, so its exposed atoms can enter current Sigma."
+            parse.PhiId
+            parse.Statement
+            alreadyKnownAtoms
+            beforeSigma
+            afterSigma
+
+    { model with
+        selectedPhiId = Some phi.PhiId
+        selectedPhiParse = Some parse
+        selectedPhiResolution = Some resolution
+        parsedPhis = parsedPhis
+        lastReplayAction = Some lastReplayAction
+        phiBatchParseStatus = None },
+    parse
+
+type PhiBatchParseCounts =
+    {
+        ParsedNew: int
+        SkippedAlreadyParsed: int
+        SkippedExcluded: int
+    }
+
+let emptyPhiBatchParseCounts =
+    {
+        ParsedNew = 0
+        SkippedAlreadyParsed = 0
+        SkippedExcluded = 0
+    }
+
+let formatPhiBatchParseDetail counts =
+    sprintf
+        "Parsed %d new Phi; skipped %d already parsed; skipped %d excluded."
+        counts.ParsedNew
+        counts.SkippedAlreadyParsed
+        counts.SkippedExcluded
+
+let formatPhiBatchParseStatus ingestedPhiCount counts =
+    if ingestedPhiCount = 0 then
+        "No Phi available to parse."
+    elif counts.ParsedNew = 0 then
+        sprintf
+            "No new Phi to parse. Skipped %d already parsed. Excluded %d."
+            counts.SkippedAlreadyParsed
+            counts.SkippedExcluded
+    else
+        sprintf
+            "Parsed %d new Φ. Skipped %d already parsed. Excluded %d."
+            counts.ParsedNew
+            counts.SkippedAlreadyParsed
+            counts.SkippedExcluded
+
+let getPhiBatchTargetId projectName =
+    if String.IsNullOrWhiteSpace(projectName) then
+        "PhiBatch"
+    else
+        projectName
+
+let parseAllIncludedPhis (model: Model) =
+    model.ingestedPhis
+    |> List.fold
+        (fun (workingModel, counts) phi ->
+            if isPhiExcluded workingModel.excludedPhiIds phi.PhiId then
+                workingModel, { counts with SkippedExcluded = counts.SkippedExcluded + 1 }
+            elif workingModel.parsedPhis |> List.exists (fun parse -> parse.PhiId = phi.PhiId) then
+                workingModel, { counts with SkippedAlreadyParsed = counts.SkippedAlreadyParsed + 1 }
+            else
+                let parsedModel, _ = parsePhiIntoModel phi workingModel
+
+                parsedModel, { counts with ParsedNew = counts.ParsedNew + 1 })
+        (model, emptyPhiBatchParseCounts)
+
 let decideCandidate candidateId (decision: CandidateDecisionValue) (model: Model) =
     match getCurrentCandidateDeltas model |> List.tryFind (fun candidate -> candidate.CandidateId = candidateId) with
     | Some candidate ->
@@ -943,7 +1058,7 @@ let update (jsRuntime: IJSRuntime) message model =
         match model.ingestedPhis |> List.tryFind (fun phi -> phi.PhiId = phiId) with
         | Some phi ->
             if model.parsedPhis |> List.exists (fun parse -> parse.PhiId = phiId) then
-                model
+                { model with phiBatchParseStatus = None }
                 |> appendLedgerEvent
                     "PhiParseIgnoredAlreadyParsed"
                     phi.PhiId
@@ -951,44 +1066,30 @@ let update (jsRuntime: IJSRuntime) message model =
                     phi.RawStatement
                 |> fun updatedModel -> updatedModel, Cmd.none
             else
-                let beforeSigma =
-                    model.parsedPhis
-                    |> getIncludedSequencedParsedPhis model.excludedPhiIds
-                    |> buildSigmaContext
+                let parsedModel, parse = parsePhiIntoModel phi model
 
-                let parse = Engine.parseIntake phi
-                let resolution = Engine.resolveParse DemoData.demoSigma parse
-                let parsedPhis = upsertParsedPhi parse model.parsedPhis
-
-                let afterSigma =
-                    parsedPhis
-                    |> getIncludedSequencedParsedPhis model.excludedPhiIds
-                    |> buildSigmaContext
-
-                let alreadyKnownAtoms =
-                    buildAlreadyKnownAtomGroups parse.PhiId beforeSigma parse
-
-                let lastReplayAction =
-                    createDeltaSigmaAnalysis
-                        ("Parsed " + parse.PhiId)
-                        "This Phi was parsed, so its exposed atoms can enter current Sigma."
-                        parse.PhiId
-                        parse.Statement
-                        alreadyKnownAtoms
-                        beforeSigma
-                        afterSigma
-
-                { model with
-                    selectedPhiId = Some phi.PhiId
-                    selectedPhiParse = Some parse
-                    selectedPhiResolution = Some resolution
-                    parsedPhis = parsedPhis
-                    lastReplayAction = Some lastReplayAction }
+                parsedModel
                 |> appendLedgerEvent "PhiParsed" parse.PhiId "Phi parsed" parse.Statement
                 |> fun updatedModel -> updatedModel, Cmd.none
 
         | None ->
             model, Cmd.none
+
+    | ParseAllIncludedPhi ->
+        if List.isEmpty model.ingestedPhis then
+            { model with phiBatchParseStatus = Some "No Phi available to parse." }, Cmd.none
+        else
+            let parsedModel, counts = parseAllIncludedPhis model
+            let status = formatPhiBatchParseStatus (List.length model.ingestedPhis) counts
+            let detail = formatPhiBatchParseDetail counts
+
+            { parsedModel with phiBatchParseStatus = Some status }
+            |> appendLedgerEvent
+                "PhiBatchParsed"
+                (getPhiBatchTargetId model.projectName)
+                "Parsed all included Phi"
+                detail
+            |> fun updatedModel -> updatedModel, Cmd.none
 
     | ToggleExcludeParsedPhi phiId ->
         let beforeSigma =
@@ -1027,9 +1128,19 @@ let update (jsRuntime: IJSRuntime) message model =
 
         { model with
             excludedPhiIds = excludedPhiIds
-            lastReplayAction = Some lastReplayAction }
+            lastReplayAction = Some lastReplayAction
+            phiBatchParseStatus = None }
         |> appendLedgerEvent eventKind phiId summary detail
         |> fun updatedModel -> updatedModel, Cmd.none
+
+    | SetCognitionReviewTargetFilter value ->
+        { model with cognitionReviewTargetFilter = value }, Cmd.none
+
+    | SetCognitionReviewDecisionFilter value ->
+        { model with cognitionReviewDecisionFilter = value }, Cmd.none
+
+    | SetCognitionReviewTextFilter value ->
+        { model with cognitionReviewTextFilter = value }, Cmd.none
 
     | AcceptCandidate candidateId ->
         decideCandidate candidateId Accepted model
@@ -1068,7 +1179,8 @@ let update (jsRuntime: IJSRuntime) message model =
             phiDraftTriggerContext = ""
             phiDraftSource = ""
             phiDraftQuickTags = ""
-            phiDraftConfidence = "Medium" }
+            phiDraftConfidence = "Medium"
+            phiBatchParseStatus = None }
         |> appendLedgerEvent "PhiIngested" intake.PhiId "Phi ingested" intake.RawStatement
         |> fun updatedModel -> updatedModel, Cmd.none
 
@@ -2262,6 +2374,493 @@ let renderT5GovernanceSummaryTable sigmaContext (candidateDecisions: CandidateDe
         }
     }
 
+let cognitionReviewTargetFilters = [ "All"; "Host"; "Interface"; "State"; "Mode"; "Reinforced Atom" ]
+let cognitionReviewDecisionFilters = [ "All"; "Pending"; "Accepted"; "Rejected"; "Held" ]
+
+let getTopMissingContextRows sequencedParsedPhis =
+    getMissingContextSummaryRows sequencedParsedPhis
+    |> List.sortByDescending snd
+    |> List.truncate 5
+
+let getTopArchitecturalPressureRows sigmaContext =
+    getArchitecturalPressureRows sigmaContext
+    |> List.sortByDescending (fun (_, basisCount, _) -> basisCount)
+    |> List.truncate 5
+
+let getTopReinforcedAtomRows sigmaContext =
+    getReinforcedAtoms sigmaContext
+    |> List.sortByDescending (fun (_, entry) -> entry.SupportCount)
+    |> List.truncate 10
+
+let getTextAfter (marker: string) (value: string) =
+    let index = value.IndexOf(marker, StringComparison.Ordinal)
+
+    if index < 0 then
+        ""
+    else
+        value.Substring(index + marker.Length)
+
+let getTextBefore (marker: string) (value: string) =
+    let index = value.IndexOf(marker, StringComparison.Ordinal)
+
+    if index < 0 then
+        value
+    else
+        value.Substring(0, index)
+
+let extractAtomValueFromBasis basis =
+    let withoutKind = getTextAfter ": " basis
+
+    let source =
+        if String.IsNullOrWhiteSpace(withoutKind) then
+            basis
+        else
+            withoutKind
+
+    getTextBefore " (support " source
+    |> fun value -> value.Trim()
+
+let extractSupportingPhiIdsFromBasis basis =
+    let phiText =
+        getTextAfter "; Φ " basis
+        |> getTextBefore ")"
+
+    if String.IsNullOrWhiteSpace(phiText) then
+        []
+    else
+        phiText.Split([| ',' |], StringSplitOptions.RemoveEmptyEntries)
+        |> Array.map (fun value -> value.Trim())
+        |> Array.filter (fun value -> not (String.IsNullOrWhiteSpace(value)))
+        |> Array.toList
+
+let getCandidateSupportingPhiIds candidate =
+    candidate.RelevantSigmaBasis
+    |> List.collect extractSupportingPhiIdsFromBasis
+    |> List.distinct
+
+let getCandidateAtomValues candidate =
+    candidate.RelevantSigmaBasis
+    |> List.map extractAtomValueFromBasis
+    |> List.filter (fun value -> not (String.IsNullOrWhiteSpace(value)))
+    |> List.distinct
+
+let normalizeReviewText (value: string) =
+    if String.IsNullOrWhiteSpace(value) then
+        ""
+    else
+        value.Trim().ToLowerInvariant()
+
+let candidateMatchesTargetFilter filterValue candidate =
+    match filterValue with
+    | "All" -> true
+    | "Reinforced Atom" -> candidate.Kind = ReinforcedSigmaAtom
+    | "Host"
+    | "Interface"
+    | "State"
+    | "Mode" -> candidate.Kind <> ReinforcedSigmaAtom && candidate.Target = filterValue
+    | _ -> true
+
+let candidateMatchesDecisionFilter filterValue decisionValue =
+    match filterValue with
+    | "All" -> true
+    | "Pending" -> decisionValue = Pending
+    | "Accepted" -> decisionValue = Accepted
+    | "Rejected" -> decisionValue = Rejected
+    | "Held" -> decisionValue = Held
+    | _ -> true
+
+let candidateMatchesTextFilter searchText candidate =
+    if searchText = "" then
+        true
+    else
+        [
+            formatCandidateDeltaKind candidate.Kind
+            candidate.Target
+            candidate.ProposedTransition
+            candidate.Reason
+            yield! candidate.RelevantSigmaBasis
+            yield! getCandidateSupportingPhiIds candidate
+            yield! getCandidateAtomValues candidate
+        ]
+        |> String.concat " "
+        |> normalizeReviewText
+        |> fun haystack -> haystack.Contains(searchText)
+
+let getFilteredReviewCandidates (model: Model) sigmaContext =
+    let searchText = normalizeReviewText model.cognitionReviewTextFilter
+
+    formulateCandidateDeltas sigmaContext
+    |> List.filter (fun candidate ->
+        let decisionValue = getCandidateDecisionValue candidate.CandidateId model.candidateDecisions
+
+        candidateMatchesTargetFilter model.cognitionReviewTargetFilter candidate
+        && candidateMatchesDecisionFilter model.cognitionReviewDecisionFilter decisionValue
+        && candidateMatchesTextFilter searchText candidate)
+
+let interpretReviewCandidate candidate =
+    match candidate.Kind with
+    | AddUnknownRevealMissingHost -> "Functions and states exist, but no host has been identified."
+    | AddInterface -> "This interface appears available for boundary reasoning."
+    | AddState -> "This state appears available for condition and behavior reasoning."
+    | AddMode -> "This mode appears available for operational-context reasoning."
+    | ReinforcedSigmaAtom -> "This atom appears in multiple Phi and may be an architectural theme."
+    | NoStructuralChange -> "No actionable candidate transition is currently visible."
+
+let renderLimitedPhiChips phiIds =
+    let visiblePhiIds = phiIds |> List.truncate 5
+    let remainingCount = List.length phiIds - List.length visiblePhiIds
+
+    match phiIds with
+    | [] ->
+        p {
+            attr.``class`` "is-size-7 has-text-grey"
+            text "No supporting Phi IDs available."
+        }
+    | _ ->
+        div {
+            attr.``class`` "tags mb-0"
+            forEach visiblePhiIds <| fun phiId ->
+                span {
+                    attr.``class`` "tag is-link is-light"
+                    text phiId
+                }
+
+            if remainingCount > 0 then
+                span {
+                    attr.``class`` "tag is-light"
+                    text ("+" + string remainingCount + " more")
+                }
+        }
+
+let renderLimitedBasis basis =
+    let visibleBasis = basis |> List.truncate 3
+    let remainingCount = List.length basis - List.length visibleBasis
+
+    match basis with
+    | [] ->
+        p {
+            attr.``class`` "is-size-7 has-text-grey"
+            text "No relevant Sigma basis."
+        }
+    | _ ->
+        div {
+            forEach visibleBasis <| fun basisValue ->
+                p {
+                    attr.``class`` "is-size-7 mb-1"
+                    text basisValue
+                }
+
+            if remainingCount > 0 then
+                p {
+                    attr.``class`` "is-size-7 has-text-grey"
+                    text ("+" + string remainingCount + " more basis entries")
+                }
+        }
+
+let renderTopMissingContextReview sequencedParsedPhis =
+    div {
+        attr.``class`` "column is-4"
+
+        h3 {
+            attr.``class`` "title is-6"
+            text "Top Missing Context"
+        }
+
+        div {
+            attr.``class`` "table-container"
+            table {
+                attr.``class`` "table is-fullwidth is-striped is-narrow"
+
+                thead {
+                    tr {
+                        th { text "Area" }
+                        th { text "Count" }
+                        th { text "Interpretation" }
+                    }
+                }
+
+                tbody {
+                    forEach (getTopMissingContextRows sequencedParsedPhis) <| fun (missingArea, count) ->
+                        tr {
+                            td { text missingArea }
+                            td { text (string count) }
+                            td { text (interpretMissingContextCount count) }
+                        }
+                }
+            }
+        }
+    }
+
+let renderTopArchitecturalPressuresReview sigmaContext =
+    div {
+        attr.``class`` "column is-4"
+
+        h3 {
+            attr.``class`` "title is-6"
+            text "Top Architectural Pressures"
+        }
+
+        div {
+            attr.``class`` "table-container"
+            table {
+                attr.``class`` "table is-fullwidth is-striped is-narrow"
+
+                thead {
+                    tr {
+                        th { text "Target" }
+                        th { text "Basis" }
+                        th { text "Pressure" }
+                        th { text "Meaning" }
+                    }
+                }
+
+                tbody {
+                    forEach (getTopArchitecturalPressureRows sigmaContext) <| fun (target, basisCount, meaning) ->
+                        tr {
+                            td { text target }
+                            td { text (string basisCount) }
+                            td { text (interpretPressure basisCount) }
+                            td { text meaning }
+                        }
+                }
+            }
+        }
+    }
+
+let renderTopReinforcedAtomsReview sigmaContext =
+    div {
+        attr.``class`` "column is-4"
+
+        h3 {
+            attr.``class`` "title is-6"
+            text "Top Reinforced Atoms"
+        }
+
+        match getTopReinforcedAtomRows sigmaContext with
+        | [] ->
+            p {
+                attr.``class`` "has-text-grey"
+                text "No reinforced atoms yet."
+            }
+        | atoms ->
+            div {
+                attr.``class`` "table-container"
+                table {
+                    attr.``class`` "table is-fullwidth is-striped is-narrow"
+
+                    thead {
+                        tr {
+                            th { text "Kind" }
+                            th { text "Atom" }
+                            th { text "Support" }
+                            th { text "Supporting Phi" }
+                        }
+                    }
+
+                    tbody {
+                        forEach atoms <| fun (kind, entry) ->
+                            tr {
+                                td { text kind }
+                                td { text entry.Value }
+                                td { text (string entry.SupportCount) }
+                                td { renderLimitedPhiChips entry.SupportingPhiIds }
+                            }
+                    }
+                }
+            }
+    }
+
+let renderCognitionReviewFilters (model: Model) dispatch =
+    div {
+        attr.``class`` "columns is-variable is-3 mb-2"
+
+        div {
+            attr.``class`` "column is-3"
+            label {
+                attr.``class`` "label is-size-7"
+                text "Candidate target"
+            }
+            div {
+                attr.``class`` "select is-fullwidth is-small"
+                select {
+                    bind.input.string model.cognitionReviewTargetFilter (fun value -> dispatch (SetCognitionReviewTargetFilter value))
+                    forEach cognitionReviewTargetFilters <| fun filterValue ->
+                        option { text filterValue }
+                }
+            }
+        }
+
+        div {
+            attr.``class`` "column is-3"
+            label {
+                attr.``class`` "label is-size-7"
+                text "Decision"
+            }
+            div {
+                attr.``class`` "select is-fullwidth is-small"
+                select {
+                    bind.input.string model.cognitionReviewDecisionFilter (fun value -> dispatch (SetCognitionReviewDecisionFilter value))
+                    forEach cognitionReviewDecisionFilters <| fun filterValue ->
+                        option { text filterValue }
+                }
+            }
+        }
+
+        div {
+            attr.``class`` "column is-6"
+            label {
+                attr.``class`` "label is-size-7"
+                text "Search"
+            }
+            input {
+                attr.``class`` "input is-small"
+                attr.placeholder "Candidate type, atom, target, or supporting Phi ID"
+                bind.input.string model.cognitionReviewTextFilter (fun value -> dispatch (SetCognitionReviewTextFilter value))
+            }
+        }
+    }
+
+let renderReviewCandidateCard (candidate: CandidateDelta) (candidateDecisions: CandidateDecision list) dispatch =
+    let decisionValue = getCandidateDecisionValue candidate.CandidateId candidateDecisions
+    let supportingPhiIds = getCandidateSupportingPhiIds candidate
+
+    div {
+        attr.``class`` "card mb-3"
+
+        div {
+            attr.``class`` "card-content"
+
+            div {
+                attr.``class`` "columns is-variable is-3 is-vcentered"
+
+                div {
+                    attr.``class`` "column is-5"
+                    p {
+                        attr.``class`` "heading mb-1"
+                        text "Candidate"
+                    }
+                    h4 {
+                        attr.``class`` "title is-6 mb-2"
+                        text (formatCandidateDeltaKind candidate.Kind)
+                    }
+                    p {
+                        attr.``class`` "is-size-7 has-text-grey"
+                        text (interpretReviewCandidate candidate)
+                    }
+                }
+
+                div {
+                    attr.``class`` "column is-2"
+                    p {
+                        attr.``class`` "heading mb-1"
+                        text "Target"
+                    }
+                    p { text candidate.Target }
+                }
+
+                div {
+                    attr.``class`` "column is-2"
+                    p {
+                        attr.``class`` "heading mb-1"
+                        text "Basis"
+                    }
+                    p { text (string (List.length candidate.RelevantSigmaBasis)) }
+                }
+
+                div {
+                    attr.``class`` "column is-3"
+                    p {
+                        attr.``class`` "heading mb-1"
+                        text "Decision"
+                    }
+                    renderCandidateDecisionTag decisionValue
+                }
+            }
+
+            div {
+                attr.``class`` "columns is-variable is-3"
+
+                div {
+                    attr.``class`` "column is-6"
+                    p {
+                        attr.``class`` "has-text-weight-semibold is-size-7 mb-2"
+                        text "Relevant Sigma basis"
+                    }
+                    renderLimitedBasis candidate.RelevantSigmaBasis
+                }
+
+                div {
+                    attr.``class`` "column is-3"
+                    p {
+                        attr.``class`` "has-text-weight-semibold is-size-7 mb-2"
+                        text "Supporting Phi IDs"
+                    }
+                    renderLimitedPhiChips supportingPhiIds
+                }
+
+                div {
+                    attr.``class`` "column is-3"
+                    p {
+                        attr.``class`` "has-text-weight-semibold is-size-7 mb-2"
+                        text "Action"
+                    }
+                    renderCandidateGovernanceActions candidate decisionValue dispatch
+                }
+            }
+        }
+    }
+
+let renderCognitionReviewPanel (model: Model) sequencedParsedPhis sigmaContext dispatch =
+    let reviewCandidates = getFilteredReviewCandidates model sigmaContext
+
+    div {
+        attr.``class`` "box"
+
+        h2 {
+            attr.``class`` "title is-5"
+            text "Cognition Review"
+        }
+
+        p {
+            attr.``class`` "is-size-7 has-text-grey mb-4"
+            text "Current v0 governance applies to candidate class; atom-level governance will be added later."
+        }
+
+        div {
+            attr.``class`` "columns is-variable is-4"
+            renderTopMissingContextReview sequencedParsedPhis
+            renderTopArchitecturalPressuresReview sigmaContext
+            renderTopReinforcedAtomsReview sigmaContext
+        }
+
+        hr {}
+
+        h3 {
+            attr.``class`` "title is-6"
+            text "Review Queue"
+        }
+
+        renderCognitionReviewFilters model dispatch
+
+        div {
+            attr.``class`` "tags mb-3"
+            span {
+                attr.``class`` "tag is-light"
+                text ("Matching candidates: " + string (List.length reviewCandidates))
+            }
+        }
+
+        match reviewCandidates with
+        | [] ->
+            p {
+                attr.``class`` "has-text-grey"
+                text "No candidates match the current review filters."
+            }
+        | candidates ->
+            forEach candidates <| fun candidate ->
+                renderReviewCandidateCard candidate model.candidateDecisions dispatch
+    }
+
 let renderLatestDeltaSummaryTable lastReplayAction =
     div {
         h3 {
@@ -3283,6 +3882,22 @@ let homePage model dispatch =
                                 text "Φ Set"
                             }
 
+                            button {
+                                attr.``class`` "button is-link is-light is-fullwidth mb-3"
+                                attr.``type`` "button"
+                                on.click (fun _ -> dispatch ParseAllIncludedPhi)
+                                text "Parse All Included Φ"
+                            }
+
+                            match model.phiBatchParseStatus with
+                            | None ->
+                                empty()
+                            | Some status ->
+                                p {
+                                    attr.``class`` "is-size-7 has-text-grey mb-3"
+                                    text status
+                                }
+
                             match model.ingestedPhis with
                             | [] ->
                                 p {
@@ -3322,6 +3937,8 @@ let homePage model dispatch =
                         renderCurrentSigmaSnapshotPanel includedSequencedParsedPhis currentSigmaContext
 
                         renderOperationalSummaryTablesPanel includedSequencedParsedPhis currentSigmaContext model.lastReplayAction model.candidateDecisions dispatch
+
+                        renderCognitionReviewPanel model includedSequencedParsedPhis currentSigmaContext dispatch
 
                         renderParsedPhiLedgerPanel model.parsedPhis model.excludedPhiIds dispatch
                     }
