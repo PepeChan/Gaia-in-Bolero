@@ -7,6 +7,8 @@ open Bolero.Html
 open Bolero.Remoting
 open Bolero.Remoting.Client
 open Bolero.Templating.Client
+open Microsoft.AspNetCore.Components
+open Microsoft.JSInterop
 open Gaia.Core
 open Gaia.Client.Types
 open Gaia.Client.Persistence
@@ -200,6 +202,64 @@ let buildSphynxSampleSnapshot () =
         EvidenceRecords = []
     }
 
+let projectFileModulePath = "./cognopy-files.js"
+
+let normalizeProjectFileNamePart (value: string) =
+    let source =
+        if String.IsNullOrWhiteSpace(value) then
+            "untitled-project"
+        else
+            value.Trim().ToLowerInvariant()
+
+    let folder =
+        source
+        |> Seq.fold
+            (fun (parts: string list, previousWasSeparator: bool) ch ->
+                let isAsciiLetter = ch >= 'a' && ch <= 'z'
+                let isDigit = ch >= '0' && ch <= '9'
+                let isSeparator = ch = ' ' || ch = '-' || ch = '_'
+
+                if isAsciiLetter || isDigit then
+                    string ch :: parts, false
+                elif isSeparator && not previousWasSeparator then
+                    "-" :: parts, true
+                else
+                    parts, previousWasSeparator)
+            ([], true)
+        |> fst
+        |> List.rev
+        |> String.concat ""
+
+    let normalized = folder.Trim('-')
+
+    if String.IsNullOrWhiteSpace(normalized) then
+        "untitled-project"
+    else
+        normalized
+
+let createProjectFileName projectName =
+    let safeProjectName = normalizeProjectFileNamePart projectName
+    let timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss")
+    "cognopy-" + safeProjectName + "-" + timestamp + ".json"
+
+let importProjectFileModule (jsRuntime: IJSRuntime) =
+    jsRuntime.InvokeAsync<IJSObjectReference>("import", [| box projectFileModulePath |]).AsTask()
+
+let saveJsonFileAsync (jsRuntime: IJSRuntime) filename content =
+    task {
+        let! fileModule = importProjectFileModule jsRuntime
+        do! fileModule.InvokeVoidAsync("saveJsonFile", [| box filename; box content |]).AsTask()
+        do! fileModule.DisposeAsync().AsTask()
+    }
+
+let openJsonFileAsync (jsRuntime: IJSRuntime) =
+    task {
+        let! fileModule = importProjectFileModule jsRuntime
+        let! content = fileModule.InvokeAsync<string>("openJsonFile", Array.empty<obj>).AsTask()
+        do! fileModule.DisposeAsync().AsTask()
+        return content
+    }
+
 /// The Elmish application's update messages.
 type Message =
     | SetPage of Page
@@ -221,6 +281,13 @@ type Message =
     | SelectReplayPreview of int
     | ClearReplayPreview
     | SetProjectName of string
+    | SaveProjectFile
+    | ProjectFileSaved of string
+    | ProjectFileSaveFailed of string
+    | OpenProjectFile
+    | ProjectFileOpened of string
+    | ProjectFileOpenCancelled
+    | ProjectFileOpenFailed of string
     | ExportProjectJson
     | SetImportJson of string
     | ImportProjectJson
@@ -233,6 +300,34 @@ type Message =
     | SetEvidenceNotes of string
     | SetEvidenceContentRef of string
     | CreateEvidenceRecord
+
+let saveJsonFileOperation (jsRuntime: IJSRuntime, filename: string, content: string) =
+    async {
+        do! saveJsonFileAsync jsRuntime filename content |> Async.AwaitTask
+    }
+
+let openJsonFileOperation (jsRuntime: IJSRuntime) =
+    async {
+        return! openJsonFileAsync jsRuntime |> Async.AwaitTask
+    }
+
+let saveProjectFileCmd jsRuntime filename content =
+    Cmd.OfAsync.either
+        saveJsonFileOperation
+        (jsRuntime, filename, content)
+        (fun () -> ProjectFileSaved filename)
+        (fun ex -> ProjectFileSaveFailed ex.Message)
+
+let openProjectFileCmd jsRuntime =
+    Cmd.OfAsync.either
+        openJsonFileOperation
+        jsRuntime
+        (fun content ->
+            if isNull content then
+                ProjectFileOpenCancelled
+            else
+                ProjectFileOpened content)
+        (fun ex -> ProjectFileOpenFailed ex.Message)
 
 let upsertParsedPhi parse parsedPhis =
     if parsedPhis |> List.exists (fun parsedPhi -> parsedPhi.PhiId = parse.PhiId) then
@@ -657,7 +752,7 @@ let decideCandidate candidateId (decision: CandidateDecisionValue) (model: Model
     | None ->
         model, Cmd.none
 
-let update message model =
+let update (jsRuntime: IJSRuntime) message model =
     match message with
     | SetPage page ->
         { model with page = page }, Cmd.none
@@ -681,6 +776,45 @@ let update message model =
         { model with ReplayPreviewSequence = None }, Cmd.none
     | SetProjectName value ->
         { model with projectName = value }, Cmd.none
+    | SaveProjectFile ->
+        let snapshot = buildProjectSnapshot model
+        let projectJson = serializeProjectSnapshot snapshot
+        let filename = createProjectFileName snapshot.ProjectName
+
+        model, saveProjectFileCmd jsRuntime filename projectJson
+    | ProjectFileSaved filename ->
+        { model with persistenceStatus = Some ("Project file saved: " + filename) }
+        |> appendLedgerEvent
+            "ProjectFileSaved"
+            model.projectName
+            "Project file saved"
+            ("Downloaded project snapshot as " + filename + ".")
+        |> fun updatedModel -> updatedModel, Cmd.none
+    | ProjectFileSaveFailed message ->
+        { model with persistenceStatus = Some ("Save failed: " + message) }, Cmd.none
+    | OpenProjectFile ->
+        model, openProjectFileCmd jsRuntime
+    | ProjectFileOpened json ->
+        match tryDeserializeProjectSnapshot json with
+        | Ok snapshot ->
+            model
+            |> restoreProjectSnapshot snapshot
+            |> fun restoredModel ->
+                { restoredModel with
+                    exportJson = ""
+                    persistenceStatus = Some "Project file opened." }
+            |> appendLedgerEvent
+                "ProjectFileOpened"
+                snapshot.ProjectName
+                "Project file opened"
+                ("Opened snapshot saved at " + snapshot.SavedAtUtc + ".")
+            |> fun updatedModel -> updatedModel, Cmd.none
+        | Result.Error message ->
+            { model with persistenceStatus = Some ("Open failed: " + message) }, Cmd.none
+    | ProjectFileOpenCancelled ->
+        model, Cmd.none
+    | ProjectFileOpenFailed message ->
+        { model with persistenceStatus = Some ("Open failed: " + message) }, Cmd.none
     | ExportProjectJson ->
         let exportJson =
             model
@@ -694,7 +828,7 @@ let update message model =
             "ProjectExported"
             model.projectName
             "Project exported"
-            "Project JSON exported from the Persistence tab."
+            "Project JSON exported from the Projects tab."
         |> fun updatedModel -> updatedModel, Cmd.none
     | SetImportJson value ->
         { model with importJson = value }, Cmd.none
@@ -2709,17 +2843,27 @@ let renderPersistenceTab (model: Model) dispatch =
 
         h2 {
             attr.``class`` "title is-4"
-            text "Persistence"
+            text "Projects"
         }
 
         div {
-            attr.``class`` "columns is-variable is-5"
+            attr.``class`` "box"
+
+            h3 {
+                attr.``class`` "title is-5"
+                text "Project Files"
+            }
+
+            p {
+                attr.``class`` "has-text-grey mb-4"
+                text "Save or open Cognopy project .json files."
+            }
 
             div {
-                attr.``class`` "column is-4"
+                attr.``class`` "columns is-variable is-5"
 
                 div {
-                    attr.``class`` "box"
+                    attr.``class`` "column is-4"
 
                     div {
                         attr.``class`` "field"
@@ -2741,6 +2885,22 @@ let renderPersistenceTab (model: Model) dispatch =
                         button {
                             attr.``class`` "button is-link"
                             attr.``type`` "button"
+                            on.click (fun _ -> dispatch SaveProjectFile)
+                            text "Save Project File"
+                        }
+                        button {
+                            attr.``class`` "button is-success"
+                            attr.``type`` "button"
+                            on.click (fun _ -> dispatch OpenProjectFile)
+                            text "Open Project File"
+                        }
+                    }
+
+                    div {
+                        attr.``class`` "buttons mt-4"
+                        button {
+                            attr.``class`` "button is-info is-light"
+                            attr.``type`` "button"
                             on.click (fun _ -> dispatch LoadSphynxSampleProject)
                             text "Load Sphynx sample"
                         }
@@ -2750,22 +2910,14 @@ let renderPersistenceTab (model: Model) dispatch =
                             on.click (fun _ -> dispatch ClearProject)
                             text "Clear project"
                         }
-                        button {
-                            attr.``class`` "button is-info"
-                            attr.``type`` "button"
-                            on.click (fun _ -> dispatch ExportProjectJson)
-                            text "Export JSON"
-                        }
-                        button {
-                            attr.``class`` "button is-success"
-                            attr.``type`` "button"
-                            on.click (fun _ -> dispatch ImportProjectJson)
-                            text "Import JSON"
-                        }
                     }
+                }
+
+                div {
+                    attr.``class`` "column is-8"
 
                     div {
-                        attr.``class`` "tags mt-4"
+                        attr.``class`` "tags"
                         span {
                             attr.``class`` "tag is-light"
                             text ("Phi intakes: " + string (List.length model.ingestedPhis))
@@ -2788,7 +2940,7 @@ let renderPersistenceTab (model: Model) dispatch =
                     | None ->
                         p {
                             attr.``class`` "has-text-grey"
-                            text "No persistence action yet."
+                            text "No project file action yet."
                         }
                     | Some status ->
                         div {
@@ -2797,14 +2949,44 @@ let renderPersistenceTab (model: Model) dispatch =
                         }
                 }
             }
+        }
+
+        div {
+            attr.``class`` "box"
+
+            h3 {
+                attr.``class`` "title is-5"
+                text "JSON Import / Export"
+            }
+
+            p {
+                attr.``class`` "has-text-grey mb-4"
+                text "Advanced: copy/paste JSON project snapshots."
+            }
 
             div {
-                attr.``class`` "column is-8"
+                attr.``class`` "buttons"
+                button {
+                    attr.``class`` "button is-info"
+                    attr.``type`` "button"
+                    on.click (fun _ -> dispatch ExportProjectJson)
+                    text "Export JSON"
+                }
+                button {
+                    attr.``class`` "button is-success"
+                    attr.``type`` "button"
+                    on.click (fun _ -> dispatch ImportProjectJson)
+                    text "Import JSON"
+                }
+            }
+
+            div {
+                attr.``class`` "columns is-variable is-5"
 
                 div {
-                    attr.``class`` "box"
-                    h3 {
-                        attr.``class`` "title is-5"
+                    attr.``class`` "column is-6"
+                    h4 {
+                        attr.``class`` "title is-6"
                         text "Export JSON"
                     }
                     textarea {
@@ -2815,9 +2997,9 @@ let renderPersistenceTab (model: Model) dispatch =
                 }
 
                 div {
-                    attr.``class`` "box"
-                    h3 {
-                        attr.``class`` "title is-5"
+                    attr.``class`` "column is-6"
+                    h4 {
+                        attr.``class`` "title is-6"
                         text "Import JSON"
                     }
                     textarea {
@@ -2890,7 +3072,7 @@ let renderTopNavigation activeTab dispatch =
                         "")
                 a {
                     on.click (fun _ -> dispatch (SelectTopNavigationTab PersistenceTab))
-                    text "Persistence"
+                    text "Projects"
                 }
             }
 
@@ -3395,10 +3577,13 @@ let view model dispatch =
 type MyApp() =
     inherit ProgramComponent<Model, Message>()
 
+    [<Inject>]
+    member val JSRuntime: IJSRuntime = Unchecked.defaultof<_> with get, set
+
     override _.CssScope = CssScopes.MyApp
 
     override this.Program =
-        Program.mkProgram (fun _ -> initModel, Cmd.none) update view
+        Program.mkProgram (fun _ -> initModel, Cmd.none) (update this.JSRuntime) view
         |> Program.withRouter router
 #if DEBUG
         |> Program.withHotReload
