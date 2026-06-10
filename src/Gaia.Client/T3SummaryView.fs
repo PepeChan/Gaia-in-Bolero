@@ -19,7 +19,7 @@ let renderCurrentSigmaSnapshotPanel sequencedParsedPhis sigmaContext =
         renderSigmaSnapshotCounts (List.length sequencedParsedPhis) sigmaContext
     }
 
-let getReinforcedAtomCount entries =
+let getReinforcedAtomCount (entries: SigmaContextEntry list) =
     entries
     |> List.filter (fun entry -> entry.SupportCount > 1)
     |> List.length

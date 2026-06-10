@@ -36,6 +36,9 @@ let isGovernanceLedgerEvent eventKind =
     eventKind = "CandidateAccepted"
     || eventKind = "CandidateRejected"
     || eventKind = "CandidateHeld"
+    || eventKind = "SigmaBasisItemAccepted"
+    || eventKind = "SigmaBasisItemRejected"
+    || eventKind = "SigmaBasisItemHeld"
 
 let countLedgerEvents predicate (ledgerEvents: LedgerEvent list) =
     ledgerEvents

@@ -381,14 +381,35 @@ let update (jsRuntime: IJSRuntime) message model =
         decideCandidate candidateId Held model
 
     | SetSigmaBasisItemDecision (basisItemKey, decision) ->
-        { model with sigmaBasisItemDecisions = model.sigmaBasisItemDecisions |> Map.add basisItemKey decision }, Cmd.none
+        let updatedModel =
+            { model with sigmaBasisItemDecisions = model.sigmaBasisItemDecisions |> Map.add basisItemKey decision }
+
+        match tryFindCurrentSigmaBasisItemLedgerContext basisItemKey model with
+        | Some context ->
+            updatedModel
+            |> appendSigmaBasisItemDecisionLedgerEvent "Individual" decision context
+            |> fun ledgerModel -> ledgerModel, Cmd.none
+        | None ->
+            updatedModel, Cmd.none
 
     | SetSigmaBasisItemDecisions (basisItemKeys, decision) ->
         let sigmaBasisItemDecisions =
             basisItemKeys
             |> List.fold (fun decisions basisItemKey -> decisions |> Map.add basisItemKey decision) model.sigmaBasisItemDecisions
 
-        { model with sigmaBasisItemDecisions = sigmaBasisItemDecisions }, Cmd.none
+        let updatedModel =
+            { model with sigmaBasisItemDecisions = sigmaBasisItemDecisions }
+
+        let ledgerModel =
+            basisItemKeys
+            |> List.choose (fun basisItemKey -> tryFindCurrentSigmaBasisItemLedgerContext basisItemKey model)
+            |> List.fold
+                (fun workingModel context ->
+                    workingModel
+                    |> appendSigmaBasisItemDecisionLedgerEvent "Bulk" decision context)
+                updatedModel
+
+        ledgerModel, Cmd.none
 
     | IngestPhiDraft ->
         let timestamp = DateTime.UtcNow

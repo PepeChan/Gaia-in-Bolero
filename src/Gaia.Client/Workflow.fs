@@ -398,6 +398,241 @@ let upsertCandidateDecision (candidateDecision: CandidateDecision) (candidateDec
     else
         candidateDecisions @ [ candidateDecision ]
 
+let getTextAfter (marker: string) (value: string) =
+    let index = value.IndexOf(marker, StringComparison.Ordinal)
+
+    if index < 0 then
+        ""
+    else
+        value.Substring(index + marker.Length)
+
+let getTextBefore (marker: string) (value: string) =
+    let index = value.IndexOf(marker, StringComparison.Ordinal)
+
+    if index < 0 then
+        value
+    else
+        value.Substring(0, index)
+
+let extractAtomValueFromBasis basis =
+    let withoutKind = getTextAfter ": " basis
+
+    let source =
+        if String.IsNullOrWhiteSpace(withoutKind) then
+            basis
+        else
+            withoutKind
+
+    getTextBefore " (support " source
+    |> fun value -> value.Trim()
+
+let extractSupportingPhiIdsFromBasis basis =
+    let phiText =
+        getTextAfter "; Φ " basis
+        |> getTextBefore ")"
+
+    if String.IsNullOrWhiteSpace(phiText) then
+        []
+    else
+        phiText.Split([| ',' |], StringSplitOptions.RemoveEmptyEntries)
+        |> Array.map (fun value -> value.Trim())
+        |> Array.filter (fun value -> not (String.IsNullOrWhiteSpace(value)))
+        |> Array.toList
+
+let getCandidateSupportingPhiIds candidate =
+    candidate.RelevantSigmaBasis
+    |> List.collect extractSupportingPhiIdsFromBasis
+    |> List.distinct
+
+let getCandidateAtomValues candidate =
+    candidate.RelevantSigmaBasis
+    |> List.map extractAtomValueFromBasis
+    |> List.filter (fun value -> not (String.IsNullOrWhiteSpace(value)))
+    |> List.distinct
+
+type SigmaBasisItemReview =
+    {
+        Key: string
+        Kind: string
+        AtomValue: string
+        SupportCount: int
+        SupportingPhiIds: string list
+        RawPhiPreview: string option
+        SourceText: string
+    }
+
+let normalizeBasisItemKeyPart (value: string) =
+    if String.IsNullOrWhiteSpace(value) then
+        "none"
+    else
+        value.Trim().ToLowerInvariant().Split([| ' '; '\t'; '\r'; '\n' |], StringSplitOptions.RemoveEmptyEntries)
+        |> String.concat " "
+
+let createSigmaBasisItemKey candidateId atomKind atomValue =
+    candidateId
+    + "::"
+    + normalizeBasisItemKeyPart atomKind
+    + "::"
+    + normalizeBasisItemKeyPart atomValue
+
+let extractAtomKindFromBasis fallbackKind (basis: string) =
+    let index = basis.IndexOf(": ", StringComparison.Ordinal)
+
+    if index > 0 then
+        basis.Substring(0, index).Trim()
+    else
+        fallbackKind
+
+let extractSupportCountFromBasis basis =
+    let supportText =
+        getTextAfter "(support " basis
+        |> getTextBefore ";"
+        |> fun value -> value.Trim()
+
+    let mutable supportCount = 0
+
+    if Int32.TryParse(supportText, &supportCount) then
+        supportCount
+    else
+        0
+
+let buildPhiStatementMap sequencedParsedPhis =
+    sequencedParsedPhis
+    |> List.map (fun (_, parse: PhiParse) -> parse.PhiId, parse.Statement)
+    |> Map.ofList
+
+let tryFindRawPhiPreview phiStatementById supportingPhiIds =
+    supportingPhiIds
+    |> List.tryPick (fun phiId ->
+        phiStatementById
+        |> Map.tryFind phiId
+        |> Option.bind (fun statement ->
+            if String.IsNullOrWhiteSpace(statement) then
+                None
+            else
+                Some statement))
+
+let buildSigmaBasisItemReviews (candidate: CandidateDelta) sequencedParsedPhis =
+    let phiStatementById = buildPhiStatementMap sequencedParsedPhis
+
+    candidate.RelevantSigmaBasis
+    |> List.map (fun basis ->
+        let atomKind = extractAtomKindFromBasis candidate.Target basis
+        let atomValue = extractAtomValueFromBasis basis
+        let supportingPhiIds = extractSupportingPhiIdsFromBasis basis
+        let parsedSupportCount = extractSupportCountFromBasis basis
+        let supportCount =
+            if parsedSupportCount > 0 then
+                parsedSupportCount
+            else
+                List.length supportingPhiIds
+
+        {
+            Key = createSigmaBasisItemKey candidate.CandidateId atomKind atomValue
+            Kind = atomKind
+            AtomValue = atomValue
+            SupportCount = supportCount
+            SupportingPhiIds = supportingPhiIds
+            RawPhiPreview = tryFindRawPhiPreview phiStatementById supportingPhiIds
+            SourceText = basis
+        })
+
+let getSigmaBasisItemDecisionValue basisItemKey sigmaBasisItemDecisions =
+    sigmaBasisItemDecisions
+    |> Map.tryFind basisItemKey
+    |> Option.defaultValue Pending
+
+type SigmaBasisItemLedgerContext =
+    {
+        Candidate: CandidateDelta
+        BasisItem: SigmaBasisItemReview
+    }
+
+let getCurrentSigmaBasisItemLedgerContexts (model: Model) =
+    let sequencedParsedPhis =
+        model.parsedPhis
+        |> getIncludedSequencedParsedPhis model.excludedPhiIds
+
+    sequencedParsedPhis
+    |> buildSigmaContext
+    |> formulateCandidateDeltas
+    |> List.collect (fun candidate ->
+        buildSigmaBasisItemReviews candidate sequencedParsedPhis
+        |> List.map (fun basisItem ->
+            {
+                Candidate = candidate
+                BasisItem = basisItem
+            }))
+
+let tryFindCurrentSigmaBasisItemLedgerContext basisItemKey model =
+    model
+    |> getCurrentSigmaBasisItemLedgerContexts
+    |> List.tryFind (fun context -> context.BasisItem.Key = basisItemKey)
+
+let formatSigmaBasisItemDecisionValue = function
+    | Pending -> "Pending"
+    | Accepted -> "Accepted"
+    | Rejected -> "Rejected"
+    | Held -> "Held"
+
+let getSigmaBasisItemDecisionRationale = function
+    | Pending -> ""
+    | Accepted -> "Basis item accepted for later Sigma atom promotion."
+    | Rejected -> "Basis item rejected; no Sigma atom promotion should occur."
+    | Held -> "Basis item held for later review."
+
+let getSigmaBasisItemDecisionLedgerKind = function
+    | Accepted -> "SigmaBasisItemAccepted"
+    | Rejected -> "SigmaBasisItemRejected"
+    | Held -> "SigmaBasisItemHeld"
+    | Pending -> "SigmaBasisItemReviewed"
+
+let getSigmaBasisItemDecisionLedgerSummary = function
+    | Accepted -> "Sigma basis item accepted"
+    | Rejected -> "Sigma basis item rejected"
+    | Held -> "Sigma basis item held"
+    | Pending -> "Sigma basis item reviewed"
+
+let formatSupportingPhiIds phiIds =
+    match phiIds with
+    | [] -> "None"
+    | values -> String.concat ", " values
+
+let formatSigmaBasisItemLedgerDetail actionScope decision context =
+    let basisItem = context.BasisItem
+    let candidate = context.Candidate
+    let rationale = getSigmaBasisItemDecisionRationale decision
+
+    "Candidate type: "
+    + formatCandidateDeltaKind candidate.Kind
+    + "; Candidate target: "
+    + candidate.Target
+    + "; Atom kind: "
+    + basisItem.Kind
+    + "; Atom value: "
+    + basisItem.AtomValue
+    + "; Supporting Phi IDs: "
+    + formatSupportingPhiIds basisItem.SupportingPhiIds
+    + "; Decision: "
+    + formatSigmaBasisItemDecisionValue decision
+    + "; Action scope: "
+    + actionScope
+    + "; Rationale: "
+    + rationale
+
+let appendSigmaBasisItemDecisionLedgerEvent actionScope decision context model =
+    match decision with
+    | Pending -> model
+    | Accepted
+    | Rejected
+    | Held ->
+        model
+        |> appendLedgerEvent
+            (getSigmaBasisItemDecisionLedgerKind decision)
+            context.BasisItem.Key
+            (getSigmaBasisItemDecisionLedgerSummary decision)
+            (formatSigmaBasisItemLedgerDetail actionScope decision context)
+
 let parsePhiIntoModel (phi: PhiIntake) (model: Model) =
     let beforeSigma =
         model.parsedPhis
