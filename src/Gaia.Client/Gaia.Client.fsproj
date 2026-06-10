@@ -10,6 +10,15 @@
     <Compile Include="Types.fs" />
     <Compile Include="Persistence.fs" />
     <Compile Include="Ledger.fs" />
+    <Compile Include="AppState.fs" />
+    <Compile Include="Workflow.fs" />
+    <Compile Include="AppUpdate.fs" />
+    <Compile Include="T2ParsingView.fs" />
+    <Compile Include="T4CandidateView.fs" />
+    <Compile Include="T3SummaryView.fs" />
+    <Compile Include="T5GovernanceView.fs" />
+    <Compile Include="LedgerView.fs" />
+    <Compile Include="EvidenceView.fs" />
     <Compile Include="Main.fs" />
     <Compile Include="Startup.fs" />
   </ItemGroup>
