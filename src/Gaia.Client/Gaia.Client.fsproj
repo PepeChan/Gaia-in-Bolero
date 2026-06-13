@@ -11,6 +11,7 @@
     <Compile Include="Persistence.fs" />
     <Compile Include="Ledger.fs" />
     <Compile Include="AppState.fs" />
+    <Compile Include="Inquiry.fs" />
     <Compile Include="Workflow.fs" />
     <Compile Include="FactsReconstruction.fs" />
     <Compile Include="AppUpdate.fs" />

@@ -15,6 +15,7 @@ open Gaia.Client.Persistence
 open Gaia.Client.Ledger
 open Gaia.Client.AppState
 open Gaia.Client.Workflow
+open Gaia.Client.Inquiry
 open Gaia.Client.AppUpdate
 open Gaia.Client.T2ParsingView
 open Gaia.Client.T4CandidateView
@@ -112,7 +113,7 @@ let renderPersistenceTab (model: Model) dispatch =
                         attr.``class`` "tags"
                         span {
                             attr.``class`` "tag is-light"
-                            text ("Phi intakes: " + string (List.length model.ingestedPhis))
+                            text ("Forward inquiries / Phi intakes: " + string (List.length model.ingestedPhis))
                         }
                         span {
                             attr.``class`` "tag is-light"
@@ -264,7 +265,7 @@ let renderTopNavigation activeTab dispatch =
                         "")
                 a {
                     on.click (fun _ -> dispatch (SelectTopNavigationTab FactsReconstructionTab))
-                    text "Facts"
+                    text "Inquiry Resolution"
                 }
             }
 
@@ -324,14 +325,19 @@ let homePage model dispatch =
 
                 h2 {
                     attr.``class`` "title is-4"
-                    text "Live Gaia Workflow"
+                    text "Live Inquiry Workflow"
+                }
+
+                p {
+                    attr.``class`` "has-text-grey mb-4"
+                    text "Inquiry is the user-facing layer. T1-T5 are the translation and reasoning machinery over Phi, candidates, governance, and ledger history."
                 }
 
                 div {
                     attr.``class`` "tags are-medium mb-5"
                     span {
                         attr.``class`` "tag is-link"
-                        text "T1"
+                        text "T1 Inquiry Intake"
                     }
                     span {
                         attr.``class`` "tag is-light"
@@ -385,7 +391,12 @@ let homePage model dispatch =
                             attr.``class`` "box"
                             h2 {
                                 attr.``class`` "title is-5"
-                                text "T1 — Φ Ingestion"
+                                text "T1 - Inquiry Intake / Phi Ingestion"
+                            }
+
+                            p {
+                                attr.``class`` "is-size-7 has-text-grey"
+                                text "Forward inquiries are still captured as PhiIntake records and parsed by the existing T1-T5 machinery."
                             }
 
                             div {
@@ -496,7 +507,7 @@ let homePage model dispatch =
                                 attr.``class`` "button is-link is-fullwidth"
                                 attr.``type`` "button"
                                 on.click (fun _ -> dispatch IngestPhiDraft)
-                                text "Ingest Φ"
+                                text "Ingest Inquiry / Phi"
                             }
                         }
 
@@ -527,16 +538,29 @@ let homePage model dispatch =
                             | [] ->
                                 p {
                                     attr.``class`` "has-text-grey"
-                                    text "No Φ ingested yet."
+                                    text "No inquiries / Phi ingested yet."
                                 }
                             | phis ->
                                 div {
                                     attr.``class`` "content"
                                     forEach phis <| fun phi ->
+                                        let inquiry = inquiryFromPhiIntake phi
+
                                         div {
                                             attr.``class`` "box"
                                             p {
                                                 strong { text phi.PhiId }
+                                            }
+                                            div {
+                                                attr.``class`` "tags mb-2"
+                                                span {
+                                                    attr.``class`` "tag is-link is-light"
+                                                    text (formatInquiryMode inquiry.Mode)
+                                                }
+                                                span {
+                                                    attr.``class`` "tag is-info is-light"
+                                                    text (formatInquiryKind inquiry.Kind)
+                                                }
                                             }
                                             p {
                                                 text phi.RawStatement

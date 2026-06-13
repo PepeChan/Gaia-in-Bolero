@@ -17,6 +17,36 @@ type TopNavigationTab =
     | PersistenceTab
     | LedgerTab
 
+type InquiryMode =
+    | ForwardInquiry
+    | ReverseInquiry
+
+type InquiryKind =
+    | Requirement
+    | Observation
+    | Concern
+    | Proposal
+    | Constraint
+    | Question
+    | StatusRequest
+    | ExplanationRequest
+    | ReviewFinding
+    | Decision
+    | Evidence
+
+type Inquiry =
+    {
+        InquiryId: string
+        Mode: InquiryMode
+        Kind: InquiryKind
+        SourceLabel: string
+        SourceId: string
+        Text: string
+        TargetKind: string option
+        TargetId: string option
+        UnderlyingMechanism: string list
+    }
+
 type SigmaContextEntry =
     {
         Value: string

@@ -7,6 +7,7 @@ open Gaia.Client.Types
 open Gaia.Client.AppState
 open Gaia.Client.Workflow
 open Gaia.Client.FactsReconstruction
+open Gaia.Client.Inquiry
 
 let private renderMuted textValue =
     p {
@@ -251,6 +252,8 @@ let private renderSupportingEvidence (result: FactsReconstructionResult) =
     }
 
 let private renderResultPanel (result: FactsReconstructionResult) =
+    let inquiry = inquiryFromFactsReconstructionQuestion result.Question result.TargetKind result.TargetId
+
     div {
         attr.``class`` "box facts-reconstruction-result"
 
@@ -262,7 +265,7 @@ let private renderResultPanel (result: FactsReconstructionResult) =
                 div {
                     p {
                         attr.``class`` "heading mb-1"
-                        text "Stakeholder question"
+                        text "Reverse inquiry"
                     }
                     h2 {
                         attr.``class`` "title is-5 mb-0"
@@ -275,6 +278,14 @@ let private renderResultPanel (result: FactsReconstructionResult) =
                 attr.``class`` "level-right"
                 div {
                     attr.``class`` "tags mb-0"
+                    span {
+                        attr.``class`` "tag is-link is-light"
+                        text (formatInquiryMode inquiry.Mode)
+                    }
+                    span {
+                        attr.``class`` "tag is-info is-light"
+                        text (formatInquiryKind inquiry.Kind)
+                    }
                     span {
                         attr.``class`` "tag is-light"
                         text ("Target kind: " + result.TargetKind)
@@ -301,17 +312,43 @@ let private renderResultPanel (result: FactsReconstructionResult) =
 
 let renderFactsReconstructionTab model dispatch =
     let targetOptions = getFactsReconstructionTargetOptions model
+    let inquiry =
+        inquiryFromFactsReconstructionQuestion
+            model.factsReconstructionQuestion
+            model.factsReconstructionTargetKind
+            model.factsReconstructionTargetId
 
     div {
         attr.``class`` "mb-6 pb-5"
 
         h2 {
             attr.``class`` "title is-4"
-            text "Facts Reconstruction"
+            text "Inquiry Resolution / Facts Reconstruction"
+        }
+
+        p {
+            attr.``class`` "has-text-grey mb-4"
+            text "Reverse inquiries resolve stored project facts into an answer. T1-T5 are the translation and reasoning machinery behind the reconstruction."
         }
 
         div {
             attr.``class`` "box"
+
+            div {
+                attr.``class`` "tags mb-4"
+                span {
+                    attr.``class`` "tag is-link is-light"
+                    text (formatInquiryMode inquiry.Mode)
+                }
+                span {
+                    attr.``class`` "tag is-info is-light"
+                    text (formatInquiryKind inquiry.Kind)
+                }
+                span {
+                    attr.``class`` "tag is-light"
+                    text "Facts Reconstruction"
+                }
+            }
 
             div {
                 attr.``class`` "columns is-variable is-4"
@@ -320,7 +357,7 @@ let renderFactsReconstructionTab model dispatch =
                     attr.``class`` "column is-5"
                     label {
                         attr.``class`` "label"
-                        text "Question"
+                        text "Inquiry question"
                     }
                     div {
                         attr.``class`` "select is-fullwidth"
@@ -379,7 +416,7 @@ let renderFactsReconstructionTab model dispatch =
                     attr.``class`` "level-left"
                     p {
                         attr.``class`` "has-text-grey is-size-7 mb-0"
-                        text "Read-only deterministic reconstruction from stored facts, candidates, decisions, provenance, and ledger history."
+                        text "Read-only deterministic inquiry resolution from stored facts, candidates, decisions, provenance, and ledger history."
                     }
                 }
 
@@ -389,7 +426,7 @@ let renderFactsReconstructionTab model dispatch =
                         attr.``class`` "button is-link"
                         attr.``type`` "button"
                         on.click (fun _ -> dispatch RunFactsReconstruction)
-                        text "Reconstruct"
+                        text "Resolve Inquiry"
                     }
                 }
             }
@@ -399,7 +436,7 @@ let renderFactsReconstructionTab model dispatch =
         | None ->
             div {
                 attr.``class`` "box"
-                renderMuted "Choose a question and reconstruct to inspect stored project facts."
+                renderMuted "Choose a reverse inquiry and resolve it to inspect stored project facts."
             }
         | Some result ->
             renderResultPanel result
