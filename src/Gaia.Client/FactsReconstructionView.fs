@@ -228,6 +228,28 @@ let private renderResultSection title (renderContent: unit -> Node) : Node =
         renderContent ()
     }
 
+let private renderEvidenceSection title (renderContent: unit -> Node) : Node =
+    div {
+        attr.``class`` "facts-reconstruction-evidence-section"
+        h4 {
+            attr.``class`` "subtitle is-6 mb-2"
+            text title
+        }
+        renderContent ()
+    }
+
+let private renderSupportingEvidence (result: FactsReconstructionResult) =
+    div {
+        renderEvidenceSection "Reconstruction facts" (fun () -> renderStringList "No fact lines reconstructed." result.FactLines)
+        renderEvidenceSection "Source Phi IDs" (fun () -> renderStringTags result.SourcePhiIds)
+        renderEvidenceSection "Source Phi text" (fun () -> renderSourcePhiTexts result.SourcePhiTexts)
+        renderEvidenceSection "Context entries used" (fun () -> renderContextEntries result.ContextEntriesUsed)
+        renderEvidenceSection "Candidate type / target / basis" (fun () -> renderCandidateFacts result.CandidateFacts)
+        renderEvidenceSection "Governance decision" (fun () -> renderGovernanceDecisions result.GovernanceDecisions)
+        renderEvidenceSection "Provenance labels" (fun () -> renderStringTags result.ProvenanceLabels)
+        renderEvidenceSection "Missing or unresolved items" (fun () -> renderStringList "No missing or unresolved items found." result.MissingOrUnresolvedItems)
+    }
+
 let private renderResultPanel (result: FactsReconstructionResult) =
     div {
         attr.``class`` "box facts-reconstruction-result"
@@ -265,20 +287,16 @@ let private renderResultPanel (result: FactsReconstructionResult) =
             }
         }
 
-        div {
-            attr.``class`` "notification is-info is-light facts-reconstruction-summary"
-            text result.AnswerSummary
-        }
+        renderResultSection "Answer" (fun () ->
+            div {
+                attr.``class`` "notification is-info is-light facts-reconstruction-summary"
+                text result.AnswerSummary
+            })
 
-        renderResultSection "Reconstruction facts" (fun () -> renderStringList "No fact lines reconstructed." result.FactLines)
-        renderResultSection "Source Phi IDs" (fun () -> renderStringTags result.SourcePhiIds)
-        renderResultSection "Source Phi text" (fun () -> renderSourcePhiTexts result.SourcePhiTexts)
-        renderResultSection "Context entries used" (fun () -> renderContextEntries result.ContextEntriesUsed)
-        renderResultSection "Candidate type / target / basis" (fun () -> renderCandidateFacts result.CandidateFacts)
-        renderResultSection "Governance decision" (fun () -> renderGovernanceDecisions result.GovernanceDecisions)
-        renderResultSection "Related ledger events" (fun () -> renderLedgerEvents result.RelatedLedgerEvents)
-        renderResultSection "Provenance labels" (fun () -> renderStringTags result.ProvenanceLabels)
-        renderResultSection "Missing or unresolved items" (fun () -> renderStringList "No missing or unresolved items found." result.MissingOrUnresolvedItems)
+        renderResultSection "Reasons" (fun () -> renderStringList "No deterministic reason lines reconstructed." result.ReasonLines)
+        renderResultSection "Recommended next actions" (fun () -> renderStringList "No next action suggested by this deterministic reconstruction." result.RecommendedNextActions)
+        renderResultSection "Supporting evidence" (fun () -> renderSupportingEvidence result)
+        renderResultSection "Ledger / history" (fun () -> renderLedgerEvents result.RelatedLedgerEvents)
     }
 
 let renderFactsReconstructionTab model dispatch =

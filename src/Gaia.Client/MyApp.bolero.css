@@ -92,6 +92,14 @@
   line-height: 1.45;
 }
 
+.facts-reconstruction-evidence-section {
+  margin-top: 1rem;
+}
+
+.facts-reconstruction-evidence-section:first-child {
+  margin-top: 0;
+}
+
 .facts-reconstruction-tag {
   height: auto;
   line-height: 1.25;

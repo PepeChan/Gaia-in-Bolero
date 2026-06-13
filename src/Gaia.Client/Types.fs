@@ -141,6 +141,8 @@ type FactsReconstructionResult =
         TargetKind: string
         TargetId: string
         AnswerSummary: string
+        ReasonLines: string list
+        RecommendedNextActions: string list
         FactLines: string list
         SourcePhiIds: string list
         SourcePhiTexts: (string * string) list

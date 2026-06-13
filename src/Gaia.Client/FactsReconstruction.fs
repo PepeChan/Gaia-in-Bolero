@@ -42,6 +42,31 @@ let private joinOrNone values =
     | [] -> "None"
     | values -> String.concat ", " values
 
+let private joinWithAnd values =
+    match values with
+    | [] -> ""
+    | [ value ] -> value
+    | [ first; second ] -> first + " and " + second
+    | values ->
+        let leading =
+            values
+            |> List.take (List.length values - 1)
+            |> String.concat ", "
+
+        leading + ", and " + (values |> List.last)
+
+let private pluralize singular plural count =
+    if count = 1 then
+        singular
+    else
+        plural
+
+let private countLabel singular plural count =
+    string count + " " + pluralize singular plural count
+
+let private candidateDisplayName (candidate: CandidateDelta) =
+    formatCandidateDeltaKind candidate.Kind
+
 let suggestFactsTargetKind question =
     if question = factsQuestionWhyHostKnown then
         factsTargetKindHost
@@ -102,6 +127,63 @@ let private basisItemDecisionLines governance =
         + basisItem.AtomValue
         + "' was "
         + lowerDecisionText decision)
+
+let private basisDecisionCountPhrase governance =
+    [
+        if governance.AcceptedCount > 0 then
+            countLabel "item" "items" governance.AcceptedCount + " accepted"
+        if governance.RejectedCount > 0 then
+            countLabel "item" "items" governance.RejectedCount + " rejected"
+        if governance.HeldCount > 0 then
+            countLabel "item" "items" governance.HeldCount + " held"
+        if governance.PendingCount > 0 then
+            countLabel "item" "items" governance.PendingCount + " pending"
+    ]
+    |> joinWithAnd
+
+let private governanceReasonLines (candidate: CandidateDelta) governance =
+    [
+        yield
+            candidateDisplayName candidate
+            + " has basis-derived status "
+            + formatCandidateGroupStatus governance.Status
+            + " because "
+            + governance.Explanation
+        match governance.ConflictExplanation with
+        | None -> ()
+        | Some conflict -> yield conflict
+        yield! basisItemDecisionLines governance
+    ]
+    |> distinctText
+
+let private candidateGovernanceNextActions (candidate: CandidateDelta) governance =
+    [
+        if governance.PendingCount > 0 then
+            yield
+                "Review "
+                + candidate.Target.ToLowerInvariant()
+                + " pending basis "
+                + pluralize "item" "items" governance.PendingCount
+                + "."
+        if governance.HeldCount > 0 then
+            yield
+                "Resolve held "
+                + candidate.Target.ToLowerInvariant()
+                + " basis "
+                + pluralize "item" "items" governance.HeldCount
+                + "."
+        match governance.ConflictExplanation with
+        | None -> ()
+        | Some _ ->
+            yield
+                "Reconcile the class-level decision with basis-item decisions for "
+                + candidateDisplayName candidate
+                + "."
+        if Option.isNone governance.ClassDecisionRecord
+           && (governance.Status = GroupPending || governance.Status = GroupPartiallyGoverned) then
+            yield "Decide the " + candidateDisplayName candidate + " candidate group."
+    ]
+    |> distinctText
 
 let private candidateGovernanceFactLines governance =
     [
@@ -262,6 +344,8 @@ let private buildResult
     targetKind
     targetId
     summary
+    reasonLines
+    recommendedActions
     factLines
     phiIds
     (contextEntries: PhiContextEntry list)
@@ -283,6 +367,8 @@ let private buildResult
         TargetKind = targetKind
         TargetId = targetId
         AnswerSummary = summary
+        ReasonLines = reasonLines |> distinctText
+        RecommendedNextActions = recommendedActions |> distinctText
         FactLines = factLines |> distinctText
         SourcePhiIds = sourcePhiIds
         SourcePhiTexts = []
@@ -299,7 +385,7 @@ let private completeResult model result =
         SourcePhiTexts = getSourcePhiTexts result.SourcePhiIds model }
 
 let private emptyResult question targetKind targetId summary missing model =
-    buildResult question targetKind targetId summary [] [] [] [] [] [] [] missing
+    buildResult question targetKind targetId summary missing missing [] [] [] [] [] [] [] missing
     |> completeResult model
 
 let private tryResolveCandidateForQuestion expectedDecision model =
@@ -359,33 +445,57 @@ let private reconstructCandidateDecision expectedDecision question model =
         let summary =
             if groupMatchesExpected then
                 "Candidate "
-                + formatCandidateDeltaKind candidate.Kind
+                + candidateDisplayName candidate
                 + " is "
                 + decisionText.ToLowerInvariant()
-                + " at the basis-derived group level. "
-                + groupGovernance.Explanation
+                + " at the basis-derived group level."
             elif actualDecision = expectedDecision then
                 "Candidate "
-                + formatCandidateDeltaKind candidate.Kind
+                + candidateDisplayName candidate
                 + " is not fully "
                 + decisionText.ToLowerInvariant()
-                + ". Class-level decision was "
-                + decisionText
-                + ", but the basis-derived status is "
+                + "; its basis-derived status is "
                 + groupStatusText
-                + ". "
-                + groupGovernance.Explanation
+                + "."
             else
                 "Candidate "
-                + formatCandidateDeltaKind candidate.Kind
+                + candidateDisplayName candidate
                 + " is not "
                 + decisionText.ToLowerInvariant()
-                + " at the basis-derived group level. Basis-derived status is "
+                + "; its basis-derived status is "
                 + groupStatusText
-                + "; class-level decision is "
-                + actualDecisionText
-                + ". "
-                + groupGovernance.Explanation
+                + "."
+
+        let reasonLines =
+            [
+                if groupMatchesExpected then
+                    yield groupGovernance.Explanation
+                else
+                    yield "Basis-derived status is " + groupStatusText + ", not " + decisionText + "."
+                yield classDecisionText groupGovernance
+                yield
+                    "Class-level decision value used by the ledger is "
+                    + actualDecisionText
+                    + "."
+                yield "Candidate was proposed because " + candidate.Reason
+                if not (List.isEmpty supportingPhiIds) then
+                    yield "Supporting Phi IDs: " + joinOrNone supportingPhiIds
+                yield! governanceReasonLines candidate groupGovernance
+            ]
+            |> distinctText
+
+        let recommendedActions =
+            [
+                yield! candidateGovernanceNextActions candidate groupGovernance
+                if not groupMatchesExpected then
+                    yield
+                        "Resolve basis-item decisions before treating this group as "
+                        + lowerDecisionText expectedDecision
+                        + "."
+                if List.isEmpty supportingPhiIds then
+                    yield "Review candidate provenance because no supporting Phi IDs were found."
+            ]
+            |> distinctText
 
         let missing =
             [
@@ -416,6 +526,8 @@ let private reconstructCandidateDecision expectedDecision question model =
             factsTargetKindCandidate
             candidate.CandidateId
             summary
+            reasonLines
+            recommendedActions
             factLines
             supportingPhiIds
             contextEntries
@@ -451,14 +563,31 @@ let private reconstructCandidateFacts question model =
 
         let summary =
             "Candidate "
-            + formatCandidateDeltaKind candidate.Kind
+            + candidateDisplayName candidate
             + " is supported by "
             + string (List.length candidate.RelevantSigmaBasis)
-            + " current Sigma basis item(s). It was proposed because "
-            + candidate.Reason
-            + " Its basis-derived group status is "
+            + " current Sigma basis item(s); its basis-derived status is "
             + formatCandidateGroupStatus groupGovernance.Status
             + "."
+
+        let reasonLines =
+            [
+                yield "Candidate was proposed because " + candidate.Reason
+                yield groupGovernance.Explanation
+                yield classDecisionText groupGovernance
+                if not (List.isEmpty supportingPhiIds) then
+                    yield "Supporting Phi IDs: " + joinOrNone supportingPhiIds
+                yield! governanceReasonLines candidate groupGovernance
+            ]
+            |> distinctText
+
+        let recommendedActions =
+            [
+                yield! candidateGovernanceNextActions candidate groupGovernance
+                if List.isEmpty supportingPhiIds then
+                    yield "Review candidate provenance because no supporting Phi IDs were found."
+            ]
+            |> distinctText
 
         let missing =
             [
@@ -487,6 +616,8 @@ let private reconstructCandidateFacts question model =
             factsTargetKindCandidate
             candidate.CandidateId
             summary
+            reasonLines
+            recommendedActions
             factLines
             supportingPhiIds
             contextEntries
@@ -559,9 +690,17 @@ let private reconstructHostKnown question model =
         let summary =
             "Host "
             + hostEntry.Value
-            + " is known because "
-            + contextPhrase
-            + candidatePhrase
+            + " is known."
+
+        let reasonLines =
+            [
+                yield contextPhrase
+                if not (List.isEmpty hostCandidates) then
+                    yield candidatePhrase.Trim()
+                yield "Host support count: " + string hostEntry.SupportCount + "."
+                yield "Supporting Phi IDs: " + joinOrNone supportingPhiIds
+            ]
+            |> distinctText
 
         let targetIds =
             [
@@ -583,6 +722,15 @@ let private reconstructHostKnown question model =
                     "No current ADD HOST candidate references this host."
             ]
 
+        let recommendedActions =
+            [
+                if List.isEmpty contextEntries && not (equalsText hostEntry.Provenance "Text") then
+                    yield "Review or attach a HostHint context entry for this host."
+                if List.isEmpty hostCandidates then
+                    yield "Review whether this known host needs an ADD HOST candidate decision."
+            ]
+            |> distinctText
+
         let factLines =
             [
                 "Host: " + hostEntry.Value
@@ -596,6 +744,8 @@ let private reconstructHostKnown question model =
             factsTargetKindHost
             hostEntry.Value
             summary
+            reasonLines
+            recommendedActions
             factLines
             supportingPhiIds
             contextEntries
@@ -687,11 +837,35 @@ let private reconstructPhiContext question model =
                     "No PhiContextEntries are attached to " + phiId + "."
             ]
 
+        let reasonLines =
+            if List.isEmpty contextEntries then
+                missing
+            else
+                contextEntries
+                |> List.map (fun entry ->
+                    "Context entry "
+                    + entry.ContextId
+                    + " attaches "
+                    + entry.Kind
+                    + ": "
+                    + entry.Value
+                    + " to Phi "
+                    + phiId
+                    + ".")
+
+        let recommendedActions =
+            [
+                if List.isEmpty contextEntries then
+                    yield "Attach context to Phi " + phiId + " if the Phi needs rich interpretation."
+            ]
+
         buildResult
             question
             factsTargetKindPhi
             phiId
             summary
+            reasonLines
+            recommendedActions
             factLines
             [ phiId ]
             contextEntries
@@ -800,6 +974,41 @@ let private reconstructPhiChange question model =
                         "No new current Sigma atoms were added by this Phi."
                 ]
 
+            let reasonLines =
+                [
+                    if model.excludedPhiIds |> List.contains phiId then
+                        yield "Phi " + phiId + " is excluded from replay, so parsed facts are not applied to the current Sigma context."
+                    elif List.isEmpty addedAtoms then
+                        yield "The parsed T2 result did not introduce any Sigma atom that was absent before this Phi."
+                    else
+                        yield
+                            "The parsed T2 result introduced "
+                            + countLabel "current Sigma atom" "current Sigma atoms" (List.length addedAtoms)
+                            + "."
+                    if not (List.isEmpty relatedCandidates) then
+                        yield
+                            "Those parsed facts support "
+                            + countLabel "current T4 candidate" "current T4 candidates" (List.length relatedCandidates)
+                            + "."
+                    if not (List.isEmpty contextEntries) then
+                        yield
+                            "Phi "
+                            + phiId
+                            + " also has "
+                            + countLabel "context entry" "context entries" (List.length contextEntries)
+                            + "."
+                ]
+                |> distinctText
+
+            let recommendedActions =
+                [
+                    if model.excludedPhiIds |> List.contains phiId then
+                        yield "Include Phi " + phiId + " in replay if its parsed facts should affect current state."
+                    if List.isEmpty addedAtoms then
+                        yield "Review the T2 parsed result if a new current Sigma atom was expected."
+                ]
+                |> distinctText
+
             let factLines =
                 [
                     yield "T2 statement: " + parse.Statement
@@ -819,6 +1028,8 @@ let private reconstructPhiChange question model =
                 factsTargetKindPhi
                 phiId
                 summary
+                reasonLines
+                recommendedActions
                 factLines
                 [ phiId ]
                 contextEntries
@@ -879,6 +1090,42 @@ let private reconstructDecisionsFromPhi question model =
                 + string (List.length decisions)
                 + " recorded T5 decision(s)."
 
+        let reasonLines =
+            [
+                if List.isEmpty relatedCandidates then
+                    yield "No current candidate basis references Phi " + phiId + "."
+                else
+                    yield
+                        "Phi "
+                        + phiId
+                        + " is present in the supporting basis for "
+                        + countLabel "current candidate group" "current candidate groups" (List.length relatedCandidates)
+                        + "."
+                yield!
+                    relatedGovernance
+                    |> List.map (fun (candidate, governance) ->
+                        candidateDisplayName candidate
+                        + " is "
+                        + (formatCandidateGroupStatus governance.Status).ToLowerInvariant()
+                        + " at the basis-derived level; "
+                        + classDecisionText governance
+                        + ".")
+                yield!
+                    unresolvedCandidates
+                    |> List.choose (fun (_, governance) -> governance.ConflictExplanation)
+            ]
+            |> distinctText
+
+        let recommendedActions =
+            [
+                if List.isEmpty relatedCandidates then
+                    yield "Parse or review current candidates if this Phi was expected to support a decision."
+                yield!
+                    unresolvedCandidates
+                    |> List.collect (fun (candidate, governance) -> candidateGovernanceNextActions candidate governance)
+            ]
+            |> distinctText
+
         let factLines =
             relatedGovernance
             |> List.collect (fun (candidate, governance) ->
@@ -920,6 +1167,8 @@ let private reconstructDecisionsFromPhi question model =
             factsTargetKindPhi
             phiId
             summary
+            reasonLines
+            recommendedActions
             factLines
             [ phiId ]
             contextEntries
@@ -964,12 +1213,6 @@ let private reconstructUnresolved question model =
                 else
                     None))
 
-    let pendingCandidates =
-        candidates
-        |> List.filter (fun candidate ->
-            let governance = getCandidateGroupGovernance model candidate
-            governance.Status = GroupPending || governance.Status = GroupPartiallyGoverned)
-
     let pendingBasisItems =
         pendingOrHeldBasisItems
         |> List.filter (fun (_, _, decision) -> decision = Pending)
@@ -987,7 +1230,68 @@ let private reconstructUnresolved question model =
 
     let summary =
         if List.isEmpty unresolvedCandidateGroups && List.isEmpty pendingOrHeldBasisItems then
-            "No current candidate group or basis item is unresolved."
+            "No unresolved decisions remain."
+        else
+            string (List.length unresolvedCandidateGroups)
+            + " unresolved candidate group "
+            + pluralize "decision" "decisions" (List.length unresolvedCandidateGroups)
+            + " "
+            + pluralize "remains" "remain" (List.length unresolvedCandidateGroups)
+            + "."
+
+    let unresolvedReasonLine (candidate: CandidateDelta, governance: CandidateGroupGovernance) =
+        let name = candidateDisplayName candidate
+
+        match governance.Status with
+        | GroupPending ->
+            if Option.isNone governance.ClassDecisionRecord then
+                name + " has not received a class-level decision and has " + countLabel "pending basis item" "pending basis items" governance.PendingCount + "."
+            else
+                name + " is unresolved because " + basisDecisionCountPhrase governance + "."
+        | GroupPartiallyGoverned
+        | GroupMixed
+        | GroupPartiallyAccepted ->
+            name + " is unresolved because " + basisDecisionCountPhrase governance + "."
+        | GroupHeld ->
+            name
+            + " is held because "
+            + countLabel "basis item" "basis items" governance.HeldCount
+            + " "
+            + pluralize "is" "are" governance.HeldCount
+            + " held."
+        | GroupAccepted
+        | GroupRejected ->
+            match governance.ConflictExplanation with
+            | Some conflict -> name + " needs reconciliation because " + conflict
+            | None -> name + " is resolved."
+
+    let reasonLines =
+        [
+            if List.isEmpty unresolvedCandidateGroups && List.isEmpty pendingOrHeldBasisItems then
+                yield "All current candidate groups are resolved under basis-derived governance."
+            else
+                yield
+                    "The unresolved count comes from "
+                    + countLabel "candidate group" "candidate groups" (List.length unresolvedCandidateGroups)
+                    + " whose basis-derived status is pending, held, mixed, partially governed, or conflicts with a class-level decision."
+            yield! unresolvedCandidateGroups |> List.map unresolvedReasonLine
+            yield! unresolvedCandidateGroups |> List.choose (fun (_, governance) -> governance.ConflictExplanation)
+        ]
+        |> distinctText
+
+    let recommendedActions =
+        [
+            yield!
+                unresolvedCandidateGroups
+                |> List.collect (fun (candidate, governance) -> candidateGovernanceNextActions candidate governance)
+            if not (List.isEmpty pendingBasisItems) then
+                yield "Review pending basis items."
+        ]
+        |> distinctText
+
+    let evidenceSummary =
+        if List.isEmpty unresolvedCandidateGroups && List.isEmpty pendingOrHeldBasisItems then
+            "No unresolved candidate groups or pending basis items were found."
         else
             "Current project has "
             + string (List.length unresolvedCandidateGroups)
@@ -1061,7 +1365,9 @@ let private reconstructUnresolved question model =
         "Project"
         "Current project"
         summary
-        factLines
+        reasonLines
+        recommendedActions
+        (evidenceSummary :: factLines)
         sourcePhiIds
         contextEntries
         (unresolvedCandidateGroups |> List.map fst)
