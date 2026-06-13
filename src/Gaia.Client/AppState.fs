@@ -43,6 +43,10 @@ type Model =
         sigmaBasisItemDecisions: Map<string, CandidateDecisionValue>
         LedgerEvents: LedgerEvent list
         ReplayPreviewSequence: int option
+        factsReconstructionQuestion: string
+        factsReconstructionTargetKind: string
+        factsReconstructionTargetId: string
+        factsReconstructionResult: FactsReconstructionResult option
         evidenceRecords: EvidenceRecord list
         evidenceCaptureKind: string
         evidenceTargetKind: string
@@ -61,6 +65,56 @@ let defaultEvidenceCaptureKind = "Manual note"
 let defaultEvidenceTargetKind = "Phi"
 let defaultCognitionReviewTargetFilter = "All"
 let defaultCognitionReviewDecisionFilter = "All"
+let factsQuestionWhyCandidateAccepted = "Why was this candidate accepted?"
+let factsQuestionWhyCandidateRejected = "Why was this candidate rejected?"
+let factsQuestionWhyHostKnown = "Why is this host known?"
+let factsQuestionWhatFactsSupportedCandidate = "What facts supported this candidate?"
+let factsQuestionWhatChangedAfterPhiParsed = "What changed after this Phi was parsed?"
+let factsQuestionWhatContextAttachedToPhi = "What context was attached to this Phi?"
+let factsQuestionWhatDecisionsFromPhi = "What decisions were made from this Phi?"
+let factsQuestionWhatStillUnresolved = "What is still unresolved?"
+let factsReconstructionQuestions =
+    [
+        factsQuestionWhyCandidateAccepted
+        factsQuestionWhyCandidateRejected
+        factsQuestionWhyHostKnown
+        factsQuestionWhatFactsSupportedCandidate
+        factsQuestionWhatChangedAfterPhiParsed
+        factsQuestionWhatContextAttachedToPhi
+        factsQuestionWhatDecisionsFromPhi
+        factsQuestionWhatStillUnresolved
+    ]
+
+let factsTargetKindCandidate = "Candidate"
+let factsTargetKindPhi = "Phi"
+let factsTargetKindHost = "Host"
+let factsTargetKindContextEntry = "Context entry"
+let factsTargetKinds =
+    [
+        factsTargetKindCandidate
+        factsTargetKindPhi
+        factsTargetKindHost
+        factsTargetKindContextEntry
+    ]
+
+let defaultFactsReconstructionQuestion = factsQuestionWhyCandidateAccepted
+let defaultFactsReconstructionTargetKind = factsTargetKindCandidate
+
+let buildSigmaBasisItemDecisionsFromLedger ledgerEvents =
+    ledgerEvents
+    |> List.fold
+        (fun decisions ledgerEvent ->
+            match ledgerEvent.EventKind with
+            | "SigmaBasisItemAccepted" ->
+                decisions |> Map.add ledgerEvent.TargetId Accepted
+            | "SigmaBasisItemRejected" ->
+                decisions |> Map.add ledgerEvent.TargetId Rejected
+            | "SigmaBasisItemHeld" ->
+                decisions |> Map.add ledgerEvent.TargetId Held
+            | _ ->
+                decisions)
+        Map.empty<string, CandidateDecisionValue>
+
 let phiContextEntryKinds =
     [
         "HostHint"
@@ -113,9 +167,13 @@ let restoreProjectSnapshot (snapshot: ProjectSnapshot) (model: Model) =
             cognitionReviewDecisionFilter = defaultCognitionReviewDecisionFilter
             cognitionReviewTextFilter = ""
             candidateDecisions = snapshot.CandidateDecisions
-            sigmaBasisItemDecisions = Map.empty
+            sigmaBasisItemDecisions = buildSigmaBasisItemDecisionsFromLedger snapshot.LedgerEvents
             LedgerEvents = snapshot.LedgerEvents
             ReplayPreviewSequence = None
+            factsReconstructionQuestion = defaultFactsReconstructionQuestion
+            factsReconstructionTargetKind = defaultFactsReconstructionTargetKind
+            factsReconstructionTargetId = ""
+            factsReconstructionResult = None
             evidenceRecords = snapshot.EvidenceRecords
             evidenceTargetId = ""
             evidenceTitle = ""
@@ -184,6 +242,10 @@ let initModel =
         sigmaBasisItemDecisions = Map.empty
         LedgerEvents = []
         ReplayPreviewSequence = None
+        factsReconstructionQuestion = defaultFactsReconstructionQuestion
+        factsReconstructionTargetKind = defaultFactsReconstructionTargetKind
+        factsReconstructionTargetId = ""
+        factsReconstructionResult = None
         evidenceRecords = []
         evidenceCaptureKind = defaultEvidenceCaptureKind
         evidenceTargetKind = defaultEvidenceTargetKind
@@ -226,6 +288,10 @@ let clearProjectModel (model: Model) =
             sigmaBasisItemDecisions = Map.empty
             LedgerEvents = []
             ReplayPreviewSequence = None
+            factsReconstructionQuestion = defaultFactsReconstructionQuestion
+            factsReconstructionTargetKind = defaultFactsReconstructionTargetKind
+            factsReconstructionTargetId = ""
+            factsReconstructionResult = None
             evidenceRecords = []
             evidenceCaptureKind = defaultEvidenceCaptureKind
             evidenceTargetKind = defaultEvidenceTargetKind
@@ -237,16 +303,42 @@ let clearProjectModel (model: Model) =
     }
 
 let buildSphynxSampleSnapshot () =
+    let coverGlassContextEntry =
+        {
+            ContextId = "PHI-SPHYNX-SEED-005-CTX-0001"
+            PhiId = "PHI-SPHYNX-SEED-005"
+            Kind = "HostHint"
+            Value = "Cover Glass"
+            Provenance = "OneSecSnip"
+        }
+
+    let sampleLedgerEvents =
+        []
+        |> appendLedgerEventToList
+            "PhiContextEntryCreated"
+            coverGlassContextEntry.ContextId
+            "Phi context entry created"
+            ("PhiId: "
+             + coverGlassContextEntry.PhiId
+             + "; ContextId: "
+             + coverGlassContextEntry.ContextId
+             + "; Kind: "
+             + coverGlassContextEntry.Kind
+             + "; Value: "
+             + coverGlassContextEntry.Value
+             + "; Provenance: "
+             + coverGlassContextEntry.Provenance)
+
     {
         SnapshotVersion = projectSnapshotVersion
         SavedAtUtc = getUtcTimestampString ()
         ProjectName = "Sphynx Sample Project"
         PhiIntakes = DemoData.demoPhiIntakes
-        PhiContextEntries = []
+        PhiContextEntries = [ coverGlassContextEntry ]
         ParsedPhis = []
         ExcludedPhiIds = []
         CandidateDecisions = []
-        LedgerEvents = []
+        LedgerEvents = sampleLedgerEvents
         EvidenceRecords = []
     }
 
@@ -281,6 +373,10 @@ type Message =
     | SetSigmaBasisItemDecisions of string list * CandidateDecisionValue
     | SelectReplayPreview of int
     | ClearReplayPreview
+    | SetFactsReconstructionQuestion of string
+    | SetFactsReconstructionTargetKind of string
+    | SetFactsReconstructionTargetId of string
+    | RunFactsReconstruction
     | SetProjectName of string
     | SaveProjectFile
     | ProjectFileSaved of string

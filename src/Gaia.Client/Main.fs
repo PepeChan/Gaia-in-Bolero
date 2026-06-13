@@ -22,6 +22,7 @@ open Gaia.Client.T3SummaryView
 open Gaia.Client.T5GovernanceView
 open Gaia.Client.LedgerView
 open Gaia.Client.EvidenceView
+open Gaia.Client.FactsReconstructionView
 
 /// Connects the routing system to the Elmish application.
 let router = Router.infer SetPage (fun model -> model.page)
@@ -252,6 +253,18 @@ let renderTopNavigation activeTab dispatch =
                 a {
                     on.click (fun _ -> dispatch (SelectTopNavigationTab EvidenceTab))
                     text "Evidence"
+                }
+            }
+
+            li {
+                attr.``class`` (
+                    if activeTab = FactsReconstructionTab then
+                        "is-active"
+                    else
+                        "")
+                a {
+                    on.click (fun _ -> dispatch (SelectTopNavigationTab FactsReconstructionTab))
+                    text "Facts"
                 }
             }
 
@@ -639,7 +652,13 @@ let homePage model dispatch =
 
                         renderCurrentSigmaSnapshotPanel includedSequencedParsedPhis currentSigmaContext
 
-                        renderOperationalSummaryTablesPanel includedSequencedParsedPhis currentSigmaContext model.lastReplayAction model.candidateDecisions dispatch
+                        renderOperationalSummaryTablesPanel
+                            includedSequencedParsedPhis
+                            currentSigmaContext
+                            model.lastReplayAction
+                            model.candidateDecisions
+                            model.sigmaBasisItemDecisions
+                            dispatch
 
                         renderCognitionReviewPanel model includedSequencedParsedPhis currentSigmaContext dispatch
 
@@ -702,7 +721,12 @@ let homePage model dispatch =
 
                 renderRelevantSigmaContextPanel includedSequencedParsedPhis model.selectedPhiParse model.selectedPhiResolution
 
-                renderCandidateDeltaSigmaPanel currentSigmaContext model.candidateDecisions dispatch
+                renderCandidateDeltaSigmaPanel
+                    currentSigmaContext
+                    model.candidateDecisions
+                    model.sigmaBasisItemDecisions
+                    includedSequencedParsedPhis
+                    dispatch
 
                 renderT5DecisionHistoryPanel model.candidateDecisions
                 }
@@ -854,6 +878,9 @@ let homePage model dispatch =
 
             | EvidenceTab ->
                 renderEvidenceTab model dispatch
+
+            | FactsReconstructionTab ->
+                renderFactsReconstructionTab model dispatch
 
             | PersistenceTab ->
                 renderPersistenceTab model dispatch

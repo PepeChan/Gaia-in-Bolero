@@ -11,10 +11,12 @@ open Gaia.Client.T2ParsingView
 open Gaia.Client.T3SummaryView
 open Gaia.Client.T4CandidateView
 
-let countCandidateDecisions decisionValue (candidateDeltas: CandidateDelta list) (candidateDecisions: CandidateDecision list) =
+let countCandidateGroupStatuses status candidateDeltas candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis =
     candidateDeltas
     |> List.sumBy (fun candidate ->
-        if getCandidateDecisionValue candidate.CandidateId candidateDecisions = decisionValue then
+        let governance = buildCandidateGroupGovernance candidate candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
+
+        if governance.Status = status then
             1
         else
             0)
@@ -31,12 +33,15 @@ let renderCandidateDecisionTag decisionValue =
         text (formatCandidateDecisionValue decisionValue)
     }
 
-let renderT5GovernanceSummaryTable sigmaContext (candidateDecisions: CandidateDecision list) dispatch =
+let renderT5GovernanceSummaryTable sigmaContext (candidateDecisions: CandidateDecision list) sigmaBasisItemDecisions sequencedParsedPhis dispatch =
     let candidateDeltas = formulateCandidateDeltas sigmaContext
-    let pendingCount = countCandidateDecisions Pending candidateDeltas candidateDecisions
-    let acceptedCount = countCandidateDecisions Accepted candidateDeltas candidateDecisions
-    let rejectedCount = countCandidateDecisions Rejected candidateDeltas candidateDecisions
-    let heldCount = countCandidateDecisions Held candidateDeltas candidateDecisions
+    let pendingCount = countCandidateGroupStatuses GroupPending candidateDeltas candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
+    let acceptedCount = countCandidateGroupStatuses GroupAccepted candidateDeltas candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
+    let rejectedCount = countCandidateGroupStatuses GroupRejected candidateDeltas candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
+    let heldCount = countCandidateGroupStatuses GroupHeld candidateDeltas candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
+    let mixedCount = countCandidateGroupStatuses GroupMixed candidateDeltas candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
+    let partiallyGovernedCount =
+        countCandidateGroupStatuses GroupPartiallyGoverned candidateDeltas candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
 
     div {
         attr.``class`` "mb-5"
@@ -48,10 +53,12 @@ let renderT5GovernanceSummaryTable sigmaContext (candidateDecisions: CandidateDe
 
         div {
             attr.``class`` "tags mb-3"
-            renderCandidateDecisionCount "Pending" pendingCount
-            renderCandidateDecisionCount "Accepted" acceptedCount
-            renderCandidateDecisionCount "Rejected" rejectedCount
-            renderCandidateDecisionCount "Held" heldCount
+            renderCandidateDecisionCount "Group pending" pendingCount
+            renderCandidateDecisionCount "Group accepted" acceptedCount
+            renderCandidateDecisionCount "Group rejected" rejectedCount
+            renderCandidateDecisionCount "Group held" heldCount
+            renderCandidateDecisionCount "Mixed" mixedCount
+            renderCandidateDecisionCount "Partially governed" partiallyGovernedCount
         }
 
         div {
@@ -65,7 +72,9 @@ let renderT5GovernanceSummaryTable sigmaContext (candidateDecisions: CandidateDe
                         th { text "Target" }
                         th { text "Basis count" }
                         th { text "Provenance" }
-                        th { text "Decision" }
+                        th { text "Basis-derived status" }
+                        th { text "Class decision" }
+                        th { text "Meaning" }
                         th { text "Action" }
                     }
                 }
@@ -73,13 +82,30 @@ let renderT5GovernanceSummaryTable sigmaContext (candidateDecisions: CandidateDe
                 tbody {
                     forEach candidateDeltas <| fun candidate ->
                         let decisionValue = getCandidateDecisionValue candidate.CandidateId candidateDecisions
+                        let candidateDecision = tryFindCandidateDecision candidate.CandidateId candidateDecisions
+                        let groupGovernance =
+                            buildCandidateGroupGovernance candidate candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
 
                         tr {
                             td { text (formatCandidateDeltaKind candidate.Kind) }
                             td { text candidate.Target }
                             td { text (string (List.length candidate.RelevantSigmaBasis)) }
                             td { text candidate.Provenance }
-                            td { renderCandidateDecisionTag decisionValue }
+                            td { renderCandidateGroupStatusTag groupGovernance.Status }
+                            td { renderCandidateClassDecisionTag candidateDecision }
+                            td {
+                                p {
+                                    attr.``class`` "is-size-7 mb-1"
+                                    text groupGovernance.Explanation
+                                }
+                                match groupGovernance.ConflictExplanation with
+                                | None -> empty()
+                                | Some conflict ->
+                                    p {
+                                        attr.``class`` "is-size-7 has-text-warning-dark mb-0"
+                                        text conflict
+                                    }
+                            }
                             td { renderCandidateGovernanceActions candidate decisionValue dispatch }
                         }
                 }
@@ -88,12 +114,12 @@ let renderT5GovernanceSummaryTable sigmaContext (candidateDecisions: CandidateDe
 
         p {
             attr.``class`` "is-size-7 has-text-grey"
-            text "T5 records governance decisions only. Candidate promotion to Sigma is intentionally not performed here."
+            text "T5 records class and basis-item governance decisions only. Human-facing group status is derived from basis-item decisions. Candidate promotion to Sigma is intentionally not performed here."
         }
     }
 
 let cognitionReviewTargetFilters = [ "All"; "Host"; "Interface"; "State"; "Mode"; "Constraint"; "Reinforced Atom" ]
-let cognitionReviewDecisionFilters = [ "All"; "Pending"; "Accepted"; "Rejected"; "Held" ]
+let cognitionReviewDecisionFilters = [ "All"; "Pending"; "Accepted"; "Rejected"; "Held"; "Mixed"; "Partially governed" ]
 
 let getTopMissingContextRows sequencedParsedPhis =
     getMissingContextSummaryRows sequencedParsedPhis
@@ -130,10 +156,12 @@ let candidateMatchesTargetFilter filterValue (candidate: CandidateDelta) =
 let candidateMatchesDecisionFilter filterValue decisionValue =
     match filterValue with
     | "All" -> true
-    | "Pending" -> decisionValue = Pending
-    | "Accepted" -> decisionValue = Accepted
-    | "Rejected" -> decisionValue = Rejected
-    | "Held" -> decisionValue = Held
+    | "Pending" -> decisionValue = GroupPending
+    | "Accepted" -> decisionValue = GroupAccepted
+    | "Rejected" -> decisionValue = GroupRejected
+    | "Held" -> decisionValue = GroupHeld
+    | "Mixed" -> decisionValue = GroupMixed
+    | "Partially governed" -> decisionValue = GroupPartiallyGoverned
     | _ -> true
 
 let candidateMatchesTextFilter searchText (candidate: CandidateDelta) =
@@ -154,15 +182,16 @@ let candidateMatchesTextFilter searchText (candidate: CandidateDelta) =
         |> normalizeReviewText
         |> fun haystack -> haystack.Contains(searchText)
 
-let getFilteredReviewCandidates (model: Model) sigmaContext =
+let getFilteredReviewCandidates (model: Model) sigmaContext sequencedParsedPhis =
     let searchText = normalizeReviewText model.cognitionReviewTextFilter
 
     formulateCandidateDeltas sigmaContext
     |> List.filter (fun candidate ->
-        let decisionValue = getCandidateDecisionValue candidate.CandidateId model.candidateDecisions
+        let groupGovernance =
+            buildCandidateGroupGovernance candidate model.candidateDecisions model.sigmaBasisItemDecisions sequencedParsedPhis
 
         candidateMatchesTargetFilter model.cognitionReviewTargetFilter candidate
-        && candidateMatchesDecisionFilter model.cognitionReviewDecisionFilter decisionValue
+        && candidateMatchesDecisionFilter model.cognitionReviewDecisionFilter groupGovernance.Status
         && candidateMatchesTextFilter searchText candidate)
 
 let interpretReviewCandidate (candidate: CandidateDelta) =
@@ -488,7 +517,7 @@ let renderCognitionReviewFilters (model: Model) dispatch =
             attr.``class`` "column is-3"
             label {
                 attr.``class`` "label is-size-7"
-                text "Decision"
+                text "Group status"
             }
             div {
                 attr.``class`` "select is-fullwidth is-small"
@@ -521,8 +550,10 @@ let renderReviewCandidateCard
     sequencedParsedPhis
     dispatch =
     let decisionValue = getCandidateDecisionValue candidate.CandidateId candidateDecisions
+    let candidateDecision = tryFindCandidateDecision candidate.CandidateId candidateDecisions
     let basisItems = buildSigmaBasisItemReviews candidate sequencedParsedPhis
     let basisItemKeys = basisItems |> List.map (fun basisItem -> basisItem.Key)
+    let groupGovernance = buildCandidateGroupGovernance candidate candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
 
     div {
         attr.``class`` "card mb-4 cognition-review-card"
@@ -571,9 +602,9 @@ let renderReviewCandidateCard
                     attr.``class`` "column is-2"
                     p {
                         attr.``class`` "heading mb-1"
-                        text "Decision"
+                        text "Group status"
                     }
-                    renderCandidateDecisionTag decisionValue
+                    renderCandidateGroupStatusTag groupGovernance.Status
                 }
 
                 div {
@@ -599,7 +630,7 @@ let renderReviewCandidateCard
                         attr.``class`` "column is-8"
                         h5 {
                             attr.``class`` "title is-6 mb-2"
-                            text "Section 1: Candidate class decision"
+                            text "Section 1: Candidate group governance"
                         }
 
                         p {
@@ -619,8 +650,27 @@ let renderReviewCandidateCard
                         attr.``class`` "column is-4"
                         p {
                             attr.``class`` "mb-2"
+                            strong { text "Basis-derived status: " }
+                            renderCandidateGroupStatusTag groupGovernance.Status
+                        }
+
+                        p {
+                            attr.``class`` "is-size-7 has-text-grey mb-2"
+                            text groupGovernance.Explanation
+                        }
+
+                        match groupGovernance.ConflictExplanation with
+                        | None -> empty()
+                        | Some conflict ->
+                            p {
+                                attr.``class`` "notification is-warning is-light cognition-review-helper is-size-7"
+                                text conflict
+                            }
+
+                        p {
+                            attr.``class`` "mb-2"
                             strong { text "Candidate class decision: " }
-                            renderCandidateDecisionTag decisionValue
+                            renderCandidateClassDecisionTag candidateDecision
                         }
 
                         renderCandidateGovernanceActions candidate decisionValue dispatch
@@ -657,7 +707,7 @@ let renderReviewCandidateCard
 
                 p {
                     attr.``class`` "notification is-info is-light cognition-review-helper"
-                    text "Class-level governance affects the candidate type. Basis item review records human review intent for individual Sigma atoms. Persistent atom-level promotion will be added later."
+                    text "Basis item review is the finer-grained governance layer. The candidate group status above is derived from these item decisions."
                 }
 
                 div {
@@ -682,7 +732,7 @@ let renderReviewCandidateCard
     }
 
 let renderCognitionReviewPanel (model: Model) sequencedParsedPhis sigmaContext dispatch =
-    let reviewCandidates = getFilteredReviewCandidates model sigmaContext
+    let reviewCandidates = getFilteredReviewCandidates model sigmaContext sequencedParsedPhis
 
     div {
         attr.``class`` "box"
@@ -694,7 +744,7 @@ let renderCognitionReviewPanel (model: Model) sequencedParsedPhis sigmaContext d
 
         p {
             attr.``class`` "is-size-7 has-text-grey mb-4"
-            text "Candidate-class decisions persist. Basis item decisions are local/session review state in this v0."
+            text "Candidate-class decisions persist. Basis-derived group status is the human-facing governance state."
         }
 
         div {
@@ -824,7 +874,13 @@ let renderT5DecisionHistoryPanel (candidateDecisions: CandidateDecision list) =
             }
     }
 
-let renderOperationalSummaryTablesPanel sequencedParsedPhis sigmaContext lastReplayAction (candidateDecisions: CandidateDecision list) dispatch =
+let renderOperationalSummaryTablesPanel
+    sequencedParsedPhis
+    sigmaContext
+    lastReplayAction
+    (candidateDecisions: CandidateDecision list)
+    sigmaBasisItemDecisions
+    dispatch =
     div {
         attr.``class`` "box"
 
@@ -843,7 +899,7 @@ let renderOperationalSummaryTablesPanel sequencedParsedPhis sigmaContext lastRep
 
         renderT4CandidateSummaryTable sigmaContext
 
-        renderT5GovernanceSummaryTable sigmaContext candidateDecisions dispatch
+        renderT5GovernanceSummaryTable sigmaContext candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis dispatch
 
         renderLatestDeltaSummaryTable lastReplayAction
     }

@@ -77,3 +77,30 @@
 .sigma-basis-preview p:last-child {
   overflow-wrap: anywhere;
 }
+
+.facts-reconstruction-result {
+  overflow-wrap: anywhere;
+}
+
+.facts-reconstruction-section {
+  border-top: 1px solid #f0f0f0;
+  margin-top: 1rem;
+  padding-top: 1rem;
+}
+
+.facts-reconstruction-summary {
+  line-height: 1.45;
+}
+
+.facts-reconstruction-tag {
+  height: auto;
+  line-height: 1.25;
+  max-width: 100%;
+  padding-bottom: 0.35rem;
+  padding-top: 0.35rem;
+  white-space: normal;
+}
+
+.facts-reconstruction-basis {
+  margin-left: 1rem;
+}

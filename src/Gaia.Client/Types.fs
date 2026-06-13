@@ -12,6 +12,7 @@ type TopNavigationTab =
     | GaiaProbeTab
     | DetailsTab
     | DemoToolsTab
+    | FactsReconstructionTab
     | EvidenceTab
     | PersistenceTab
     | LedgerTab
@@ -74,6 +75,15 @@ type CandidateDecisionValue =
     | Rejected
     | Held
 
+type CandidateGroupStatus =
+    | GroupPending
+    | GroupAccepted
+    | GroupRejected
+    | GroupHeld
+    | GroupMixed
+    | GroupPartiallyAccepted
+    | GroupPartiallyGoverned
+
 type CandidateDecision =
     {
         CandidateId: string
@@ -123,6 +133,23 @@ type LedgerEvent =
         TargetId: string
         Summary: string
         Detail: string
+    }
+
+type FactsReconstructionResult =
+    {
+        Question: string
+        TargetKind: string
+        TargetId: string
+        AnswerSummary: string
+        FactLines: string list
+        SourcePhiIds: string list
+        SourcePhiTexts: (string * string) list
+        ContextEntriesUsed: PhiContextEntry list
+        CandidateFacts: CandidateDelta list
+        GovernanceDecisions: CandidateDecision list
+        RelatedLedgerEvents: LedgerEvent list
+        ProvenanceLabels: string list
+        MissingOrUnresolvedItems: string list
     }
 
 type ReplayPreviewState =

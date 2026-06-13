@@ -41,6 +41,21 @@ let candidateDecisionTagClass = function
     | Rejected -> "tag is-danger is-light"
     | Held -> "tag is-warning is-light"
 
+let candidateGroupStatusTagClass = function
+    | GroupPending -> "tag is-light"
+    | GroupAccepted -> "tag is-success"
+    | GroupRejected -> "tag is-danger"
+    | GroupHeld -> "tag is-warning"
+    | GroupMixed -> "tag is-danger"
+    | GroupPartiallyAccepted -> "tag is-info"
+    | GroupPartiallyGoverned -> "tag is-info"
+
+let renderCandidateGroupStatusTag status =
+    span {
+        attr.``class`` (candidateGroupStatusTagClass status)
+        text (formatCandidateGroupStatus status)
+    }
+
 let candidateDecisionButtonClass decisionValue activeDecision buttonStyle =
     if decisionValue = activeDecision then
         "button is-small " + buttonStyle
@@ -97,9 +112,28 @@ let renderCandidateDecisionMetadata (candidateDecision: CandidateDecision option
             }
         }
 
-let renderCandidateDeltaCard (candidate: CandidateDelta) (candidateDecisions: CandidateDecision list) dispatch =
+let renderCandidateClassDecisionTag candidateDecision =
+    match candidateDecision with
+    | None ->
+        span {
+            attr.``class`` "tag is-light"
+            text "No class decision"
+        }
+    | Some decision ->
+        span {
+            attr.``class`` (candidateDecisionTagClass decision.Decision)
+            text (formatCandidateDecisionValue decision.Decision)
+        }
+
+let renderCandidateDeltaCard
+    (candidate: CandidateDelta)
+    (candidateDecisions: CandidateDecision list)
+    sigmaBasisItemDecisions
+    sequencedParsedPhis
+    dispatch =
     let candidateDecision = tryFindCandidateDecision candidate.CandidateId candidateDecisions
     let decisionValue = getCandidateDecisionValue candidate.CandidateId candidateDecisions
+    let groupGovernance = buildCandidateGroupGovernance candidate candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
 
     div {
         attr.``class`` "card mb-4"
@@ -189,11 +223,26 @@ let renderCandidateDeltaCard (candidate: CandidateDelta) (candidateDecisions: Ca
                 div {
                     attr.``class`` "column is-12"
                     p {
-                        strong { text "T5 governance decision: " }
-                        span {
-                            attr.``class`` (candidateDecisionTagClass decisionValue)
-                            text (formatCandidateDecisionValue decisionValue)
+                        strong { text "Basis-derived status: " }
+                        renderCandidateGroupStatusTag groupGovernance.Status
+                    }
+
+                    p {
+                        attr.``class`` "is-size-7 has-text-grey mb-2"
+                        text groupGovernance.Explanation
+                    }
+
+                    match groupGovernance.ConflictExplanation with
+                    | None -> empty()
+                    | Some conflict ->
+                        p {
+                            attr.``class`` "notification is-warning is-light is-size-7 mb-2"
+                            text conflict
                         }
+
+                    p {
+                        strong { text "Candidate class decision: " }
+                        renderCandidateClassDecisionTag candidateDecision
                     }
 
                     div {
@@ -207,7 +256,7 @@ let renderCandidateDeltaCard (candidate: CandidateDelta) (candidateDecisions: Ca
         }
     }
 
-let renderCandidateDeltaSigmaPanel sigmaContext (candidateDecisions: CandidateDecision list) dispatch =
+let renderCandidateDeltaSigmaPanel sigmaContext (candidateDecisions: CandidateDecision list) sigmaBasisItemDecisions sequencedParsedPhis dispatch =
     let candidateDeltas = formulateCandidateDeltas sigmaContext
 
     div {
@@ -224,6 +273,6 @@ let renderCandidateDeltaSigmaPanel sigmaContext (candidateDecisions: CandidateDe
         }
 
         forEach candidateDeltas <| fun candidateDelta ->
-            renderCandidateDeltaCard candidateDelta candidateDecisions dispatch
+            renderCandidateDeltaCard candidateDelta candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis dispatch
     }
 

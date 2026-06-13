@@ -9,6 +9,7 @@ open Gaia.Client.Persistence
 open Gaia.Client.Ledger
 open Gaia.Client.AppState
 open Gaia.Client.Workflow
+open Gaia.Client.FactsReconstruction
 
 let projectFileModulePath = "./cognopy-files.js"
 
@@ -118,6 +119,23 @@ let update (jsRuntime: IJSRuntime) message model =
         { model with ReplayPreviewSequence = Some sequenceNumber }, Cmd.none
     | ClearReplayPreview ->
         { model with ReplayPreviewSequence = None }, Cmd.none
+    | SetFactsReconstructionQuestion value ->
+        { model with
+            factsReconstructionQuestion = value
+            factsReconstructionTargetKind = suggestFactsTargetKind value
+            factsReconstructionTargetId = ""
+            factsReconstructionResult = None }, Cmd.none
+    | SetFactsReconstructionTargetKind value ->
+        { model with
+            factsReconstructionTargetKind = value
+            factsReconstructionTargetId = ""
+            factsReconstructionResult = None }, Cmd.none
+    | SetFactsReconstructionTargetId value ->
+        { model with
+            factsReconstructionTargetId = value
+            factsReconstructionResult = None }, Cmd.none
+    | RunFactsReconstruction ->
+        { model with factsReconstructionResult = Some (reconstructFacts model) }, Cmd.none
     | SetProjectName value ->
         { model with projectName = value }, Cmd.none
     | SaveProjectFile ->

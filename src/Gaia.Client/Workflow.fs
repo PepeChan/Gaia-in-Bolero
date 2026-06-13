@@ -919,6 +919,208 @@ let formatSigmaBasisItemDecisionValue = function
     | Rejected -> "Rejected"
     | Held -> "Held"
 
+type CandidateGroupGovernance =
+    {
+        ClassDecision: CandidateDecisionValue
+        ClassDecisionRecord: CandidateDecision option
+        BasisItems: (SigmaBasisItemReview * CandidateDecisionValue) list
+        Status: CandidateGroupStatus
+        TotalBasisItems: int
+        PendingCount: int
+        AcceptedCount: int
+        RejectedCount: int
+        HeldCount: int
+        Explanation: string
+        ConflictExplanation: string option
+    }
+
+let formatCandidateGroupStatus = function
+    | GroupPending -> "Pending"
+    | GroupAccepted -> "Accepted"
+    | GroupRejected -> "Rejected"
+    | GroupHeld -> "Held"
+    | GroupMixed -> "Mixed"
+    | GroupPartiallyAccepted -> "Partially accepted"
+    | GroupPartiallyGoverned -> "Partially governed"
+
+let private tryFindStoredCandidateDecision candidateId (candidateDecisions: CandidateDecision list) =
+    candidateDecisions
+    |> List.tryFind (fun decision -> decision.CandidateId = candidateId)
+
+let private deriveCandidateGroupStatus basisItemDecisions =
+    let total = List.length basisItemDecisions
+    let count decisionValue =
+        basisItemDecisions
+        |> List.filter (fun decision -> decision = decisionValue)
+        |> List.length
+
+    let pendingCount = count Pending
+    let acceptedCount = count Accepted
+    let rejectedCount = count Rejected
+    let heldCount = count Held
+
+    if total = 0 || pendingCount = total then
+        GroupPending
+    elif pendingCount > 0 then
+        GroupPartiallyGoverned
+    elif acceptedCount = total then
+        GroupAccepted
+    elif rejectedCount = total then
+        GroupRejected
+    elif heldCount = total then
+        GroupHeld
+    elif acceptedCount > 0 && (rejectedCount > 0 || heldCount > 0) then
+        GroupMixed
+    elif rejectedCount > 0 && heldCount > 0 then
+        GroupMixed
+    else
+        GroupMixed
+
+let private pluralizeBasisItem count =
+    if count = 1 then
+        "basis item"
+    else
+        "basis items"
+
+let formatCandidateGroupDecisionCounts governance =
+    [
+        "accepted " + string governance.AcceptedCount
+        "rejected " + string governance.RejectedCount
+        "held " + string governance.HeldCount
+        "pending " + string governance.PendingCount
+    ]
+    |> String.concat ", "
+
+let private describeCandidateGroupStatus status total pendingCount acceptedCount rejectedCount heldCount =
+    match status with
+    | GroupPending when total = 0 ->
+        "This candidate group is pending because it has no relevant basis items to govern."
+    | GroupPending ->
+        "This candidate group is pending because no basis item has been accepted, rejected, or held."
+    | GroupAccepted ->
+        "This candidate group is fully accepted because all "
+        + string total
+        + " "
+        + pluralizeBasisItem total
+        + " were accepted."
+    | GroupRejected ->
+        "This candidate group is fully rejected because all "
+        + string total
+        + " "
+        + pluralizeBasisItem total
+        + " were rejected."
+    | GroupHeld ->
+        "This candidate group is held because all "
+        + string total
+        + " "
+        + pluralizeBasisItem total
+        + " were held."
+    | GroupMixed ->
+        "This candidate group is not fully accepted because "
+        + string acceptedCount
+        + " "
+        + pluralizeBasisItem acceptedCount
+        + " were accepted, "
+        + string rejectedCount
+        + " were rejected, and "
+        + string heldCount
+        + " were held."
+    | GroupPartiallyAccepted ->
+        "This candidate group is partially accepted because some, but not all, basis items were accepted."
+    | GroupPartiallyGoverned ->
+        let decidedCount = acceptedCount + rejectedCount + heldCount
+
+        "This candidate group is partially governed because "
+        + string decidedCount
+        + " "
+        + pluralizeBasisItem decidedCount
+        + " have a decision and "
+        + string pendingCount
+        + " remain pending."
+
+let private classDecisionMatchesGroupStatus classDecision groupStatus =
+    match classDecision, groupStatus with
+    | Pending, _ -> true
+    | Accepted, GroupAccepted -> true
+    | Rejected, GroupRejected -> true
+    | Held, GroupHeld -> true
+    | _ -> false
+
+let describeCandidateGroupClassConflict governance =
+    match governance.ClassDecisionRecord with
+    | None ->
+        None
+    | Some _ ->
+        if classDecisionMatchesGroupStatus governance.ClassDecision governance.Status then
+            None
+        else
+            Some
+                ("Class-level decision was "
+                 + formatSigmaBasisItemDecisionValue governance.ClassDecision
+                 + ", but the basis-derived status is "
+                 + formatCandidateGroupStatus governance.Status
+                 + " because one or more basis items do not match the class-level decision.")
+
+let buildCandidateGroupGovernance
+    (candidate: CandidateDelta)
+    (candidateDecisions: CandidateDecision list)
+    (sigmaBasisItemDecisions: Map<string, CandidateDecisionValue>)
+    sequencedParsedPhis =
+    let classDecisionRecord = tryFindStoredCandidateDecision candidate.CandidateId candidateDecisions
+    let classDecision =
+        classDecisionRecord
+        |> Option.map (fun decision -> decision.Decision)
+        |> Option.defaultValue Pending
+
+    let basisItems =
+        buildSigmaBasisItemReviews candidate sequencedParsedPhis
+        |> List.map (fun basisItem -> basisItem, getSigmaBasisItemDecisionValue basisItem.Key sigmaBasisItemDecisions)
+
+    let basisItemDecisions =
+        basisItems
+        |> List.map snd
+
+    let count decisionValue =
+        basisItemDecisions
+        |> List.filter (fun decision -> decision = decisionValue)
+        |> List.length
+
+    let pendingCount = count Pending
+    let acceptedCount = count Accepted
+    let rejectedCount = count Rejected
+    let heldCount = count Held
+    let totalBasisItems = List.length basisItems
+    let status = deriveCandidateGroupStatus basisItemDecisions
+    let explanation =
+        describeCandidateGroupStatus status totalBasisItems pendingCount acceptedCount rejectedCount heldCount
+
+    let governance =
+        {
+            ClassDecision = classDecision
+            ClassDecisionRecord = classDecisionRecord
+            BasisItems = basisItems
+            Status = status
+            TotalBasisItems = totalBasisItems
+            PendingCount = pendingCount
+            AcceptedCount = acceptedCount
+            RejectedCount = rejectedCount
+            HeldCount = heldCount
+            Explanation = explanation
+            ConflictExplanation = None
+        }
+
+    { governance with ConflictExplanation = describeCandidateGroupClassConflict governance }
+
+let isCandidateGroupUnresolvedOrConflicted governance =
+    match governance.Status with
+    | GroupPending
+    | GroupHeld
+    | GroupMixed
+    | GroupPartiallyAccepted
+    | GroupPartiallyGoverned -> true
+    | GroupAccepted
+    | GroupRejected -> Option.isSome governance.ConflictExplanation
+
 let getSigmaBasisItemDecisionRationale = function
     | Pending -> ""
     | Accepted -> "Basis item accepted for later Sigma atom promotion."
