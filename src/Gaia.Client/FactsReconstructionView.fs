@@ -241,7 +241,7 @@ let private renderEvidenceSection title (renderContent: unit -> Node) : Node =
 
 let private renderSupportingEvidence (result: FactsReconstructionResult) =
     div {
-        renderEvidenceSection "Reconstruction facts" (fun () -> renderStringList "No fact lines reconstructed." result.FactLines)
+        renderEvidenceSection "Fact lines" (fun () -> renderStringList "No supporting facts reconstructed." result.FactLines)
         renderEvidenceSection "Source Phi IDs" (fun () -> renderStringTags result.SourcePhiIds)
         renderEvidenceSection "Source Phi text" (fun () -> renderSourcePhiTexts result.SourcePhiTexts)
         renderEvidenceSection "Context entries used" (fun () -> renderContextEntries result.ContextEntriesUsed)
@@ -298,15 +298,34 @@ let private renderResultPanel (result: FactsReconstructionResult) =
             }
         }
 
+        renderResultSection "Question" (fun () ->
+            div {
+                p {
+                    attr.``class`` "mb-2"
+                    text result.Question
+                }
+                div {
+                    attr.``class`` "tags mb-0"
+                    span {
+                        attr.``class`` "tag is-light"
+                        text ("Target kind: " + result.TargetKind)
+                    }
+                    span {
+                        attr.``class`` "tag is-light"
+                        text ("Target: " + result.TargetId)
+                    }
+                }
+            })
+
         renderResultSection "Answer" (fun () ->
             div {
                 attr.``class`` "notification is-info is-light facts-reconstruction-summary"
                 text result.AnswerSummary
             })
 
+        renderResultSection "Supporting facts" (fun () -> renderSupportingEvidence result)
         renderResultSection "Reasons" (fun () -> renderStringList "No deterministic reason lines reconstructed." result.ReasonLines)
         renderResultSection "Recommended next actions" (fun () -> renderStringList "No next action suggested by this deterministic reconstruction." result.RecommendedNextActions)
-        renderResultSection "Supporting evidence" (fun () -> renderSupportingEvidence result)
         renderResultSection "Ledger / history" (fun () -> renderLedgerEvents result.RelatedLedgerEvents)
     }
 
@@ -323,12 +342,12 @@ let renderFactsReconstructionTab model dispatch =
 
         h2 {
             attr.``class`` "title is-4"
-            text "Inquiry Resolution / Facts Reconstruction"
+            text "Inquiry Resolution / Reverse Inquiry"
         }
 
         p {
             attr.``class`` "has-text-grey mb-4"
-            text "Reverse inquiries resolve stored project facts into an answer. T1-T5 are the translation and reasoning machinery behind the reconstruction."
+            text "Reverse inquiries resolve stakeholder questions into answers from stored facts. T1-T5 remain the reasoning pipeline behind the reconstruction."
         }
 
         div {
@@ -346,7 +365,7 @@ let renderFactsReconstructionTab model dispatch =
                 }
                 span {
                     attr.``class`` "tag is-light"
-                    text "Facts Reconstruction"
+                    text "Inquiry Resolution / Facts Reconstruction"
                 }
             }
 

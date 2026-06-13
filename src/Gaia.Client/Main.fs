@@ -217,7 +217,7 @@ let renderTopNavigation activeTab dispatch =
                         "")
                 a {
                     on.click (fun _ -> dispatch (SelectTopNavigationTab GaiaProbeTab))
-                    text "Gaia Probe"
+                    text "Inquiry Intake"
                 }
             }
 
@@ -310,11 +310,70 @@ let homePage model dispatch =
             attr.``class`` "content"
             h1 {
                 attr.``class`` "title"
-                text "Gaia Probe Dashboard"
+                text "Cognopy Inquiry Console"
             }
             p {
                 attr.``class`` "subtitle is-6"
-                text "Probe demo scenarios, resolve them through Gaia.Core, and inspect the resulting path and matches."
+                text "An inquiry resolution engine for adding stakeholder information and reconstructing answers from preserved reasoning history."
+            }
+
+            div {
+                attr.``class`` "notification is-info is-light"
+                text "Cognopy resolves stakeholder inquiries by translating them into structured reasoning, governing candidate changes, and reconstructing answers from preserved reasoning history."
+            }
+
+            div {
+                attr.``class`` "columns is-variable is-4 mb-5"
+
+                div {
+                    attr.``class`` "column is-6"
+                    div {
+                        attr.``class`` "box"
+                        p {
+                            attr.``class`` "heading mb-2"
+                            text "Tell Cognopy"
+                        }
+                        h2 {
+                            attr.``class`` "title is-5"
+                            text "Add information to the system"
+                        }
+                        p {
+                            attr.``class`` "has-text-grey"
+                            text "Use forward inquiry intake to capture stakeholder statements as Phi for the existing reasoning pipeline."
+                        }
+                        button {
+                            attr.``class`` "button is-link is-light"
+                            attr.``type`` "button"
+                            on.click (fun _ -> dispatch (SelectTopNavigationTab GaiaProbeTab))
+                            text "Tell Cognopy"
+                        }
+                    }
+                }
+
+                div {
+                    attr.``class`` "column is-6"
+                    div {
+                        attr.``class`` "box"
+                        p {
+                            attr.``class`` "heading mb-2"
+                            text "Ask Cognopy"
+                        }
+                        h2 {
+                            attr.``class`` "title is-5"
+                            text "Retrieve or explain information from the system"
+                        }
+                        p {
+                            attr.``class`` "has-text-grey"
+                            text "Use reverse inquiry resolution to answer questions from stored facts, decisions, provenance, and ledger history."
+                        }
+                        button {
+                            attr.``class`` "button is-link"
+                            attr.``type`` "button"
+                            on.click (fun _ -> dispatch (SelectTopNavigationTab FactsReconstructionTab))
+                            text "Ask Cognopy"
+                        }
+                    }
+                }
             }
 
             renderTopNavigation model.activeTopNavigationTab dispatch
@@ -331,6 +390,11 @@ let homePage model dispatch =
                 p {
                     attr.``class`` "has-text-grey mb-4"
                     text "Inquiry is the user-facing layer. T1-T5 are the translation and reasoning machinery over Phi, candidates, governance, and ledger history."
+                }
+
+                p {
+                    attr.``class`` "heading mb-2"
+                    text "Reasoning pipeline"
                 }
 
                 div {
@@ -391,7 +455,7 @@ let homePage model dispatch =
                             attr.``class`` "box"
                             h2 {
                                 attr.``class`` "title is-5"
-                                text "T1 - Inquiry Intake / Phi Ingestion"
+                                text "T1 - Inquiry Intake / Forward Inquiry"
                             }
 
                             p {
@@ -507,7 +571,7 @@ let homePage model dispatch =
                                 attr.``class`` "button is-link is-fullwidth"
                                 attr.``type`` "button"
                                 on.click (fun _ -> dispatch IngestPhiDraft)
-                                text "Ingest Inquiry / Phi"
+                                text "Ingest Forward Inquiry"
                             }
                         }
 
@@ -697,6 +761,11 @@ let homePage model dispatch =
                 h2 {
                     attr.``class`` "title is-4"
                     text "Reasoning Details"
+                }
+
+                p {
+                    attr.``class`` "heading mb-2"
+                    text "Translation machinery"
                 }
 
                 div {
@@ -928,7 +997,7 @@ let menuItem (model: Model) (page: Page) (text: string) =
 let view model dispatch =
     Main()
         .Menu(concat {
-            menuItem model Probe "Gaia Probe"            
+            menuItem model Probe "Inquiry Console"            
         })
         .Body(
             cond model.page <| function
