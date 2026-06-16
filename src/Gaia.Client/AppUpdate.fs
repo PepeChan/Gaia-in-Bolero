@@ -134,6 +134,8 @@ let update (jsRuntime: IJSRuntime) message model =
         { model with
             factsReconstructionTargetId = value
             factsReconstructionResult = None }, Cmd.none
+    | SetFactsReconstructionDisplayMode value ->
+        { model with factsReconstructionDisplayMode = value }, Cmd.none
     | RunFactsReconstruction ->
         { model with factsReconstructionResult = Some (reconstructFacts model) }, Cmd.none
     | SetProjectName value ->

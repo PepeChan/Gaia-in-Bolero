@@ -281,11 +281,11 @@ let private renderAnswerFactsTable emptyText (facts: InquiryAnswerFact list) =
             }
         }
 
-let private renderAnswerFactsPreview (result: FactsReconstructionResult) =
-    let answer =
-        inquiryAnswerFromFactsReconstructionResult result
-        |> profileInquiryAnswer
+let private profiledInquiryAnswerFromResult (result: FactsReconstructionResult) =
+    inquiryAnswerFromFactsReconstructionResult result
+    |> profileInquiryAnswer
 
+let private renderAnswerFactsPreview (answer: InquiryAnswer) =
     let profile = inquiryIntentProfileForAnswer answer
     let maturity = answer.MaturityContext
     let primaryFacts, additionalFacts = splitAnswerFactsByProfile answer
@@ -344,7 +344,147 @@ let private renderAnswerFactsPreview (result: FactsReconstructionResult) =
                 (fun () -> renderAnswerFactsTable "No additional supporting facts." additionalFacts)
         }
 
-let private renderResultPanel (result: FactsReconstructionResult) =
+let private formatInquiryTarget targetKind targetId =
+    if String.IsNullOrWhiteSpace targetId then
+        targetKind + ": Auto-selected target"
+    else
+        targetKind + ": " + targetId
+
+let private isPrimaryReasonFact (fact: InquiryAnswerFact) =
+    match fact.Kind with
+    | Reason
+    | Warning
+    | Status ->
+        fact.Label <> "Maturity stage"
+        && fact.Label <> "Governance state"
+    | _ -> false
+
+let private tryPrimaryReason (primaryFacts: InquiryAnswerFact list) =
+    primaryFacts
+    |> List.tryFind isPrimaryReasonFact
+    |> Option.map (fun fact -> fact.Value)
+
+let private tryRecommendedNextStep (maturity: InquiryMaturityContext) (primaryFacts: InquiryAnswerFact list) =
+    match maturity.RecommendedNextStep with
+    | Some step -> Some step
+    | None ->
+        primaryFacts
+        |> List.tryPick (fun fact ->
+            if fact.Kind = SuggestedAction then
+                Some fact.Value
+            else
+                None)
+
+let private renderInquiryCardLine label value =
+    p {
+        attr.``class`` "mb-2"
+        strong { text (label + ": ") }
+        text value
+    }
+
+let private renderInquiryCountTag label count =
+    span {
+        attr.``class`` "tag is-light"
+        text (label + " " + string count)
+    }
+
+let private renderInquiryCard (result: FactsReconstructionResult) (answer: InquiryAnswer) dispatch =
+    let maturity = answer.MaturityContext
+    let primaryFacts, additionalFacts = splitAnswerFactsByProfile answer
+    let primaryReason =
+        tryPrimaryReason primaryFacts
+        |> Option.defaultValue maturity.PrimaryMessage
+
+    let evidenceStatus =
+        if maturity.HasEvidence then
+            "Evidence available"
+        else
+            "No evidence attached"
+
+    let ledgerStatus =
+        if maturity.HasLedgerHistory then
+            "Ledger history available"
+        else
+            "No related ledger events"
+
+    div {
+        attr.``class`` "box facts-reconstruction-result"
+
+        p {
+            attr.``class`` "heading mb-1"
+            text "Inquiry card"
+        }
+
+        h2 {
+            attr.``class`` "title is-5 mb-3"
+            text result.Question
+        }
+
+        div {
+            attr.``class`` "tags mb-3"
+            span {
+                attr.``class`` "tag is-info is-light"
+                text "Compact projection"
+            }
+            span {
+                attr.``class`` "tag is-light"
+                text (formatInquiryTarget result.TargetKind result.TargetId)
+            }
+            span {
+                attr.``class`` "tag is-warning is-light"
+                text (formatInquiryMaturityStage maturity.MaturityStage)
+            }
+        }
+
+        div {
+            attr.``class`` "notification is-info is-light facts-reconstruction-summary"
+            text (formatInquiryAnswerSummary answer)
+        }
+
+        div {
+            attr.``class`` "content mb-3"
+            renderInquiryCardLine "Maturity stage" (formatInquiryMaturityStage maturity.MaturityStage)
+            renderInquiryCardLine "Governance state" maturity.GovernanceState
+            renderInquiryCardLine "Primary reason" primaryReason
+
+            match tryRecommendedNextStep maturity primaryFacts with
+            | None -> empty()
+            | Some step -> renderInquiryCardLine "Recommended next step" step
+
+            renderInquiryCardLine "Evidence status" evidenceStatus
+            renderInquiryCardLine "Ledger status" ledgerStatus
+        }
+
+        div {
+            attr.``class`` "tags mb-4"
+            renderInquiryCountTag "Primary facts" primaryFacts.Length
+            renderInquiryCountTag "Additional facts" additionalFacts.Length
+            renderInquiryCountTag "Source Phi" result.SourcePhiIds.Length
+            renderInquiryCountTag "Ledger events" result.RelatedLedgerEvents.Length
+        }
+
+        div {
+            attr.``class`` "field is-grouped"
+            div {
+                attr.``class`` "control"
+                button {
+                    attr.``class`` "button is-small is-light"
+                    attr.``type`` "button"
+                    on.click (fun _ -> dispatch (SetFactsReconstructionDisplayMode factsReconstructionDisplayModeFullReport))
+                    text "Open full report"
+                }
+            }
+            div {
+                attr.``class`` "control"
+                p {
+                    attr.``class`` "help"
+                    text "Full report keeps the reconstruction details and answer fact tables available."
+                }
+            }
+        }
+    }
+
+let private renderResultPanel (result: FactsReconstructionResult) (answer: InquiryAnswer) =
     let inquiry = inquiryFromFactsReconstructionQuestion result.Question result.TargetKind result.TargetId
 
     div {
@@ -416,7 +556,7 @@ let private renderResultPanel (result: FactsReconstructionResult) =
                 text result.AnswerSummary
             })
 
-        renderResultSection "Answer Facts" (fun () -> renderAnswerFactsPreview result)
+        renderResultSection "Answer Facts" (fun () -> renderAnswerFactsPreview answer)
         renderResultSection "Supporting facts" (fun () -> renderSupportingEvidence result)
         renderResultSection "Reasons" (fun () -> renderStringList "No deterministic reason lines reconstructed." result.ReasonLines)
         renderResultSection "Recommended next actions" (fun () -> renderStringList "No next action suggested by this deterministic reconstruction." result.RecommendedNextActions)
@@ -535,6 +675,21 @@ let renderFactsReconstructionTab model dispatch =
 
                 div {
                     attr.``class`` "level-right"
+                    div {
+                        attr.``class`` "field mb-0 mr-3"
+                        label {
+                            attr.``class`` "label is-small mb-1"
+                            text "Display"
+                        }
+                        div {
+                            attr.``class`` "select is-small"
+                            select {
+                                bind.input.string model.factsReconstructionDisplayMode (fun value -> dispatch (SetFactsReconstructionDisplayMode value))
+                                forEach factsReconstructionDisplayModes <| fun displayMode ->
+                                    option { text displayMode }
+                            }
+                        }
+                    }
                     button {
                         attr.``class`` "button is-link"
                         attr.``type`` "button"
@@ -552,5 +707,10 @@ let renderFactsReconstructionTab model dispatch =
                 renderMuted "Choose a reverse inquiry and resolve it to inspect stored project facts."
             }
         | Some result ->
-            renderResultPanel result
+            let answer = profiledInquiryAnswerFromResult result
+
+            if model.factsReconstructionDisplayMode = factsReconstructionDisplayModeFullReport then
+                renderResultPanel result answer
+            else
+                renderInquiryCard result answer dispatch
     }

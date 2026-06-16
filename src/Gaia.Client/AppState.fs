@@ -46,6 +46,7 @@ type Model =
         factsReconstructionQuestion: string
         factsReconstructionTargetKind: string
         factsReconstructionTargetId: string
+        factsReconstructionDisplayMode: string
         factsReconstructionResult: FactsReconstructionResult option
         evidenceRecords: EvidenceRecord list
         evidenceCaptureKind: string
@@ -99,6 +100,14 @@ let factsTargetKinds =
 
 let defaultFactsReconstructionQuestion = factsQuestionWhyCandidateAccepted
 let defaultFactsReconstructionTargetKind = factsTargetKindCandidate
+let factsReconstructionDisplayModeCard = "Card"
+let factsReconstructionDisplayModeFullReport = "Full report"
+let factsReconstructionDisplayModes =
+    [
+        factsReconstructionDisplayModeCard
+        factsReconstructionDisplayModeFullReport
+    ]
+let defaultFactsReconstructionDisplayMode = factsReconstructionDisplayModeCard
 
 let buildSigmaBasisItemDecisionsFromLedger ledgerEvents =
     ledgerEvents
@@ -173,6 +182,7 @@ let restoreProjectSnapshot (snapshot: ProjectSnapshot) (model: Model) =
             factsReconstructionQuestion = defaultFactsReconstructionQuestion
             factsReconstructionTargetKind = defaultFactsReconstructionTargetKind
             factsReconstructionTargetId = ""
+            factsReconstructionDisplayMode = defaultFactsReconstructionDisplayMode
             factsReconstructionResult = None
             evidenceRecords = snapshot.EvidenceRecords
             evidenceTargetId = ""
@@ -245,6 +255,7 @@ let initModel =
         factsReconstructionQuestion = defaultFactsReconstructionQuestion
         factsReconstructionTargetKind = defaultFactsReconstructionTargetKind
         factsReconstructionTargetId = ""
+        factsReconstructionDisplayMode = defaultFactsReconstructionDisplayMode
         factsReconstructionResult = None
         evidenceRecords = []
         evidenceCaptureKind = defaultEvidenceCaptureKind
@@ -291,6 +302,7 @@ let clearProjectModel (model: Model) =
             factsReconstructionQuestion = defaultFactsReconstructionQuestion
             factsReconstructionTargetKind = defaultFactsReconstructionTargetKind
             factsReconstructionTargetId = ""
+            factsReconstructionDisplayMode = defaultFactsReconstructionDisplayMode
             factsReconstructionResult = None
             evidenceRecords = []
             evidenceCaptureKind = defaultEvidenceCaptureKind
@@ -376,6 +388,7 @@ type Message =
     | SetFactsReconstructionQuestion of string
     | SetFactsReconstructionTargetKind of string
     | SetFactsReconstructionTargetId of string
+    | SetFactsReconstructionDisplayMode of string
     | RunFactsReconstruction
     | SetProjectName of string
     | SaveProjectFile
