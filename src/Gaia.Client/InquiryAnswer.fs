@@ -1,6 +1,7 @@
 module Gaia.Client.InquiryAnswer
 
 open System
+open System.Text.RegularExpressions
 open Gaia.Client.Types
 open Gaia.Client.AppState
 open Gaia.Client.Workflow
@@ -36,11 +37,37 @@ type InquiryAnswerFact =
         Rank: int
     }
 
+type InquiryMaturityStage =
+    | NoRelevantData
+    | ParsedOnly
+    | CandidateOnly
+    | GovernanceNotStarted
+    | GovernanceInProgress
+    | GovernanceMixed
+    | GovernanceClosed
+    | EvidenceAvailable
+    | EvidenceMissing
+
+type InquiryMaturityContext =
+    {
+        MaturityStage: InquiryMaturityStage
+        GovernanceState: string
+        HasParsedPhi: bool
+        HasCandidates: bool
+        HasGovernanceDecision: bool
+        HasMixedGovernance: bool
+        HasEvidence: bool
+        HasLedgerHistory: bool
+        PrimaryMessage: string
+        RecommendedNextStep: string option
+    }
+
 type InquiryAnswer =
     {
         AnswerId: string
         Inquiry: Inquiry
         Summary: string
+        MaturityContext: InquiryMaturityContext
         Facts: InquiryAnswerFact list
     }
 
@@ -91,6 +118,10 @@ let private containsText needle haystack =
 
     needleValue <> ""
     && haystackValue.IndexOf(needleValue, StringComparison.OrdinalIgnoreCase) >= 0
+
+let private containsAnyText needles haystack =
+    needles
+    |> List.exists (fun needle -> containsText needle haystack)
 
 let private startsWithText prefix value =
     (clean value).StartsWith(clean prefix, StringComparison.OrdinalIgnoreCase)
@@ -159,6 +190,18 @@ let formatInquiryIntentProfile (profile: InquiryIntentProfile) =
     | DecisionProfile -> "Decision profile"
     | ContextProfile -> "Context profile"
     | UnresolvedProfile -> "Unresolved profile"
+
+let formatInquiryMaturityStage (stage: InquiryMaturityStage) =
+    match stage with
+    | NoRelevantData -> "No relevant data"
+    | ParsedOnly -> "Parsed only"
+    | CandidateOnly -> "Candidate only"
+    | GovernanceNotStarted -> "Governance not started"
+    | GovernanceInProgress -> "Governance in progress"
+    | GovernanceMixed -> "Governance mixed"
+    | GovernanceClosed -> "Governance closed"
+    | EvidenceAvailable -> "Evidence available"
+    | EvidenceMissing -> "Evidence missing"
 
 let private formatDecisionValue = function
     | Pending -> "Pending"
@@ -605,6 +648,242 @@ let private specializedFacts (result: FactsReconstructionResult) : InquiryAnswer
         yield! phiContextFacts result
     ]
 
+let private resultTextLines (result: FactsReconstructionResult) =
+    [
+        result.AnswerSummary
+        yield! result.ReasonLines
+        yield! result.RecommendedNextActions
+        yield! result.FactLines
+        yield! result.MissingOrUnresolvedItems
+        yield! result.ProvenanceLabels
+        yield!
+            result.RelatedLedgerEvents
+            |> List.map (fun ledgerEvent -> ledgerEvent.EventKind + " " + ledgerEvent.Summary + " " + ledgerEvent.Detail)
+    ]
+    |> distinctText
+
+let private factTextLines (facts: InquiryAnswerFact list) =
+    facts
+    |> List.collect (fun fact ->
+        [
+            fact.Label
+            fact.Value
+            fact.SourceKind
+            fact.SourceId |> Option.defaultValue ""
+            fact.TargetKind |> Option.defaultValue ""
+            fact.TargetId |> Option.defaultValue ""
+        ])
+    |> distinctText
+
+let private hasNonZeroGovernanceCount (label: string) (line: string) =
+    Regex.IsMatch(line, @"\b" + Regex.Escape(label) + @"\s+[1-9][0-9]*", RegexOptions.IgnoreCase)
+
+let private lineHasAnyNonZeroGovernanceCount line =
+    hasNonZeroGovernanceCount "accepted" line
+    || hasNonZeroGovernanceCount "rejected" line
+    || hasNonZeroGovernanceCount "held" line
+
+let private lineHasPendingCount line =
+    hasNonZeroGovernanceCount "pending" line
+    || containsText "still pending" line
+
+let private isDecisionQuestion question =
+    equalsText question factsQuestionWhyCandidateAccepted
+    || equalsText question factsQuestionWhyCandidateRejected
+
+let private expectedDecisionText question =
+    if equalsText question factsQuestionWhyCandidateAccepted then
+        "accepted"
+    elif equalsText question factsQuestionWhyCandidateRejected then
+        "rejected"
+    else
+        "governed"
+
+let private isEvidenceFocusedQuestion question =
+    equalsText question factsQuestionWhatFactsSupportedCandidate
+    || equalsText question factsQuestionWhatContextAttachedToPhi
+
+let private deriveInquiryMaturityContext
+    (result: FactsReconstructionResult)
+    (facts: InquiryAnswerFact list)
+    : InquiryMaturityContext =
+    let lines = resultTextLines result @ factTextLines facts
+    let hasParsedPhi = not (List.isEmpty result.SourcePhiIds) || not (List.isEmpty result.SourcePhiTexts)
+    let hasCandidates = not (List.isEmpty result.CandidateFacts)
+    let hasGovernanceDecision = not (List.isEmpty result.GovernanceDecisions)
+
+    let hasBasisGovernance =
+        lines
+        |> List.exists (fun line ->
+            lineHasAnyNonZeroGovernanceCount line
+            || containsAnyText [ " was accepted"; " was rejected"; " was held" ] line)
+
+    let hasPendingGovernance =
+        lines |> List.exists lineHasPendingCount
+
+    let hasAcceptedBasis =
+        lines |> List.exists (fun line -> hasNonZeroGovernanceCount "accepted" line || containsText " was accepted" line)
+
+    let hasRejectedBasis =
+        lines |> List.exists (fun line -> hasNonZeroGovernanceCount "rejected" line || containsText " was rejected" line)
+
+    let hasHeldBasis =
+        lines |> List.exists (fun line -> hasNonZeroGovernanceCount "held" line || containsText " was held" line)
+
+    let hasMixedGovernance =
+        (hasAcceptedBasis && (hasRejectedBasis || hasHeldBasis))
+        || (hasRejectedBasis && hasHeldBasis)
+        || (lines |> List.exists (containsAnyText [ "Mixed"; "Partially"; "conflict"; "not fully"; "reconciliation" ]))
+
+    let hasClosedGovernance =
+        (hasGovernanceDecision || hasBasisGovernance)
+        && not hasMixedGovernance
+        && not hasPendingGovernance
+        && (lines
+            |> List.exists (
+                containsAnyText
+                    [
+                        "Basis-derived status: Accepted"
+                        "Basis-derived status: Rejected"
+                        "Basis-derived status: Held"
+                        "fully accepted"
+                        "fully rejected"
+                    ]))
+
+    let hasEvidence =
+        not (List.isEmpty result.SourcePhiIds)
+        || not (List.isEmpty result.SourcePhiTexts)
+        || not (List.isEmpty result.ContextEntriesUsed)
+        || not (List.isEmpty result.ProvenanceLabels)
+
+    let hasLedgerHistory = not (List.isEmpty result.RelatedLedgerEvents)
+
+    let hasRelevantData =
+        hasParsedPhi
+        || hasCandidates
+        || hasGovernanceDecision
+        || hasBasisGovernance
+        || hasEvidence
+        || hasLedgerHistory
+
+    let stage =
+        if not hasRelevantData then
+            NoRelevantData
+        elif isEvidenceFocusedQuestion result.Question && not hasEvidence then
+            EvidenceMissing
+        elif isEvidenceFocusedQuestion result.Question && hasEvidence then
+            EvidenceAvailable
+        elif hasMixedGovernance then
+            GovernanceMixed
+        elif hasClosedGovernance then
+            GovernanceClosed
+        elif hasGovernanceDecision || hasBasisGovernance then
+            GovernanceInProgress
+        elif hasCandidates && isDecisionQuestion result.Question then
+            GovernanceNotStarted
+        elif hasCandidates then
+            CandidateOnly
+        elif hasParsedPhi then
+            ParsedOnly
+        elif hasEvidence then
+            EvidenceAvailable
+        else
+            EvidenceMissing
+
+    let governanceState =
+        match stage with
+        | GovernanceMixed -> "Mixed"
+        | GovernanceClosed -> "Closed"
+        | GovernanceInProgress -> "In progress"
+        | GovernanceNotStarted
+        | CandidateOnly -> "Not started"
+        | _ -> "No governance data"
+
+    let expectedDecision = expectedDecisionText result.Question
+
+    let primaryMessage =
+        match stage with
+        | NoRelevantData -> "No relevant facts have been reconstructed for this inquiry yet."
+        | ParsedOnly -> "Relevant Phi has been parsed, but no current candidate or governance decision is available yet."
+        | CandidateOnly -> "A candidate exists, but governance has not started yet."
+        | GovernanceNotStarted ->
+            "This candidate has not been " + expectedDecision + " yet. It is still awaiting governance."
+        | GovernanceInProgress -> "Governance has started, but the decision is not closed yet."
+        | GovernanceMixed -> "This candidate is not fully resolved. Some basis items have conflicting or incomplete decisions."
+        | GovernanceClosed -> "Governance is closed for this inquiry."
+        | EvidenceAvailable -> "Supporting evidence is available for this inquiry."
+        | EvidenceMissing -> "No evidence has been attached yet."
+
+    let recommendedNextStep =
+        match stage with
+        | NoRelevantData -> Some "Ingest or parse relevant Phi before resolving this inquiry."
+        | ParsedOnly -> Some "Review parsed Phi and generate or review candidates."
+        | CandidateOnly
+        | GovernanceNotStarted -> Some "Review candidate decision."
+        | GovernanceInProgress -> Some "Finish pending or held basis-item decisions."
+        | GovernanceMixed -> Some "Reconcile basis decisions before treating the answer as final."
+        | EvidenceMissing -> Some "Attach or capture evidence for this inquiry."
+        | GovernanceClosed
+        | EvidenceAvailable -> None
+
+    {
+        MaturityStage = stage
+        GovernanceState = governanceState
+        HasParsedPhi = hasParsedPhi
+        HasCandidates = hasCandidates
+        HasGovernanceDecision = hasGovernanceDecision
+        HasMixedGovernance = hasMixedGovernance
+        HasEvidence = hasEvidence
+        HasLedgerHistory = hasLedgerHistory
+        PrimaryMessage = primaryMessage
+        RecommendedNextStep = recommendedNextStep
+    }
+
+let private summaryForMaturity question (maturity: InquiryMaturityContext) fallbackSummary =
+    match maturity.MaturityStage with
+    | NoRelevantData
+    | ParsedOnly
+    | GovernanceInProgress
+    | GovernanceMixed
+    | EvidenceMissing -> maturity.PrimaryMessage
+    | CandidateOnly
+    | GovernanceNotStarted when isDecisionQuestion question -> maturity.PrimaryMessage
+    | _ -> fallbackSummary
+
+let private maturityFactDrafts
+    (result: FactsReconstructionResult)
+    (maturity: InquiryMaturityContext)
+    : InquiryAnswerFactDraft list =
+    [
+        yield resultFact Status "Maturity stage" (formatInquiryMaturityStage maturity.MaturityStage) "InquiryMaturityContext" None result
+        yield resultFact Status "Governance state" maturity.GovernanceState "InquiryMaturityContext" None result
+        yield resultFact Reason "Maturity context" maturity.PrimaryMessage "InquiryMaturityContext" None result
+
+        match maturity.MaturityStage with
+        | GovernanceNotStarted
+        | CandidateOnly ->
+            yield
+                resultFact
+                    Reason
+                    "Governance basis"
+                    "Candidate exists but no accept/reject/hold decision is recorded."
+                    "InquiryMaturityContext"
+                    None
+                    result
+        | GovernanceMixed ->
+            yield resultFact Warning "Mixed governance" maturity.PrimaryMessage "InquiryMaturityContext" None result
+        | EvidenceMissing ->
+            yield resultFact Warning "Evidence missing" "No evidence has been attached yet." "InquiryMaturityContext" None result
+        | _ -> ()
+
+        match maturity.RecommendedNextStep with
+        | Some step -> yield resultFact SuggestedAction "Recommended next step" step "InquiryMaturityContext" None result
+        | None -> ()
+
+        if not maturity.HasEvidence && maturity.MaturityStage <> EvidenceMissing then
+            yield resultFact Warning "Evidence missing" "No evidence has been attached yet." "InquiryMaturityContext" None result
+    ]
+
 let private answerIdForResult (result: FactsReconstructionResult) =
     "ANS-"
     + stableIdText result.Question
@@ -616,13 +895,17 @@ let private answerIdForResult (result: FactsReconstructionResult) =
 let inquiryAnswerFromFactsReconstructionResult (result: FactsReconstructionResult) : InquiryAnswer =
     let inquiry = inquiryFromFactsReconstructionQuestion result.Question result.TargetKind result.TargetId
     let answerId = answerIdForResult result
-    let summary = summaryForResult result
-    let facts = rankFacts answerId (specializedFacts result @ genericFacts result)
+    let baseFactDrafts = specializedFacts result @ genericFacts result
+    let baseFacts = rankFacts answerId baseFactDrafts
+    let maturity = deriveInquiryMaturityContext result baseFacts
+    let summary = summaryForMaturity result.Question maturity (summaryForResult result)
+    let facts = rankFacts answerId (maturityFactDrafts result maturity @ baseFactDrafts)
 
     {
         AnswerId = answerId
         Inquiry = inquiry
         Summary = summary
+        MaturityContext = maturity
         Facts = facts
     }
 
@@ -751,6 +1034,12 @@ let private profileTermPriority (profile: InquiryIntentProfile) (fact: InquiryAn
             10
     | _ -> 10
 
+let private maturitySourcePriority (fact: InquiryAnswerFact) =
+    if equalsText fact.SourceKind "InquiryMaturityContext" then
+        0
+    else
+        1
+
 let private hostOriginPriority (answer: InquiryAnswer) (fact: InquiryAnswerFact) =
     if equalsText answer.Inquiry.Text factsQuestionWhyHostKnown then
         if fact.Kind = DirectAnswer then
@@ -782,7 +1071,12 @@ let private rerankFacts (facts: InquiryAnswerFact list) : InquiryAnswerFact list
 
 let selectFactsForProfile (profile: InquiryIntentProfile) (facts: InquiryAnswerFact list) : InquiryAnswerFact list =
     facts
-    |> List.sortBy (fun fact -> kindPriority profile fact, profileTermPriority profile fact, fact.Rank, fact.FactId)
+    |> List.sortBy (fun fact ->
+        maturitySourcePriority fact,
+        kindPriority profile fact,
+        profileTermPriority profile fact,
+        fact.Rank,
+        fact.FactId)
     |> rerankFacts
 
 let profileInquiryAnswer (answer: InquiryAnswer) : InquiryAnswer =
@@ -791,6 +1085,7 @@ let profileInquiryAnswer (answer: InquiryAnswer) : InquiryAnswer =
     let facts =
         answer.Facts
         |> List.sortBy (fun fact ->
+            maturitySourcePriority fact,
             hostOriginPriority answer fact,
             kindPriority profile fact,
             profileTermPriority profile fact,
@@ -801,46 +1096,64 @@ let profileInquiryAnswer (answer: InquiryAnswer) : InquiryAnswer =
     { answer with Facts = facts }
 
 let isPrimaryAnswerFactForProfile (profile: InquiryIntentProfile) (fact: InquiryAnswerFact) =
-    match profile, fact.Kind with
-    | EvidenceProfile, Evidence
-    | EvidenceProfile, RelatedTarget
-    | EvidenceProfile, LedgerReference
-    | EvidenceProfile, Reason -> true
-    | ExplanationProfile, DirectAnswer
-    | ExplanationProfile, Reason
-    | ExplanationProfile, RelatedTarget
-    | ExplanationProfile, Evidence
-    | ExplanationProfile, LedgerReference -> true
-    | StatusProfile, Status
-    | StatusProfile, OpenDecision
-    | StatusProfile, Warning
-    | StatusProfile, MissingLink
-    | StatusProfile, SuggestedAction -> true
-    | DeltaProfile, DirectAnswer
-    | DeltaProfile, RelatedTarget
-    | DeltaProfile, Reason
-    | DeltaProfile, Evidence -> true
-    | DecisionProfile, DirectAnswer
-    | DecisionProfile, Status
-    | DecisionProfile, Reason
-    | DecisionProfile, Warning
-    | DecisionProfile, LedgerReference -> true
-    | ContextProfile, Evidence when equalsText fact.SourceKind "PhiContextEntry" -> true
-    | ContextProfile, Evidence when containsText "Source Phi" fact.Label -> true
-    | ContextProfile, Evidence when containsText "Provenance" fact.Label -> true
-    | ContextProfile, RelatedTarget -> true
-    | UnresolvedProfile, Status
-    | UnresolvedProfile, OpenDecision
-    | UnresolvedProfile, Warning
-    | UnresolvedProfile, MissingLink
-    | UnresolvedProfile, SuggestedAction -> true
-    | _ -> false
+    if equalsText fact.SourceKind "InquiryMaturityContext" then
+        true
+    else
+        match profile, fact.Kind with
+        | EvidenceProfile, Evidence
+        | EvidenceProfile, RelatedTarget
+        | EvidenceProfile, LedgerReference
+        | EvidenceProfile, Reason -> true
+        | ExplanationProfile, DirectAnswer
+        | ExplanationProfile, Reason
+        | ExplanationProfile, RelatedTarget
+        | ExplanationProfile, Evidence
+        | ExplanationProfile, LedgerReference -> true
+        | StatusProfile, Status
+        | StatusProfile, OpenDecision
+        | StatusProfile, Warning
+        | StatusProfile, MissingLink
+        | StatusProfile, SuggestedAction -> true
+        | DeltaProfile, DirectAnswer
+        | DeltaProfile, RelatedTarget
+        | DeltaProfile, Reason
+        | DeltaProfile, Evidence -> true
+        | DecisionProfile, DirectAnswer
+        | DecisionProfile, Status
+        | DecisionProfile, Reason
+        | DecisionProfile, Warning
+        | DecisionProfile, LedgerReference -> true
+        | ContextProfile, Evidence when equalsText fact.SourceKind "PhiContextEntry" -> true
+        | ContextProfile, Evidence when containsText "Source Phi" fact.Label -> true
+        | ContextProfile, Evidence when containsText "Provenance" fact.Label -> true
+        | ContextProfile, RelatedTarget -> true
+        | UnresolvedProfile, Status
+        | UnresolvedProfile, OpenDecision
+        | UnresolvedProfile, Warning
+        | UnresolvedProfile, MissingLink
+        | UnresolvedProfile, SuggestedAction -> true
+        | _ -> false
 
 let splitAnswerFactsByProfile (answer: InquiryAnswer) : InquiryAnswerFact list * InquiryAnswerFact list =
     let profile = inquiryIntentProfileForAnswer answer
 
-    answer.Facts
-    |> List.partition (isPrimaryAnswerFactForProfile profile)
+    let primaryLimit = 8
+
+    let primaryFacts =
+        answer.Facts
+        |> List.filter (isPrimaryAnswerFactForProfile profile)
+        |> List.truncate primaryLimit
+
+    let primaryIds =
+        primaryFacts
+        |> List.map (fun fact -> fact.FactId)
+        |> Set.ofList
+
+    let additionalFacts =
+        answer.Facts
+        |> List.filter (fun fact -> not (Set.contains fact.FactId primaryIds))
+
+    primaryFacts, additionalFacts
 
 let buildInquiryAnswer (model: Model) : InquiryAnswer =
     reconstructFacts model

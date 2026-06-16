@@ -287,6 +287,7 @@ let private renderAnswerFactsPreview (result: FactsReconstructionResult) =
         |> profileInquiryAnswer
 
     let profile = inquiryIntentProfileForAnswer answer
+    let maturity = answer.MaturityContext
     let primaryFacts, additionalFacts = splitAnswerFactsByProfile answer
 
     match answer.Facts with
@@ -309,6 +310,29 @@ let private renderAnswerFactsPreview (result: FactsReconstructionResult) =
                     attr.``class`` "tag is-light"
                     text (formatInquiryIntentProfile profile)
                 }
+                span {
+                    attr.``class`` "tag is-warning is-light"
+                    text ("Maturity: " + formatInquiryMaturityStage maturity.MaturityStage)
+                }
+            }
+
+            div {
+                attr.``class`` "notification is-light"
+                p {
+                    strong { text "Maturity stage: " }
+                    text (formatInquiryMaturityStage maturity.MaturityStage)
+                }
+                p {
+                    strong { text "Primary message: " }
+                    text maturity.PrimaryMessage
+                }
+                match maturity.RecommendedNextStep with
+                | None -> empty()
+                | Some step ->
+                    p {
+                        strong { text "Recommended next step: " }
+                        text step
+                    }
             }
 
             renderEvidenceSection
