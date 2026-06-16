@@ -8,6 +8,7 @@ open Gaia.Client.AppState
 open Gaia.Client.Workflow
 open Gaia.Client.FactsReconstruction
 open Gaia.Client.Inquiry
+open Gaia.Client.InquiryAnswer
 
 let private renderMuted textValue =
     p {
@@ -251,6 +252,74 @@ let private renderSupportingEvidence (result: FactsReconstructionResult) =
         renderEvidenceSection "Missing or unresolved items" (fun () -> renderStringList "No missing or unresolved items found." result.MissingOrUnresolvedItems)
     }
 
+let private renderAnswerFactsTable emptyText (facts: InquiryAnswerFact list) =
+    match facts with
+    | [] ->
+        renderMuted emptyText
+    | facts ->
+        div {
+            attr.``class`` "table-container"
+            table {
+                attr.``class`` "table is-fullwidth is-striped is-narrow"
+
+                thead {
+                    tr {
+                        th { text "Kind" }
+                        th { text "Label" }
+                        th { text "Value" }
+                    }
+                }
+
+                tbody {
+                    forEach facts <| fun fact ->
+                        tr {
+                            td { text (formatInquiryAnswerFactKind fact.Kind) }
+                            td { text fact.Label }
+                            td { text fact.Value }
+                        }
+                }
+            }
+        }
+
+let private renderAnswerFactsPreview (result: FactsReconstructionResult) =
+    let answer =
+        inquiryAnswerFromFactsReconstructionResult result
+        |> profileInquiryAnswer
+
+    let profile = inquiryIntentProfileForAnswer answer
+    let primaryFacts, additionalFacts = splitAnswerFactsByProfile answer
+
+    match answer.Facts with
+    | [] ->
+        renderMuted "No answer facts projected."
+    | _ ->
+        div {
+            div {
+                attr.``class`` "notification is-light facts-reconstruction-summary"
+                text (formatInquiryAnswerSummary answer)
+            }
+
+            div {
+                attr.``class`` "tags mb-3"
+                span {
+                    attr.``class`` "tag is-info is-light"
+                    text "Profiled answer facts"
+                }
+                span {
+                    attr.``class`` "tag is-light"
+                    text (formatInquiryIntentProfile profile)
+                }
+            }
+
+            renderEvidenceSection
+                "Primary answer facts"
+                (fun () -> renderAnswerFactsTable "No primary facts selected for this profile." primaryFacts)
+
+            renderEvidenceSection
+                "Additional supporting facts"
+                (fun () -> renderAnswerFactsTable "No additional supporting facts." additionalFacts)
+        }
+
 let private renderResultPanel (result: FactsReconstructionResult) =
     let inquiry = inquiryFromFactsReconstructionQuestion result.Question result.TargetKind result.TargetId
 
@@ -323,6 +392,7 @@ let private renderResultPanel (result: FactsReconstructionResult) =
                 text result.AnswerSummary
             })
 
+        renderResultSection "Answer Facts" (fun () -> renderAnswerFactsPreview result)
         renderResultSection "Supporting facts" (fun () -> renderSupportingEvidence result)
         renderResultSection "Reasons" (fun () -> renderStringList "No deterministic reason lines reconstructed." result.ReasonLines)
         renderResultSection "Recommended next actions" (fun () -> renderStringList "No next action suggested by this deterministic reconstruction." result.RecommendedNextActions)
