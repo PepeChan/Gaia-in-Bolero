@@ -10,6 +10,7 @@ open Gaia.Client.Ledger
 open Gaia.Client.AppState
 open Gaia.Client.Workflow
 open Gaia.Client.FactsReconstruction
+open Gaia.Client.InquiryAnswer
 
 let projectFileModulePath = "./cognopy-files.js"
 
@@ -97,6 +98,37 @@ let openProjectFileCmd jsRuntime =
                 ProjectFileOpened content)
         (fun ex -> ProjectFileOpenFailed ex.Message)
 
+let createInquiryResolvedLedgerEvent (result: FactsReconstructionResult) ledgerEvents =
+    let answer =
+        inquiryAnswerFromFactsReconstructionResult result
+        |> profileInquiryAnswer
+
+    let profile = inquiryIntentProfileForAnswer answer
+    let maturity = answer.MaturityContext.MaturityStage
+    let targetId =
+        if String.IsNullOrWhiteSpace(result.TargetId) then
+            "Auto-selected target"
+        else
+            result.TargetId
+
+    let detail =
+        [
+            "Question: " + result.Question
+            "Target kind: " + result.TargetKind
+            "Target identifier: " + targetId
+            "Answer profile: " + formatInquiryIntentProfile profile
+            "Maturity stage: " + formatInquiryMaturityStage maturity
+            "Answer summary: " + answer.Summary
+        ]
+        |> String.concat " | "
+
+    createLedgerEvent
+        inquiryResolvedLedgerEventKind
+        targetId
+        "Inquiry resolved"
+        detail
+        ledgerEvents
+
 let update (jsRuntime: IJSRuntime) message model =
     match message with
     | SetPage page ->
@@ -137,7 +169,12 @@ let update (jsRuntime: IJSRuntime) message model =
     | SetFactsReconstructionDisplayMode value ->
         { model with factsReconstructionDisplayMode = value }, Cmd.none
     | RunFactsReconstruction ->
-        { model with factsReconstructionResult = Some (reconstructFacts model) }, Cmd.none
+        let result = reconstructFacts model
+        let inquiryResolvedEvent = createInquiryResolvedLedgerEvent result model.LedgerEvents
+
+        { model with
+            factsReconstructionResult = Some result
+            LedgerEvents = model.LedgerEvents @ [ inquiryResolvedEvent ] }, Cmd.none
     | SetProjectName value ->
         { model with projectName = value }, Cmd.none
     | SaveProjectFile ->

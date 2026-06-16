@@ -23,6 +23,8 @@ let createLedgerEvent eventKind targetId summary detail (ledgerEvents: LedgerEve
 let appendLedgerEventToList eventKind targetId summary detail ledgerEvents =
     ledgerEvents @ [ createLedgerEvent eventKind targetId summary detail ledgerEvents ]
 
+let inquiryResolvedLedgerEventKind = "InquiryResolved"
+
 let isPhiLedgerEvent eventKind =
     eventKind = "PhiIngested"
     || eventKind = "PhiParsed"
@@ -40,6 +42,12 @@ let isGovernanceLedgerEvent eventKind =
     || eventKind = "SigmaBasisItemAccepted"
     || eventKind = "SigmaBasisItemRejected"
     || eventKind = "SigmaBasisItemHeld"
+
+let isInquiryLedgerEvent eventKind =
+    eventKind = inquiryResolvedLedgerEventKind
+
+let isAuditOnlyLedgerEvent eventKind =
+    isInquiryLedgerEvent eventKind
 
 let countLedgerEvents predicate (ledgerEvents: LedgerEvent list) =
     ledgerEvents

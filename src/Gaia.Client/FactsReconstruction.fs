@@ -4,6 +4,7 @@ open System
 open Gaia.Core
 open Gaia.Client.Types
 open Gaia.Client.AppState
+open Gaia.Client.Ledger
 open Gaia.Client.Workflow
 
 let private isBlank (value: string) =
@@ -325,11 +326,12 @@ let private relatedLedgerEvents targetIds model =
 
     model.LedgerEvents
     |> List.filter (fun ledgerEvent ->
-        ids
-        |> List.exists (fun targetId ->
-            equalsText ledgerEvent.TargetId targetId
-            || containsText targetId ledgerEvent.Summary
-            || containsText targetId ledgerEvent.Detail))
+        not (isAuditOnlyLedgerEvent ledgerEvent.EventKind)
+        && (ids
+            |> List.exists (fun targetId ->
+                equalsText ledgerEvent.TargetId targetId
+                || containsText targetId ledgerEvent.Summary
+                || containsText targetId ledgerEvent.Detail)))
 
 let private provenanceLabels (candidates: CandidateDelta list) (contextEntries: PhiContextEntry list) extraLabels =
     [

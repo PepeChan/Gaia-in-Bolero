@@ -171,6 +171,7 @@ let renderLedgerTab (ledgerEvents: LedgerEvent list) (replayPreviewSequence: int
     let phiEvents = countLedgerEvents isPhiLedgerEvent ledgerEvents
     let replayEvents = countLedgerEvents isReplayLedgerEvent ledgerEvents
     let governanceEvents = countLedgerEvents isGovernanceLedgerEvent ledgerEvents
+    let inquiryEvents = countLedgerEvents isInquiryLedgerEvent ledgerEvents
 
     div {
         attr.``class`` "mb-6 pb-5"
@@ -189,6 +190,7 @@ let renderLedgerTab (ledgerEvents: LedgerEvent list) (replayPreviewSequence: int
                 renderLedgerCounter "Phi events" phiEvents
                 renderLedgerCounter "Replay events" replayEvents
                 renderLedgerCounter "Governance events" governanceEvents
+                renderLedgerCounter "Inquiry events" inquiryEvents
             }
 
             match ledgerEvents with
