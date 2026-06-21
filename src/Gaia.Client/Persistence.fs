@@ -183,6 +183,80 @@ let jsonArrayFrom values toJson =
 
     array
 
+let frToJson (fr: FR) =
+    let json = JsonObject()
+    json["Id"] <- JsonValue.Create(fr.Id)
+    json["Name"] <- JsonValue.Create(fr.Name)
+    json
+
+let dpToJson (dp: DP) =
+    let json = JsonObject()
+    json["Id"] <- JsonValue.Create(dp.Id)
+    json["Name"] <- JsonValue.Create(dp.Name)
+    json
+
+let tfToJson (tf: TF) =
+    let json = JsonObject()
+    json["Id"] <- JsonValue.Create(tf.Id)
+    json["Name"] <- JsonValue.Create(tf.Name)
+    json
+
+let ctqToJson (ctq: CTQ) =
+    let json = JsonObject()
+    json["Id"] <- JsonValue.Create(ctq.Id)
+    json["Name"] <- JsonValue.Create(ctq.Name)
+    json
+
+let partToJson (part: Part) =
+    let json = JsonObject()
+    json["Id"] <- JsonValue.Create(part.Id)
+    json["Name"] <- JsonValue.Create(part.Name)
+    json
+
+let vvItemToJson (vvItem: VVItem) =
+    let json = JsonObject()
+    json["Id"] <- JsonValue.Create(vvItem.Id)
+    json["Name"] <- JsonValue.Create(vvItem.Name)
+    json
+
+let linkPairToJson ((sourceId: string), (targetId: string)) =
+    let json = JsonObject()
+    json["SourceId"] <- JsonValue.Create(sourceId)
+    json["TargetId"] <- JsonValue.Create(targetId)
+    json
+
+let realizationObjectNoteToJson (note: RealizationObjectNote) =
+    let json = JsonObject()
+    json["ObjectKind"] <- JsonValue.Create(note.ObjectKind)
+    json["ObjectId"] <- JsonValue.Create(note.ObjectId)
+    json["Description"] <- JsonValue.Create(note.Description)
+    json["SourceNote"] <- JsonValue.Create(note.SourceNote)
+    json
+
+let sigmaToJson (sigma: Sigma) =
+    let json = JsonObject()
+    json["FRs"] <- jsonArrayFrom sigma.FRs frToJson
+    json["DPs"] <- jsonArrayFrom sigma.DPs dpToJson
+    json["TFs"] <- jsonArrayFrom sigma.TFs tfToJson
+    json["CTQs"] <- jsonArrayFrom sigma.CTQs ctqToJson
+    json["Parts"] <- jsonArrayFrom sigma.Parts partToJson
+    json["FR_to_DP"] <- jsonArrayFrom sigma.FR_to_DP linkPairToJson
+    json["DP_to_TF"] <- jsonArrayFrom sigma.DP_to_TF linkPairToJson
+    json["TF_to_CTQ"] <- jsonArrayFrom sigma.TF_to_CTQ linkPairToJson
+    json["DP_to_Part"] <- jsonArrayFrom sigma.DP_to_Part linkPairToJson
+    json["FR_to_CtQ"] <- jsonArrayFrom sigma.FR_to_CtQ linkPairToJson
+    json
+
+let realizationStateToJson (state: RealizationState) =
+    let json = JsonObject()
+    json["Sigma"] <- sigmaToJson state.Sigma
+    json["VVItems"] <- jsonArrayFrom state.VVItems vvItemToJson
+    json["ObjectNotes"] <- jsonArrayFrom state.ObjectNotes realizationObjectNoteToJson
+    json["Host_to_Part"] <- jsonArrayFrom state.Host_to_Part linkPairToJson
+    json["Function_to_FR"] <- jsonArrayFrom state.Function_to_FR linkPairToJson
+    json["CTQ_to_VV"] <- jsonArrayFrom state.CTQ_to_VV linkPairToJson
+    json
+
 let projectSnapshotToJson (snapshot: ProjectSnapshot) =
     let json = JsonObject()
     json["SnapshotVersion"] <- JsonValue.Create(snapshot.SnapshotVersion)
@@ -195,6 +269,7 @@ let projectSnapshotToJson (snapshot: ProjectSnapshot) =
     json["CandidateDecisions"] <- jsonArrayFrom snapshot.CandidateDecisions candidateDecisionToJson
     json["LedgerEvents"] <- jsonArrayFrom snapshot.LedgerEvents ledgerEventToJson
     json["EvidenceRecords"] <- jsonArrayFrom snapshot.EvidenceRecords evidenceRecordToJson
+    json["RealizationState"] <- realizationStateToJson snapshot.RealizationState
     json
 
 let tryReadProperty propertyName (json: JsonObject) =
@@ -434,6 +509,90 @@ let readEvidenceRecord context (json: JsonObject) =
         ContentRef = readString context "ContentRef" json
     }
 
+let readFR context (json: JsonObject) : FR =
+    {
+        Id = readString context "Id" json
+        Name = readString context "Name" json
+    }
+
+let readDP context (json: JsonObject) : DP =
+    {
+        Id = readString context "Id" json
+        Name = readString context "Name" json
+    }
+
+let readTF context (json: JsonObject) : TF =
+    {
+        Id = readString context "Id" json
+        Name = readString context "Name" json
+    }
+
+let readCTQ context (json: JsonObject) : CTQ =
+    {
+        Id = readString context "Id" json
+        Name = readString context "Name" json
+    }
+
+let readPart context (json: JsonObject) : Part =
+    {
+        Id = readString context "Id" json
+        Name = readString context "Name" json
+    }
+
+let readVVItem context (json: JsonObject) : VVItem =
+    {
+        Id = readString context "Id" json
+        Name = readString context "Name" json
+    }
+
+let readLinkPair context (json: JsonObject) =
+    readString context "SourceId" json, readString context "TargetId" json
+
+let readRealizationObjectNote context (json: JsonObject) =
+    {
+        ObjectKind = readString context "ObjectKind" json
+        ObjectId = readString context "ObjectId" json
+        Description = readString context "Description" json
+        SourceNote = readString context "SourceNote" json
+    }
+
+let readSigma context (json: JsonObject) =
+    {
+        FRs = readObjectList context "FRs" readFR json
+        DPs = readObjectList context "DPs" readDP json
+        TFs = readObjectList context "TFs" readTF json
+        CTQs = readObjectList context "CTQs" readCTQ json
+        Parts = readObjectList context "Parts" readPart json
+        FR_to_DP = readObjectList context "FR_to_DP" readLinkPair json
+        DP_to_TF = readObjectList context "DP_to_TF" readLinkPair json
+        TF_to_CTQ = readObjectList context "TF_to_CTQ" readLinkPair json
+        DP_to_Part = readObjectList context "DP_to_Part" readLinkPair json
+        FR_to_CtQ = readOptionalObjectList context "FR_to_CtQ" readLinkPair json
+    }
+
+let readRealizationState context (json: JsonObject) =
+    let sigma =
+        readProperty context "Sigma" json
+        |> asObject (context + ".Sigma")
+        |> readSigma (context + ".Sigma")
+
+    {
+        Sigma = sigma
+        VVItems = readOptionalObjectList context "VVItems" readVVItem json
+        ObjectNotes = readOptionalObjectList context "ObjectNotes" readRealizationObjectNote json
+        Host_to_Part = readOptionalObjectList context "Host_to_Part" readLinkPair json
+        Function_to_FR = readOptionalObjectList context "Function_to_FR" readLinkPair json
+        CTQ_to_VV = readOptionalObjectList context "CTQ_to_VV" readLinkPair json
+    }
+
+let readOptionalRealizationState context (json: JsonObject) =
+    match tryReadProperty "RealizationState" json with
+    | None -> emptyRealizationState
+    | Some node ->
+        node
+        |> asObject (context + ".RealizationState")
+        |> readRealizationState (context + ".RealizationState")
+
 let serializeProjectSnapshot (snapshot: ProjectSnapshot) =
     (projectSnapshotToJson snapshot).ToJsonString(projectJsonSerializerOptions)
 
@@ -455,6 +614,7 @@ let tryDeserializeProjectSnapshot json =
                 CandidateDecisions = readObjectList "ProjectSnapshot" "CandidateDecisions" readCandidateDecision root
                 LedgerEvents = readObjectList "ProjectSnapshot" "LedgerEvents" readLedgerEvent root
                 EvidenceRecords = readOptionalObjectList "ProjectSnapshot" "EvidenceRecords" readEvidenceRecord root
+                RealizationState = readOptionalRealizationState "ProjectSnapshot" root
             }
             |> Ok
     with

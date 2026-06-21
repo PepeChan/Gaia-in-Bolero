@@ -12,6 +12,7 @@ type TopNavigationTab =
     | GaiaProbeTab
     | DetailsTab
     | DemoToolsTab
+    | DesignRealizationTab
     | FactsReconstructionTab
     | EvidenceTab
     | PersistenceTab
@@ -209,6 +210,88 @@ type EvidenceRecord =
         ContentRef: string
     }
 
+type RealizationObjectNote =
+    {
+        ObjectKind: string
+        ObjectId: string
+        Description: string
+        SourceNote: string
+    }
+
+type RealizationState =
+    {
+        Sigma: Sigma
+        VVItems: VVItem list
+        ObjectNotes: RealizationObjectNote list
+        Host_to_Part: (string * string) list
+        Function_to_FR: (string * string) list
+        CTQ_to_VV: (string * string) list
+    }
+
+let emptyRealizationSigma : Sigma =
+    {
+        FRs = []
+        DPs = []
+        TFs = []
+        CTQs = []
+        Parts = []
+        FR_to_DP = []
+        DP_to_TF = []
+        TF_to_CTQ = []
+        DP_to_Part = []
+        FR_to_CtQ = []
+    }
+
+let emptyRealizationState : RealizationState =
+    {
+        Sigma = emptyRealizationSigma
+        VVItems = []
+        ObjectNotes = []
+        Host_to_Part = []
+        Function_to_FR = []
+        CTQ_to_VV = []
+    }
+
+let realizationObjectKindFR = "FR"
+let realizationObjectKindDP = "DP"
+let realizationObjectKindTF = "TF"
+let realizationObjectKindCTQ = "CTQ"
+let realizationObjectKindPart = "Part"
+let realizationObjectKindVV = "VV item"
+
+let realizationObjectKinds =
+    [
+        realizationObjectKindFR
+        realizationObjectKindDP
+        realizationObjectKindTF
+        realizationObjectKindCTQ
+        realizationObjectKindPart
+        realizationObjectKindVV
+    ]
+
+let defaultRealizationObjectKind = realizationObjectKindFR
+
+let realizationLinkKindHostToPart = "Host -> Part"
+let realizationLinkKindFunctionToFR = "Function -> FR"
+let realizationLinkKindFRToDP = "FR -> DP"
+let realizationLinkKindDPToTF = "DP -> TF"
+let realizationLinkKindTFToCTQ = "TF -> CTQ"
+let realizationLinkKindCTQToVV = "CTQ -> VV"
+let realizationLinkKindDPToPart = "DP -> Part"
+
+let realizationLinkKinds =
+    [
+        realizationLinkKindHostToPart
+        realizationLinkKindFunctionToFR
+        realizationLinkKindFRToDP
+        realizationLinkKindDPToTF
+        realizationLinkKindTFToCTQ
+        realizationLinkKindCTQToVV
+        realizationLinkKindDPToPart
+    ]
+
+let defaultRealizationLinkKind = realizationLinkKindHostToPart
+
 type ProjectSnapshot =
     {
         SnapshotVersion: string
@@ -221,6 +304,7 @@ type ProjectSnapshot =
         CandidateDecisions: CandidateDecision list
         LedgerEvents: LedgerEvent list
         EvidenceRecords: EvidenceRecord list
+        RealizationState: RealizationState
     }
 
 type AdmissibilityResult =

@@ -15,6 +15,7 @@
     <Compile Include="Workflow.fs" />
     <Compile Include="FactsReconstruction.fs" />
     <Compile Include="InquiryAnswer.fs" />
+    <Compile Include="Realization.fs" />
     <Compile Include="AppUpdate.fs" />
     <Compile Include="T2ParsingView.fs" />
     <Compile Include="T4CandidateView.fs" />
@@ -23,6 +24,7 @@
     <Compile Include="LedgerView.fs" />
     <Compile Include="EvidenceView.fs" />
     <Compile Include="FactsReconstructionView.fs" />
+    <Compile Include="T6RealizationView.fs" />
     <Compile Include="Main.fs" />
     <Compile Include="Startup.fs" />
   </ItemGroup>

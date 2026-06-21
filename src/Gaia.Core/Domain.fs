@@ -7,6 +7,7 @@ type DP = { Id: string; Name: string }
 type TF = { Id: string; Name: string }
 type CTQ = { Id: string; Name: string }
 type Part = { Id: string; Name: string }
+type VVItem = { Id: string; Name: string }
 
 type Sigma =
     {

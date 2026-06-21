@@ -11,8 +11,15 @@ open Gaia.Client.AppState
 open Gaia.Client.Workflow
 open Gaia.Client.FactsReconstruction
 open Gaia.Client.InquiryAnswer
+open Gaia.Client.Realization
 
 let projectFileModulePath = "./cognopy-files.js"
+
+let cleanFormValue (value: string) =
+    if isNull value then
+        ""
+    else
+        value.Trim()
 
 let normalizeProjectFileNamePart (value: string) =
     let source =
@@ -325,6 +332,76 @@ let update (jsRuntime: IJSRuntime) message model =
                     evidenceStatus = Some ("Evidence captured: " + evidenceId) }
                 |> appendLedgerEvent "EvidenceCaptured" evidenceId "Evidence captured" detail
                 |> fun updatedModel -> updatedModel, Cmd.none
+    | SetRealizationObjectKindDraft value ->
+        { model with realizationObjectKindDraft = value }, Cmd.none
+    | SetRealizationObjectIdDraft value ->
+        { model with realizationObjectIdDraft = value }, Cmd.none
+    | SetRealizationObjectNameDraft value ->
+        { model with realizationObjectNameDraft = value }, Cmd.none
+    | SetRealizationObjectDescriptionDraft value ->
+        { model with realizationObjectDescriptionDraft = value }, Cmd.none
+    | SetRealizationObjectSourceNoteDraft value ->
+        { model with realizationObjectSourceNoteDraft = value }, Cmd.none
+    | CreateRealizationObject ->
+        let objectKind = cleanFormValue model.realizationObjectKindDraft
+        let objectId = cleanFormValue model.realizationObjectIdDraft
+        let objectName = cleanFormValue model.realizationObjectNameDraft
+        let description = cleanFormValue model.realizationObjectDescriptionDraft
+        let sourceNote = cleanFormValue model.realizationObjectSourceNoteDraft
+
+        match tryAddRealizationObject objectKind objectId objectName description sourceNote model.realizationState with
+        | Result.Error message ->
+            { model with realizationStatus = Some message }, Cmd.none
+        | Result.Ok realizationState ->
+            let detail =
+                [
+                    "Kind: " + objectKind
+                    "Id: " + objectId
+                    "Name: " + objectName
+                    if not (String.IsNullOrWhiteSpace(description)) then
+                        "Description: " + description
+                    if not (String.IsNullOrWhiteSpace(sourceNote)) then
+                        "Source/note: " + sourceNote
+                ]
+                |> String.concat "; "
+
+            { model with
+                realizationState = realizationState
+                realizationObjectIdDraft = ""
+                realizationObjectNameDraft = ""
+                realizationObjectDescriptionDraft = ""
+                realizationObjectSourceNoteDraft = ""
+                realizationStatus = Some ("Created " + objectKind + " " + objectId + ".") }
+            |> appendLedgerEvent "RealizationObjectCreated" objectId "Realization object created" detail
+            |> fun updatedModel -> updatedModel, Cmd.none
+    | SetRealizationLinkKindDraft value ->
+        { model with
+            realizationLinkKindDraft = value
+            realizationLinkSourceIdDraft = ""
+            realizationLinkTargetIdDraft = "" }, Cmd.none
+    | SetRealizationLinkSourceIdDraft value ->
+        { model with realizationLinkSourceIdDraft = value }, Cmd.none
+    | SetRealizationLinkTargetIdDraft value ->
+        { model with realizationLinkTargetIdDraft = value }, Cmd.none
+    | CreateRealizationLink ->
+        let linkKind = cleanFormValue model.realizationLinkKindDraft
+        let sourceId = cleanFormValue model.realizationLinkSourceIdDraft
+        let targetId = cleanFormValue model.realizationLinkTargetIdDraft
+
+        match tryAddRealizationLink linkKind sourceId targetId model with
+        | Result.Error message ->
+            { model with realizationStatus = Some message }, Cmd.none
+        | Result.Ok realizationState ->
+            let linkId = sourceId + " -> " + targetId
+            let detail = "Kind: " + linkKind + "; Source: " + sourceId + "; Target: " + targetId
+
+            { model with
+                realizationState = realizationState
+                realizationLinkSourceIdDraft = ""
+                realizationLinkTargetIdDraft = ""
+                realizationStatus = Some ("Linked " + linkId + ".") }
+            |> appendLedgerEvent "RealizationLinkCreated" linkId "Realization link created" detail
+            |> fun updatedModel -> updatedModel, Cmd.none
     | SetPhiDraftRawStatement value ->
         { model with phiDraftRawStatement = value }, Cmd.none
 

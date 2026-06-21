@@ -56,6 +56,16 @@ type Model =
         evidenceNotes: string
         evidenceContentRef: string
         evidenceStatus: string option
+        realizationState: RealizationState
+        realizationObjectKindDraft: string
+        realizationObjectIdDraft: string
+        realizationObjectNameDraft: string
+        realizationObjectDescriptionDraft: string
+        realizationObjectSourceNoteDraft: string
+        realizationLinkKindDraft: string
+        realizationLinkSourceIdDraft: string
+        realizationLinkTargetIdDraft: string
+        realizationStatus: string option
     }
 
 let demoScenarios = DemoData.demoScenarios
@@ -153,6 +163,7 @@ let buildProjectSnapshot (model: Model) =
         CandidateDecisions = model.candidateDecisions
         LedgerEvents = model.LedgerEvents
         EvidenceRecords = model.evidenceRecords
+        RealizationState = model.realizationState
     }
 
 let restoreProjectSnapshot (snapshot: ProjectSnapshot) (model: Model) =
@@ -190,6 +201,16 @@ let restoreProjectSnapshot (snapshot: ProjectSnapshot) (model: Model) =
             evidenceNotes = ""
             evidenceContentRef = ""
             evidenceStatus = None
+            realizationState = snapshot.RealizationState
+            realizationObjectKindDraft = defaultRealizationObjectKind
+            realizationObjectIdDraft = ""
+            realizationObjectNameDraft = ""
+            realizationObjectDescriptionDraft = ""
+            realizationObjectSourceNoteDraft = ""
+            realizationLinkKindDraft = defaultRealizationLinkKind
+            realizationLinkSourceIdDraft = ""
+            realizationLinkTargetIdDraft = ""
+            realizationStatus = None
             phiContextSnipDraft = ""
             existingPhiContextTargetId = ""
             phiContextEntryDraftKind = defaultPhiContextEntryKind
@@ -265,6 +286,16 @@ let initModel =
         evidenceNotes = ""
         evidenceContentRef = ""
         evidenceStatus = None
+        realizationState = emptyRealizationState
+        realizationObjectKindDraft = defaultRealizationObjectKind
+        realizationObjectIdDraft = ""
+        realizationObjectNameDraft = ""
+        realizationObjectDescriptionDraft = ""
+        realizationObjectSourceNoteDraft = ""
+        realizationLinkKindDraft = defaultRealizationLinkKind
+        realizationLinkSourceIdDraft = ""
+        realizationLinkTargetIdDraft = ""
+        realizationStatus = None
     }
 
 let clearProjectModel (model: Model) =
@@ -312,6 +343,16 @@ let clearProjectModel (model: Model) =
             evidenceNotes = ""
             evidenceContentRef = ""
             evidenceStatus = None
+            realizationState = emptyRealizationState
+            realizationObjectKindDraft = defaultRealizationObjectKind
+            realizationObjectIdDraft = ""
+            realizationObjectNameDraft = ""
+            realizationObjectDescriptionDraft = ""
+            realizationObjectSourceNoteDraft = ""
+            realizationLinkKindDraft = defaultRealizationLinkKind
+            realizationLinkSourceIdDraft = ""
+            realizationLinkTargetIdDraft = ""
+            realizationStatus = None
     }
 
 let buildSphynxSampleSnapshot () =
@@ -352,6 +393,7 @@ let buildSphynxSampleSnapshot () =
         CandidateDecisions = []
         LedgerEvents = sampleLedgerEvents
         EvidenceRecords = []
+        RealizationState = emptyRealizationState
     }
 
 /// The Elmish application's update messages.
@@ -410,6 +452,16 @@ type Message =
     | SetEvidenceNotes of string
     | SetEvidenceContentRef of string
     | CreateEvidenceRecord
+    | SetRealizationObjectKindDraft of string
+    | SetRealizationObjectIdDraft of string
+    | SetRealizationObjectNameDraft of string
+    | SetRealizationObjectDescriptionDraft of string
+    | SetRealizationObjectSourceNoteDraft of string
+    | CreateRealizationObject
+    | SetRealizationLinkKindDraft of string
+    | SetRealizationLinkSourceIdDraft of string
+    | SetRealizationLinkTargetIdDraft of string
+    | CreateRealizationLink
 
 let appendLedgerEvent eventKind targetId summary detail (model: Model) =
     { model with

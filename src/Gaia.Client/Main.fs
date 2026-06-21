@@ -24,6 +24,7 @@ open Gaia.Client.T5GovernanceView
 open Gaia.Client.LedgerView
 open Gaia.Client.EvidenceView
 open Gaia.Client.FactsReconstructionView
+open Gaia.Client.T6RealizationView
 
 /// Connects the routing system to the Elmish application.
 let router = Router.infer SetPage (fun model -> model.page)
@@ -254,6 +255,18 @@ let renderTopNavigation activeTab dispatch =
                 a {
                     on.click (fun _ -> dispatch (SelectTopNavigationTab EvidenceTab))
                     text "Evidence"
+                }
+            }
+
+            li {
+                attr.``class`` (
+                    if activeTab = DesignRealizationTab then
+                        "is-active"
+                    else
+                        "")
+                a {
+                    on.click (fun _ -> dispatch (SelectTopNavigationTab DesignRealizationTab))
+                    text "T6 Realization"
                 }
             }
 
@@ -971,6 +984,9 @@ let homePage model dispatch =
 
             | EvidenceTab ->
                 renderEvidenceTab model dispatch
+
+            | DesignRealizationTab ->
+                renderT6RealizationTab model dispatch
 
             | FactsReconstructionTab ->
                 renderFactsReconstructionTab model dispatch
