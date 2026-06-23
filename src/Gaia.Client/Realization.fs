@@ -413,6 +413,115 @@ let getHostRealizationStatus hostValue (state: RealizationState) =
     else
         "Continuity complete"
 
+type ReadinessState =
+    | Missing
+    | Partial
+    | Complete
+
+type HostReadiness =
+    {
+        Part: ReadinessState
+        DP: ReadinessState
+        TF: ReadinessState
+        CTQ: ReadinessState
+        VV: ReadinessState
+        Overall: ReadinessState
+    }
+
+let getReadinessLabel readiness =
+    match readiness with
+    | Missing -> "Missing"
+    | Partial -> "Partial"
+    | Complete -> "Complete"
+
+let getReadinessSymbol readiness =
+    match readiness with
+    | Missing -> "◯"
+    | Partial -> "◐"
+    | Complete -> "●"
+
+let private aggregateReadiness readinessValues =
+    match readinessValues with
+    | [] -> Missing
+    | values when values |> List.forall ((=) Complete) -> Complete
+    | values when values |> List.forall ((=) Missing) -> Missing
+    | _ -> Partial
+
+let private readinessFromLinkedTargets targetIds =
+    if targetIds |> List.isEmpty then
+        Missing
+    else
+        Complete
+
+let private readinessFromObjectLinks objectIds getTargetIds (state: RealizationState) =
+    objectIds
+    |> List.map (fun objectId -> getTargetIds objectId state |> readinessFromLinkedTargets)
+    |> aggregateReadiness
+
+let getRealizationObjectReadiness objectKind objectId (state: RealizationState) =
+    match objectKind with
+    | kind when kind = realizationObjectKindFR ->
+        reachableTargetIds [ objectId ] state.Sigma.FR_to_DP
+        |> readinessFromLinkedTargets
+    | kind when kind = realizationObjectKindPart ->
+        getDpIdsForPart objectId state
+        |> readinessFromLinkedTargets
+    | kind when kind = realizationObjectKindDP ->
+        getTfIdsForDp objectId state
+        |> readinessFromLinkedTargets
+    | kind when kind = realizationObjectKindTF ->
+        getCtqIdsForTf objectId state
+        |> readinessFromLinkedTargets
+    | kind when kind = realizationObjectKindCTQ ->
+        getVvIdsForCtq objectId state
+        |> readinessFromLinkedTargets
+    | kind when kind = realizationObjectKindVV ->
+        if realizationObjectExists kind objectId state then
+            Complete
+        else
+            Missing
+    | _ -> Missing
+
+let getHostReadiness hostValue (state: RealizationState) =
+    let partIds, dpIds, tfIds, ctqIds, vvIds = getHostContinuityIds hostValue state
+
+    let partReadiness =
+        readinessFromObjectLinks partIds getDpIdsForPart state
+
+    let dpReadiness =
+        readinessFromObjectLinks dpIds getTfIdsForDp state
+
+    let tfReadiness =
+        readinessFromObjectLinks tfIds getCtqIdsForTf state
+
+    let ctqReadiness =
+        readinessFromObjectLinks ctqIds getVvIdsForCtq state
+
+    let vvReadiness =
+        vvIds
+        |> List.map (fun vvId -> getRealizationObjectReadiness realizationObjectKindVV vvId state)
+        |> aggregateReadiness
+
+    let overall =
+        aggregateReadiness [ partReadiness; dpReadiness; tfReadiness; ctqReadiness; vvReadiness ]
+
+    {
+        Part = partReadiness
+        DP = dpReadiness
+        TF = tfReadiness
+        CTQ = ctqReadiness
+        VV = vvReadiness
+        Overall = overall
+    }
+
+let getGapReadiness totalCount gapCount =
+    if gapCount = 0 then
+        Complete
+    elif totalCount > gapCount then
+        Partial
+    else
+        Missing
+
 let getHostsWithoutParts (hostEntries: SigmaContextEntry list) (state: RealizationState) =
     hostEntries
     |> List.filter (fun entry -> getPartIdsForHost entry.Value state |> List.isEmpty)

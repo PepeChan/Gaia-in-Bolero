@@ -49,6 +49,46 @@ let private renderRealizationStatusTag status =
         text status
     }
 
+let private readinessBadgeClass readiness =
+    match readiness with
+    | Missing -> "readiness-badge readiness-missing"
+    | Partial -> "readiness-badge readiness-partial"
+    | Complete -> "readiness-badge readiness-complete"
+
+let private renderReadinessBadge prefix showLabel readiness =
+    let label =
+        if showLabel then
+            getReadinessLabel readiness
+        else
+            ""
+
+    let body =
+        match prefix, label with
+        | "", "" -> ""
+        | "", value -> value
+        | value, "" -> value
+        | prefixValue, labelValue -> prefixValue + " " + labelValue
+
+    span {
+        attr.``class`` (readinessBadgeClass readiness)
+        span {
+            attr.``class`` "readiness-symbol"
+            text (getReadinessSymbol readiness)
+        }
+
+        if body <> "" then
+            span { text body }
+    }
+
+let private renderReadinessCell readiness values =
+    td {
+        renderReadinessBadge "" true readiness
+        div {
+            attr.``class`` "readiness-cell-detail"
+            text (formatNone values)
+        }
+    }
+
 let private renderCreateObjectForm (model: Model) dispatch =
     div {
         attr.``class`` "box"
@@ -268,11 +308,12 @@ let private renderHostCompletenessTable (model: Model) =
                         tr {
                             th { text "Host" }
                             th { text "Support" }
-                            th { text "Parts" }
-                            th { text "DPs" }
-                            th { text "TFs" }
-                            th { text "CTQs" }
+                            th { text "Part" }
+                            th { text "DP" }
+                            th { text "TF" }
+                            th { text "CTQ" }
                             th { text "VV" }
+                            th { text "Overall" }
                             th { text "Status" }
                         }
                     }
@@ -281,15 +322,17 @@ let private renderHostCompletenessTable (model: Model) =
                         forEach entries <| fun entry ->
                             let partIds, dpIds, tfIds, ctqIds, vvIds = getHostContinuityIds entry.Value state
                             let status = getHostRealizationStatus entry.Value state
+                            let readiness = getHostReadiness entry.Value state
 
                             tr {
                                 td { text entry.Value }
                                 td { text (string entry.SupportCount) }
-                                td { text (formatNone partIds) }
-                                td { text (formatNone dpIds) }
-                                td { text (formatNone tfIds) }
-                                td { text (formatNone ctqIds) }
-                                td { text (formatNone vvIds) }
+                                renderReadinessCell readiness.Part partIds
+                                renderReadinessCell readiness.DP dpIds
+                                renderReadinessCell readiness.TF tfIds
+                                renderReadinessCell readiness.CTQ ctqIds
+                                renderReadinessCell readiness.VV vvIds
+                                td { renderReadinessBadge "" true readiness.Overall }
                                 td { renderRealizationStatusTag status }
                             }
                     }
@@ -297,9 +340,10 @@ let private renderHostCompletenessTable (model: Model) =
             }
     }
 
-let private renderGapRow (label: string) (values: string list) =
+let private renderGapRow (label: string) readiness (values: string list) =
     tr {
         td { text label }
+        td { renderReadinessBadge "" true readiness }
         td { text (string (List.length values)) }
         td { text (formatNone values) }
     }
@@ -312,6 +356,11 @@ let private renderT6Summary (model: Model) =
     let dpsWithoutTFs = getDPsWithoutTFs state |> List.map (fun item -> formatIdName item.Id item.Name)
     let tfsWithoutCTQs = getTFsWithoutCTQs state |> List.map (fun item -> formatIdName item.Id item.Name)
     let ctqsWithoutVV = getCTQsWithoutVV state |> List.map (fun item -> formatIdName item.Id item.Name)
+    let hostReadiness = getGapReadiness (List.length hostEntries) (List.length hostsWithoutParts)
+    let partReadiness = getGapReadiness (List.length state.Sigma.Parts) (List.length partsWithoutDPs)
+    let dpReadiness = getGapReadiness (List.length state.Sigma.DPs) (List.length dpsWithoutTFs)
+    let tfReadiness = getGapReadiness (List.length state.Sigma.TFs) (List.length tfsWithoutCTQs)
+    let ctqReadiness = getGapReadiness (List.length state.Sigma.CTQs) (List.length ctqsWithoutVV)
 
     div {
         attr.``class`` "box"
@@ -329,17 +378,18 @@ let private renderT6Summary (model: Model) =
                 thead {
                     tr {
                         th { text "Gap" }
+                        th { text "Readiness" }
                         th { text "Count" }
                         th { text "Items" }
                     }
                 }
 
                 tbody {
-                    renderGapRow "Hosts without Parts" hostsWithoutParts
-                    renderGapRow "Parts without DPs" partsWithoutDPs
-                    renderGapRow "DPs without TFs" dpsWithoutTFs
-                    renderGapRow "TFs without CTQs" tfsWithoutCTQs
-                    renderGapRow "CTQs without VV" ctqsWithoutVV
+                    renderGapRow "Hosts without Parts" hostReadiness hostsWithoutParts
+                    renderGapRow "Parts without DPs" partReadiness partsWithoutDPs
+                    renderGapRow "DPs without TFs" dpReadiness dpsWithoutTFs
+                    renderGapRow "TFs without CTQs" tfReadiness tfsWithoutCTQs
+                    renderGapRow "CTQs without VV" ctqReadiness ctqsWithoutVV
                 }
             }
         }
@@ -347,9 +397,14 @@ let private renderT6Summary (model: Model) =
 
 let private renderObjectRow (state: RealizationState) (objectKind: string, objectId: string, objectName: string) =
     let note = tryFindObjectNote objectKind objectId state
+    let readiness = getRealizationObjectReadiness objectKind objectId state
 
     tr {
-        td { text objectKind }
+        td {
+            span { text objectKind }
+            text " "
+            renderReadinessBadge "" true readiness
+        }
         td { code { text objectId } }
         td { text objectName }
         td {

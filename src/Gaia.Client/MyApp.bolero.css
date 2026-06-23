@@ -112,3 +112,58 @@
 .facts-reconstruction-basis {
   margin-left: 1rem;
 }
+
+.readiness-badge {
+  align-items: center;
+  border: 1px solid #dbdbdb;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.75rem;
+  font-weight: 600;
+  gap: 0.3rem;
+  line-height: 1.2;
+  padding: 0.16rem 0.5rem;
+  white-space: nowrap;
+}
+
+.readiness-symbol {
+  font-size: 0.95em;
+  line-height: 1;
+}
+
+.readiness-missing {
+  background: #fff5f0;
+  border-color: #EF8A62;
+  color: #363636;
+}
+
+.readiness-missing .readiness-symbol {
+  color: #EF8A62;
+}
+
+.readiness-partial {
+  background: #F7F7F7;
+  border-color: #b5b5b5;
+  color: #363636;
+}
+
+.readiness-partial .readiness-symbol {
+  color: #7a7a7a;
+}
+
+.readiness-complete {
+  background: #eff8fb;
+  border-color: #67A9CF;
+  color: #363636;
+}
+
+.readiness-complete .readiness-symbol {
+  color: #67A9CF;
+}
+
+.readiness-cell-detail {
+  color: #4a4a4a;
+  font-size: 0.75rem;
+  margin-top: 0.25rem;
+  overflow-wrap: anywhere;
+}
