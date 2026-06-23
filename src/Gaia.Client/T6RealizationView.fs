@@ -32,6 +32,11 @@ let private renderStatusNotification status =
 let private realizationStatusTagClass status =
     match status with
     | "Not realized" -> "tag is-light"
+    | "Part linked" -> "tag is-warning is-light"
+    | "DP linked" -> "tag is-info is-light"
+    | "TF linked" -> "tag is-link is-light"
+    | "CTQ linked" -> "tag is-primary is-light"
+    | "Continuity complete" -> "tag is-success is-light"
     | "Partially realized" -> "tag is-warning is-light"
     | "Realization started" -> "tag is-info is-light"
     | "Behavior linked" -> "tag is-link is-light"
@@ -263,20 +268,28 @@ let private renderHostCompletenessTable (model: Model) =
                         tr {
                             th { text "Host" }
                             th { text "Support" }
-                            th { text "Linked Parts" }
+                            th { text "Parts" }
+                            th { text "DPs" }
+                            th { text "TFs" }
+                            th { text "CTQs" }
+                            th { text "VV" }
                             th { text "Status" }
                         }
                     }
 
                     tbody {
                         forEach entries <| fun entry ->
-                            let partIds = getPartIdsForHost entry.Value state
+                            let partIds, dpIds, tfIds, ctqIds, vvIds = getHostContinuityIds entry.Value state
                             let status = getHostRealizationStatus entry.Value state
 
                             tr {
                                 td { text entry.Value }
                                 td { text (string entry.SupportCount) }
                                 td { text (formatNone partIds) }
+                                td { text (formatNone dpIds) }
+                                td { text (formatNone tfIds) }
+                                td { text (formatNone ctqIds) }
+                                td { text (formatNone vvIds) }
                                 td { renderRealizationStatusTag status }
                             }
                     }
@@ -462,7 +475,7 @@ let renderT6RealizationTab (model: Model) dispatch =
 
         p {
             attr.``class`` "has-text-grey mb-4"
-            text "Manual continuity bookkeeping from accepted or known Sigma context into realization objects and links."
+            text "Manual continuity bookkeeping from accepted or known Sigma context into Host -> Part -> DP -> TF -> CTQ -> VV realization chains."
         }
 
         div {

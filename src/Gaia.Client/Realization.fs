@@ -172,6 +172,22 @@ let private vvOptions (state: RealizationState) =
     state.VVItems
     |> List.map (fun item -> item.Id, item.Id + " - " + item.Name)
 
+let private partIds (state: RealizationState) =
+    state.Sigma.Parts
+    |> List.map (fun item -> item.Id)
+    |> Set.ofList
+
+let private dpIds (state: RealizationState) =
+    state.Sigma.DPs
+    |> List.map (fun item -> item.Id)
+    |> Set.ofList
+
+let private isPartId state objectId =
+    state |> partIds |> Set.contains objectId
+
+let private isDpId state objectId =
+    state |> dpIds |> Set.contains objectId
+
 let getRealizationLinkSourceOptions linkKind (model: Model) =
     let state = model.realizationState
 
@@ -183,6 +199,7 @@ let getRealizationLinkSourceOptions linkKind (model: Model) =
         getRealizationSourceFunctions model
         |> List.map (sigmaEntryOption "Function")
     | kind when kind = realizationLinkKindFRToDP -> frOptions state
+    | kind when kind = realizationLinkKindPartToDP -> partOptions state
     | kind when kind = realizationLinkKindDPToTF -> dpOptions state
     | kind when kind = realizationLinkKindTFToCTQ -> tfOptions state
     | kind when kind = realizationLinkKindCTQToVV -> ctqOptions state
@@ -196,6 +213,7 @@ let getRealizationLinkTargetOptions linkKind (model: Model) =
     | kind when kind = realizationLinkKindHostToPart -> partOptions state
     | kind when kind = realizationLinkKindFunctionToFR -> frOptions state
     | kind when kind = realizationLinkKindFRToDP -> dpOptions state
+    | kind when kind = realizationLinkKindPartToDP -> dpOptions state
     | kind when kind = realizationLinkKindDPToTF -> tfOptions state
     | kind when kind = realizationLinkKindTFToCTQ -> ctqOptions state
     | kind when kind = realizationLinkKindCTQToVV -> vvOptions state
@@ -216,6 +234,8 @@ let private addRealizationLinkUnchecked linkKind sourceId targetId (state: Reali
         { state with Function_to_FR = appendUniqueLink link state.Function_to_FR }
     | kind when kind = realizationLinkKindFRToDP ->
         { state with Sigma = { state.Sigma with FR_to_DP = appendUniqueLink link state.Sigma.FR_to_DP } }
+    | kind when kind = realizationLinkKindPartToDP ->
+        { state with Sigma = { state.Sigma with DP_to_Part = appendUniqueLink link state.Sigma.DP_to_Part } }
     | kind when kind = realizationLinkKindDPToTF ->
         { state with Sigma = { state.Sigma with DP_to_TF = appendUniqueLink link state.Sigma.DP_to_TF } }
     | kind when kind = realizationLinkKindTFToCTQ ->
@@ -233,6 +253,9 @@ let private realizationLinkExists linkKind sourceId targetId (state: Realization
     | kind when kind = realizationLinkKindHostToPart -> state.Host_to_Part |> List.contains link
     | kind when kind = realizationLinkKindFunctionToFR -> state.Function_to_FR |> List.contains link
     | kind when kind = realizationLinkKindFRToDP -> state.Sigma.FR_to_DP |> List.contains link
+    | kind when kind = realizationLinkKindPartToDP ->
+        (state.Sigma.DP_to_Part |> List.contains link)
+        || (state.Sigma.DP_to_Part |> List.contains (targetId, sourceId))
     | kind when kind = realizationLinkKindDPToTF -> state.Sigma.DP_to_TF |> List.contains link
     | kind when kind = realizationLinkKindTFToCTQ -> state.Sigma.TF_to_CTQ |> List.contains link
     | kind when kind = realizationLinkKindCTQToVV -> state.CTQ_to_VV |> List.contains link
@@ -283,7 +306,24 @@ let getPartIdsForHost hostValue (state: RealizationState) =
     targetsFor hostValue state.Host_to_Part
 
 let getDpIdsForPart partId (state: RealizationState) =
-    sourcesFor partId state.Sigma.DP_to_Part
+    let chainLinks =
+        state.Sigma.DP_to_Part
+        |> List.choose (fun (source, target) ->
+            if source = partId && isDpId state target then
+                Some target
+            else
+                None)
+
+    let legacyLinks =
+        state.Sigma.DP_to_Part
+        |> List.choose (fun (source, target) ->
+            if target = partId && isDpId state source then
+                Some source
+            else
+                None)
+
+    chainLinks @ legacyLinks
+    |> List.distinct
 
 let getTfIdsForDp dpId (state: RealizationState) =
     targetsFor dpId state.Sigma.DP_to_TF
@@ -294,37 +334,61 @@ let getCtqIdsForTf tfId (state: RealizationState) =
 let getVvIdsForCtq ctqId (state: RealizationState) =
     targetsFor ctqId state.CTQ_to_VV
 
+let getPartContinuityIds partId (state: RealizationState) =
+    let dpIds =
+        getDpIdsForPart partId state
+
+    let tfIds =
+        dpIds
+        |> List.collect (fun dpId -> getTfIdsForDp dpId state)
+        |> List.distinct
+
+    let ctqIds =
+        tfIds
+        |> List.collect (fun tfId -> getCtqIdsForTf tfId state)
+        |> List.distinct
+
+    let vvIds =
+        ctqIds
+        |> List.collect (fun ctqId -> getVvIdsForCtq ctqId state)
+        |> List.distinct
+
+    dpIds, tfIds, ctqIds, vvIds
+
+let getHostContinuityIds hostValue (state: RealizationState) =
+    let partIds =
+        getPartIdsForHost hostValue state
+        |> List.distinct
+
+    let dpIds, tfIds, ctqIds, vvIds =
+        partIds
+        |> List.fold
+            (fun (allDpIds, allTfIds, allCtqIds, allVvIds) partId ->
+                let dpIds, tfIds, ctqIds, vvIds = getPartContinuityIds partId state
+
+                allDpIds @ dpIds,
+                allTfIds @ tfIds,
+                allCtqIds @ ctqIds,
+                allVvIds @ vvIds)
+            ([], [], [], [])
+
+    partIds, List.distinct dpIds, List.distinct tfIds, List.distinct ctqIds, List.distinct vvIds
+
 let getHostRealizationStatus hostValue (state: RealizationState) =
-    let partIds = getPartIdsForHost hostValue state
+    let partIds, dpIds, tfIds, ctqIds, vvIds = getHostContinuityIds hostValue state
 
     if List.isEmpty partIds then
         "Not realized"
+    elif List.isEmpty dpIds then
+        "Part linked"
+    elif List.isEmpty tfIds then
+        "DP linked"
+    elif List.isEmpty ctqIds then
+        "TF linked"
+    elif List.isEmpty vvIds then
+        "CTQ linked"
     else
-        let dpIds =
-            partIds
-            |> List.collect (fun partId -> getDpIdsForPart partId state)
-            |> List.distinct
-
-        if List.isEmpty dpIds then
-            "Partially realized"
-        else
-            let tfIds =
-                dpIds
-                |> List.collect (fun dpId -> getTfIdsForDp dpId state)
-                |> List.distinct
-
-            if List.isEmpty tfIds then
-                "Realization started"
-            else
-                let ctqIds =
-                    tfIds
-                    |> List.collect (fun tfId -> getCtqIdsForTf tfId state)
-                    |> List.distinct
-
-                if List.isEmpty ctqIds then
-                    "Behavior linked"
-                else
-                    "Verification path started"
+        "Continuity complete"
 
 let getHostsWithoutParts (hostEntries: SigmaContextEntry list) (state: RealizationState) =
     hostEntries
@@ -347,12 +411,23 @@ let getCTQsWithoutVV (state: RealizationState) =
     |> List.filter (fun ctq -> getVvIdsForCtq ctq.Id state |> List.isEmpty)
 
 let getRealizationLinkRows (state: RealizationState) =
+    let partToDpRows =
+        state.Sigma.DP_to_Part
+        |> List.map (fun (source, target) ->
+            if isPartId state source && isDpId state target then
+                realizationLinkKindPartToDP, source, target
+            elif isDpId state source && isPartId state target then
+                realizationLinkKindPartToDP, target, source
+            else
+                realizationLinkKindPartToDP, source, target)
+        |> List.distinct
+
     [
         yield! state.Host_to_Part |> List.map (fun (source, target) -> realizationLinkKindHostToPart, source, target)
         yield! state.Function_to_FR |> List.map (fun (source, target) -> realizationLinkKindFunctionToFR, source, target)
         yield! state.Sigma.FR_to_DP |> List.map (fun (source, target) -> realizationLinkKindFRToDP, source, target)
+        yield! partToDpRows
         yield! state.Sigma.DP_to_TF |> List.map (fun (source, target) -> realizationLinkKindDPToTF, source, target)
         yield! state.Sigma.TF_to_CTQ |> List.map (fun (source, target) -> realizationLinkKindTFToCTQ, source, target)
         yield! state.CTQ_to_VV |> List.map (fun (source, target) -> realizationLinkKindCTQToVV, source, target)
-        yield! state.Sigma.DP_to_Part |> List.map (fun (source, target) -> realizationLinkKindDPToPart, source, target)
     ]

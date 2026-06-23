@@ -272,6 +272,7 @@ let realizationObjectKinds =
 let defaultRealizationObjectKind = realizationObjectKindFR
 
 let realizationLinkKindHostToPart = "Host -> Part"
+let realizationLinkKindPartToDP = "Part -> DP"
 let realizationLinkKindFunctionToFR = "Function -> FR"
 let realizationLinkKindFRToDP = "FR -> DP"
 let realizationLinkKindDPToTF = "DP -> TF"
@@ -282,12 +283,12 @@ let realizationLinkKindDPToPart = "DP -> Part"
 let realizationLinkKinds =
     [
         realizationLinkKindHostToPart
-        realizationLinkKindFunctionToFR
-        realizationLinkKindFRToDP
+        realizationLinkKindPartToDP
         realizationLinkKindDPToTF
         realizationLinkKindTFToCTQ
         realizationLinkKindCTQToVV
-        realizationLinkKindDPToPart
+        realizationLinkKindFunctionToFR
+        realizationLinkKindFRToDP
     ]
 
 let defaultRealizationLinkKind = realizationLinkKindHostToPart
