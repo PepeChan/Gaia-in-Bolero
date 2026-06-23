@@ -210,6 +210,11 @@ let private reachableTargetIds sourceIds links =
             None)
     |> distinctIds
 
+let private collectReachableTargetIds sourceIds links =
+    sourceIds
+    |> List.collect (fun sourceId -> reachableTargetIds [ sourceId ] links)
+    |> distinctIds
+
 let private isPartId state objectId =
     state.Sigma.Parts
     |> List.exists (fun part -> equalsId objectId part.Id)
@@ -384,16 +389,16 @@ let getHostContinuityIds hostValue (state: RealizationState) =
         getPartIdsForHost hostValue state
 
     let dpIds =
-        reachableTargetIds partIds (partToDpLinks state)
+        collectReachableTargetIds partIds (partToDpLinks state)
 
     let tfIds =
-        reachableTargetIds dpIds state.Sigma.DP_to_TF
+        collectReachableTargetIds dpIds state.Sigma.DP_to_TF
 
     let ctqIds =
-        reachableTargetIds tfIds state.Sigma.TF_to_CTQ
+        collectReachableTargetIds tfIds state.Sigma.TF_to_CTQ
 
     let vvIds =
-        reachableTargetIds ctqIds state.CTQ_to_VV
+        collectReachableTargetIds ctqIds state.CTQ_to_VV
 
     partIds, dpIds, tfIds, ctqIds, vvIds
 

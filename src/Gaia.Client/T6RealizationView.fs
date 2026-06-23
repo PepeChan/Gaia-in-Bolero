@@ -51,9 +51,17 @@ let private renderRealizationStatusTag status =
 
 let private readinessBadgeClass readiness =
     match readiness with
-    | Missing -> "readiness-badge readiness-missing"
-    | Partial -> "readiness-badge readiness-partial"
-    | Complete -> "readiness-badge readiness-complete"
+    | Missing -> "readiness-badge cognopy-readiness-missing"
+    | Partial -> "readiness-badge cognopy-readiness-partial"
+    | Complete -> "readiness-badge cognopy-readiness-complete"
+
+let private semanticObjectClass objectKind =
+    tryGetCognopyObjectClass objectKind
+    |> Option.defaultValue "cognopy-object-kind"
+
+let private semanticObjectRowClass objectKind =
+    tryGetCognopyObjectRowClass objectKind
+    |> Option.defaultValue ""
 
 let private renderReadinessBadge prefix showLabel readiness =
     let label =
@@ -308,11 +316,11 @@ let private renderHostCompletenessTable (model: Model) =
                         tr {
                             th { text "Host" }
                             th { text "Support" }
-                            th { text "Part" }
-                            th { text "DP" }
-                            th { text "TF" }
-                            th { text "CTQ" }
-                            th { text "VV" }
+                            th { text "Parts" }
+                            th { text "DPs" }
+                            th { text "TFs" }
+                            th { text "CTQs" }
+                            th { text "VVs" }
                             th { text "Overall" }
                             th { text "Status" }
                         }
@@ -400,8 +408,12 @@ let private renderObjectRow (state: RealizationState) (objectKind: string, objec
     let readiness = getRealizationObjectReadiness objectKind objectId state
 
     tr {
+        attr.``class`` (semanticObjectRowClass objectKind)
         td {
-            span { text objectKind }
+            span {
+                attr.``class`` (semanticObjectClass objectKind)
+                text objectKind
+            }
             text " "
             renderReadinessBadge "" true readiness
         }

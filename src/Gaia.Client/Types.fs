@@ -293,6 +293,44 @@ let realizationLinkKinds =
 
 let defaultRealizationLinkKind = realizationLinkKindHostToPart
 
+let private normalizeCognopySemanticKind (value: string) =
+    if isNull value then
+        ""
+    else
+        value.Trim().ToUpperInvariant()
+
+let private tryGetCognopySemanticSuffix objectKind =
+    match normalizeCognopySemanticKind objectKind with
+    | "FR"
+    | "FUNCTIONAL REQUIREMENT" -> Some "fr"
+    | "DP"
+    | "DESIGN PARAMETER" -> Some "dp"
+    | "TF"
+    | "TRANSFER FUNCTION" -> Some "tf"
+    | "CTQ" -> Some "ctq"
+    | "PART" -> Some "part"
+    | "VV"
+    | "VV ITEM"
+    | "VERIFICATION"
+    | "VERIFICATION VALIDATION" -> Some "vv"
+    | "DECISION"
+    | "OPEN DECISION"
+    | "GOVERNANCE DECISION"
+    | "CANDIDATE DECISION"
+    | "CANDIDATEDECISION" -> Some "decision"
+    | "EVIDENCE"
+    | "EVIDENCE REF"
+    | "EVIDENCEREF" -> Some "evidence"
+    | _ -> None
+
+let tryGetCognopyObjectClass objectKind =
+    tryGetCognopySemanticSuffix objectKind
+    |> Option.map (fun suffix -> "cognopy-object-kind cognopy-object-" + suffix)
+
+let tryGetCognopyObjectRowClass objectKind =
+    tryGetCognopySemanticSuffix objectKind
+    |> Option.map (fun suffix -> "cognopy-object-row cognopy-object-row-" + suffix)
+
 type ProjectSnapshot =
     {
         SnapshotVersion: string

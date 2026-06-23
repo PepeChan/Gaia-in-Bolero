@@ -113,6 +113,72 @@
   margin-left: 1rem;
 }
 
+.cognopy-object-kind {
+  align-items: center;
+  border: 1px solid #1B2E5B;
+  border-radius: 999px;
+  color: #1B2E5B;
+  display: inline-flex;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 0.14rem 0.5rem;
+  white-space: nowrap;
+}
+
+.cognopy-object-fr,
+.cognopy-object-ctq,
+.cognopy-object-part,
+.cognopy-object-vv {
+  background: #F0F0F0;
+}
+
+.cognopy-object-dp {
+  background: #D7E8F2;
+}
+
+.cognopy-object-tf {
+  background: #ECDEFE;
+}
+
+.cognopy-object-decision {
+  background: #D7F2E5;
+}
+
+.cognopy-object-evidence {
+  background: #D8D8D8;
+  border-color: #303D00;
+  color: #303D00;
+}
+
+.table tr.cognopy-object-row-fr > td,
+.table tr.cognopy-object-row-ctq > td,
+.table tr.cognopy-object-row-part > td,
+.table tr.cognopy-object-row-vv > td {
+  background: #F0F0F0;
+  border-color: rgba(27, 46, 91, 0.22);
+}
+
+.table tr.cognopy-object-row-dp > td {
+  background: #D7E8F2;
+  border-color: rgba(27, 46, 91, 0.24);
+}
+
+.table tr.cognopy-object-row-tf > td {
+  background: #ECDEFE;
+  border-color: rgba(27, 46, 91, 0.24);
+}
+
+.table tr.cognopy-object-row-decision > td {
+  background: #D7F2E5;
+  border-color: rgba(27, 46, 91, 0.24);
+}
+
+.table tr.cognopy-object-row-evidence > td {
+  background: #D8D8D8;
+  border-color: rgba(48, 61, 0, 0.35);
+}
+
 .readiness-badge {
   align-items: center;
   border: 1px solid #dbdbdb;
@@ -131,33 +197,39 @@
   line-height: 1;
 }
 
-.readiness-missing {
+.readiness-missing,
+.cognopy-readiness-missing {
   background: #fff5f0;
   border-color: #EF8A62;
   color: #363636;
 }
 
-.readiness-missing .readiness-symbol {
+.readiness-missing .readiness-symbol,
+.cognopy-readiness-missing .readiness-symbol {
   color: #EF8A62;
 }
 
-.readiness-partial {
+.readiness-partial,
+.cognopy-readiness-partial {
   background: #F7F7F7;
   border-color: #b5b5b5;
   color: #363636;
 }
 
-.readiness-partial .readiness-symbol {
+.readiness-partial .readiness-symbol,
+.cognopy-readiness-partial .readiness-symbol {
   color: #7a7a7a;
 }
 
-.readiness-complete {
+.readiness-complete,
+.cognopy-readiness-complete {
   background: #eff8fb;
   border-color: #67A9CF;
   color: #363636;
 }
 
-.readiness-complete .readiness-symbol {
+.readiness-complete .readiness-symbol,
+.cognopy-readiness-complete .readiness-symbol {
   color: #67A9CF;
 }
 

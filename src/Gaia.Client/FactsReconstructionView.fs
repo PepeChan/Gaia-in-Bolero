@@ -16,6 +16,43 @@ let private renderMuted textValue =
         text textValue
     }
 
+let private containsText needle (value: string) =
+    not (String.IsNullOrWhiteSpace needle)
+    && not (isNull value)
+    && value.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0
+
+let private firstRecognizedSemanticKind values =
+    values
+    |> List.choose id
+    |> List.tryFind (fun value -> tryGetCognopyObjectClass value |> Option.isSome)
+
+let private renderSemanticText semanticKind textValue =
+    match semanticKind |> Option.bind tryGetCognopyObjectClass with
+    | None -> text textValue
+    | Some className ->
+        span {
+            attr.``class`` className
+            text textValue
+        }
+
+let private tryFactSemanticKind (fact: InquiryAnswerFact) =
+    match fact.Kind with
+    | Evidence -> Some "Evidence"
+    | OpenDecision -> Some "Decision"
+    | Status when fact.SourceKind = "CandidateDecision" || containsText "decision" fact.Label -> Some "Decision"
+    | _ ->
+        firstRecognizedSemanticKind [
+            fact.TargetKind
+            Some fact.SourceKind
+            Some fact.Label
+        ]
+
+let private semanticFactRowClass fact =
+    fact
+    |> tryFactSemanticKind
+    |> Option.bind tryGetCognopyObjectRowClass
+    |> Option.defaultValue ""
+
 let private renderStringTags values =
     match values with
     | [] ->
@@ -88,7 +125,7 @@ let private renderContextEntries entries =
                         tr {
                             td { code { text entry.ContextId } }
                             td { code { text entry.PhiId } }
-                            td { text entry.Kind }
+                            td { renderSemanticText (Some entry.Kind) entry.Kind }
                             td { text entry.Value }
                             td { text entry.Provenance }
                         }
@@ -179,7 +216,7 @@ let private renderGovernanceDecisions (decisions: CandidateDecision list) =
                             td { code { text decision.CandidateId } }
                             td { text decision.CandidateType }
                             td { text decision.Target }
-                            td { text (formatDecisionValue decision.Decision) }
+                            td { renderSemanticText (Some "Decision") (formatDecisionValue decision.Decision) }
                             td { text (formatDecisionTimestamp decision.Timestamp) }
                             td { text decision.Rationale }
                         }
@@ -273,7 +310,8 @@ let private renderAnswerFactsTable emptyText (facts: InquiryAnswerFact list) =
                 tbody {
                     forEach facts <| fun fact ->
                         tr {
-                            td { text (formatInquiryAnswerFactKind fact.Kind) }
+                            attr.``class`` (semanticFactRowClass fact)
+                            td { renderSemanticText (tryFactSemanticKind fact) (formatInquiryAnswerFactKind fact.Kind) }
                             td { text fact.Label }
                             td { text fact.Value }
                         }
@@ -382,6 +420,13 @@ let private renderInquiryCardLine label value =
         text value
     }
 
+let private renderInquiryCardSemanticLine label semanticKind value =
+    p {
+        attr.``class`` "mb-2"
+        strong { text (label + ": ") }
+        renderSemanticText (Some semanticKind) value
+    }
+
 let private renderInquiryCountTag label count =
     span {
         attr.``class`` "tag is-light"
@@ -444,14 +489,14 @@ let private renderInquiryCard (result: FactsReconstructionResult) (answer: Inqui
         div {
             attr.``class`` "content mb-3"
             renderInquiryCardLine "Maturity stage" (formatInquiryMaturityStage maturity.MaturityStage)
-            renderInquiryCardLine "Governance state" maturity.GovernanceState
+            renderInquiryCardSemanticLine "Governance state" "Decision" maturity.GovernanceState
             renderInquiryCardLine "Primary reason" primaryReason
 
             match tryRecommendedNextStep maturity primaryFacts with
             | None -> empty()
             | Some step -> renderInquiryCardLine "Recommended next step" step
 
-            renderInquiryCardLine "Evidence status" evidenceStatus
+            renderInquiryCardSemanticLine "Evidence status" "Evidence" evidenceStatus
             renderInquiryCardLine "Ledger status" ledgerStatus
         }
 
