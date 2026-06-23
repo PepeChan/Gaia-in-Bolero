@@ -172,21 +172,51 @@ let private vvOptions (state: RealizationState) =
     state.VVItems
     |> List.map (fun item -> item.Id, item.Id + " - " + item.Name)
 
-let private partIds (state: RealizationState) =
-    state.Sigma.Parts
-    |> List.map (fun item -> item.Id)
-    |> Set.ofList
+let private equalsId left right =
+    String.Equals(clean left, clean right, StringComparison.OrdinalIgnoreCase)
 
-let private dpIds (state: RealizationState) =
-    state.Sigma.DPs
-    |> List.map (fun item -> item.Id)
-    |> Set.ofList
+let private distinctIds values =
+    values
+    |> List.map clean
+    |> List.filter hasText
+    |> List.fold
+        (fun selected value ->
+            if selected |> List.exists (equalsId value) then
+                selected
+            else
+                selected @ [ value ])
+        []
+
+let private distinctLinkPairs links =
+    links
+    |> List.map (fun (source, target) -> clean source, clean target)
+    |> List.filter (fun (source, target) -> hasText source && hasText target)
+    |> List.fold
+        (fun selected (source, target) ->
+            if selected |> List.exists (fun (existingSource, existingTarget) -> equalsId source existingSource && equalsId target existingTarget) then
+                selected
+            else
+                selected @ [ source, target ])
+        []
+
+let private reachableTargetIds sourceIds links =
+    let sourceIds = distinctIds sourceIds
+
+    links
+    |> List.choose (fun (source, target) ->
+        if sourceIds |> List.exists (equalsId source) then
+            Some target
+        else
+            None)
+    |> distinctIds
 
 let private isPartId state objectId =
-    state |> partIds |> Set.contains objectId
+    state.Sigma.Parts
+    |> List.exists (fun part -> equalsId objectId part.Id)
 
 let private isDpId state objectId =
-    state |> dpIds |> Set.contains objectId
+    state.Sigma.DPs
+    |> List.exists (fun dp -> equalsId objectId dp.Id)
 
 let getRealizationLinkSourceOptions linkKind (model: Model) =
     let state = model.realizationState
@@ -302,37 +332,31 @@ let private sourcesFor targetId links =
         else
             None)
 
+let private partToDpLinks (state: RealizationState) =
+    state.Sigma.DP_to_Part
+    |> List.map (fun (source, target) ->
+        if isPartId state source && isDpId state target then
+            source, target
+        elif isDpId state source && isPartId state target then
+            target, source
+        else
+            source, target)
+    |> distinctLinkPairs
+
 let getPartIdsForHost hostValue (state: RealizationState) =
-    targetsFor hostValue state.Host_to_Part
+    reachableTargetIds [ hostValue ] state.Host_to_Part
 
 let getDpIdsForPart partId (state: RealizationState) =
-    let chainLinks =
-        state.Sigma.DP_to_Part
-        |> List.choose (fun (source, target) ->
-            if source = partId && isDpId state target then
-                Some target
-            else
-                None)
-
-    let legacyLinks =
-        state.Sigma.DP_to_Part
-        |> List.choose (fun (source, target) ->
-            if target = partId && isDpId state source then
-                Some source
-            else
-                None)
-
-    chainLinks @ legacyLinks
-    |> List.distinct
+    reachableTargetIds [ partId ] (partToDpLinks state)
 
 let getTfIdsForDp dpId (state: RealizationState) =
-    targetsFor dpId state.Sigma.DP_to_TF
+    reachableTargetIds [ dpId ] state.Sigma.DP_to_TF
 
 let getCtqIdsForTf tfId (state: RealizationState) =
-    targetsFor tfId state.Sigma.TF_to_CTQ
+    reachableTargetIds [ tfId ] state.Sigma.TF_to_CTQ
 
 let getVvIdsForCtq ctqId (state: RealizationState) =
-    targetsFor ctqId state.CTQ_to_VV
+    reachableTargetIds [ ctqId ] state.CTQ_to_VV
 
 let getPartContinuityIds partId (state: RealizationState) =
     let dpIds =
@@ -341,38 +365,37 @@ let getPartContinuityIds partId (state: RealizationState) =
     let tfIds =
         dpIds
         |> List.collect (fun dpId -> getTfIdsForDp dpId state)
-        |> List.distinct
+        |> distinctIds
 
     let ctqIds =
         tfIds
         |> List.collect (fun tfId -> getCtqIdsForTf tfId state)
-        |> List.distinct
+        |> distinctIds
 
     let vvIds =
         ctqIds
         |> List.collect (fun ctqId -> getVvIdsForCtq ctqId state)
-        |> List.distinct
+        |> distinctIds
 
     dpIds, tfIds, ctqIds, vvIds
 
 let getHostContinuityIds hostValue (state: RealizationState) =
     let partIds =
         getPartIdsForHost hostValue state
-        |> List.distinct
 
-    let dpIds, tfIds, ctqIds, vvIds =
-        partIds
-        |> List.fold
-            (fun (allDpIds, allTfIds, allCtqIds, allVvIds) partId ->
-                let dpIds, tfIds, ctqIds, vvIds = getPartContinuityIds partId state
+    let dpIds =
+        reachableTargetIds partIds (partToDpLinks state)
 
-                allDpIds @ dpIds,
-                allTfIds @ tfIds,
-                allCtqIds @ ctqIds,
-                allVvIds @ vvIds)
-            ([], [], [], [])
+    let tfIds =
+        reachableTargetIds dpIds state.Sigma.DP_to_TF
 
-    partIds, List.distinct dpIds, List.distinct tfIds, List.distinct ctqIds, List.distinct vvIds
+    let ctqIds =
+        reachableTargetIds tfIds state.Sigma.TF_to_CTQ
+
+    let vvIds =
+        reachableTargetIds ctqIds state.CTQ_to_VV
+
+    partIds, dpIds, tfIds, ctqIds, vvIds
 
 let getHostRealizationStatus hostValue (state: RealizationState) =
     let partIds, dpIds, tfIds, ctqIds, vvIds = getHostContinuityIds hostValue state
@@ -412,15 +435,8 @@ let getCTQsWithoutVV (state: RealizationState) =
 
 let getRealizationLinkRows (state: RealizationState) =
     let partToDpRows =
-        state.Sigma.DP_to_Part
-        |> List.map (fun (source, target) ->
-            if isPartId state source && isDpId state target then
-                realizationLinkKindPartToDP, source, target
-            elif isDpId state source && isPartId state target then
-                realizationLinkKindPartToDP, target, source
-            else
-                realizationLinkKindPartToDP, source, target)
-        |> List.distinct
+        partToDpLinks state
+        |> List.map (fun (source, target) -> realizationLinkKindPartToDP, source, target)
 
     [
         yield! state.Host_to_Part |> List.map (fun (source, target) -> realizationLinkKindHostToPart, source, target)
