@@ -105,6 +105,33 @@ let openProjectFileCmd jsRuntime =
                 ProjectFileOpened content)
         (fun ex -> ProjectFileOpenFailed ex.Message)
 
+let addContextEntryToPhi phiId (model: Model) =
+    let value = model.phiContextEntryDraftValue.Trim()
+
+    if String.IsNullOrWhiteSpace(phiId) || String.IsNullOrWhiteSpace(value) then
+        model
+    else
+        let entry =
+            createNextPhiContextEntry phiId model.phiContextEntryDraftKind value "Manual" model.phiContextEntries
+
+        let contextModel =
+            { model with
+                existingPhiContextTargetId = phiId
+                phiContextEntries = model.phiContextEntries @ [ entry ]
+                phiContextEntryDraftValue = "" }
+
+        let refreshedModel =
+            if model.parsedPhis |> List.exists (fun parse -> parse.PhiId = phiId) then
+                model.ingestedPhis
+                |> List.tryFind (fun phi -> phi.PhiId = phiId)
+                |> Option.map (fun phi -> parsePhiIntoModel phi contextModel |> fst)
+                |> Option.defaultValue contextModel
+            else
+                contextModel
+
+        refreshedModel
+        |> appendPhiContextEntryLedgerEvent entry
+
 let createInquiryResolvedLedgerEvent (result: FactsReconstructionResult) ledgerEvents =
     let answer =
         inquiryAnswerFromFactsReconstructionResult result
@@ -420,6 +447,17 @@ let update (jsRuntime: IJSRuntime) message model =
     | SetPhiContextSnipDraft value ->
         { model with phiContextSnipDraft = value }, Cmd.none
 
+    | StartInlinePhiContextEntry phiId ->
+        { model with
+            inlinePhiContextTargetId = Some phiId
+            existingPhiContextTargetId = phiId
+            phiContextEntryDraftKind = defaultPhiContextEntryKind
+            phiContextEntryDraftValue = "" },
+        Cmd.none
+
+    | CloseInlinePhiContextEntry ->
+        { model with inlinePhiContextTargetId = None }, Cmd.none
+
     | SetExistingPhiContextTargetId value ->
         { model with existingPhiContextTargetId = value }, Cmd.none
 
@@ -430,32 +468,10 @@ let update (jsRuntime: IJSRuntime) message model =
         { model with phiContextEntryDraftValue = value }, Cmd.none
 
     | AddContextEntryToExistingPhi ->
-        let phiId = model.existingPhiContextTargetId
-        let value = model.phiContextEntryDraftValue.Trim()
+        addContextEntryToPhi model.existingPhiContextTargetId model, Cmd.none
 
-        if String.IsNullOrWhiteSpace(phiId) || String.IsNullOrWhiteSpace(value) then
-            model, Cmd.none
-        else
-            let entry =
-                createNextPhiContextEntry phiId model.phiContextEntryDraftKind value "Manual" model.phiContextEntries
-
-            let contextModel =
-                { model with
-                    phiContextEntries = model.phiContextEntries @ [ entry ]
-                    phiContextEntryDraftValue = "" }
-
-            let refreshedModel =
-                if model.parsedPhis |> List.exists (fun parse -> parse.PhiId = phiId) then
-                    model.ingestedPhis
-                    |> List.tryFind (fun phi -> phi.PhiId = phiId)
-                    |> Option.map (fun phi -> parsePhiIntoModel phi contextModel |> fst)
-                    |> Option.defaultValue contextModel
-                else
-                    contextModel
-
-            refreshedModel
-            |> appendPhiContextEntryLedgerEvent entry
-            |> fun updatedModel -> updatedModel, Cmd.none
+    | AddContextEntryToPhi phiId ->
+        addContextEntryToPhi phiId model, Cmd.none
 
     | ParseIngestedPhi phiId ->
         match model.ingestedPhis |> List.tryFind (fun phi -> phi.PhiId = phiId) with

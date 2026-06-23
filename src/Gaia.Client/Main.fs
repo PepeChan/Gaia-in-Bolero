@@ -650,6 +650,8 @@ let homePage model dispatch =
                                                 model.phiContextEntries
                                                 |> List.filter (fun entry -> entry.PhiId = phi.PhiId)
 
+                                            let isInlineContextOpen = model.inlinePhiContextTargetId = Some phi.PhiId
+
                                             match contextEntries with
                                             | [] -> empty()
                                             | entries ->
@@ -661,12 +663,85 @@ let homePage model dispatch =
                                                             text (entry.Kind + ": " + entry.Value)
                                                         }
                                                 }
-                                            button {
-                                                attr.``class`` "button is-small is-link is-light"
-                                                attr.``type`` "button"
-                                                on.click (fun _ -> dispatch (ParseIngestedPhi phi.PhiId))
-                                                text "Parse Φ"
+
+                                            div {
+                                                attr.``class`` "buttons are-small mb-2"
+
+                                                button {
+                                                    attr.``class`` (
+                                                        if isInlineContextOpen then
+                                                            "button is-small is-info"
+                                                        else
+                                                            "button is-small is-info is-light")
+                                                    attr.``type`` "button"
+                                                    on.click (fun _ -> dispatch (StartInlinePhiContextEntry phi.PhiId))
+                                                    text "Add context/evidence"
+                                                }
+
+                                                button {
+                                                    attr.``class`` "button is-small is-link is-light"
+                                                    attr.``type`` "button"
+                                                    on.click (fun _ -> dispatch (ParseIngestedPhi phi.PhiId))
+                                                    text "Parse Φ"
+                                                }
                                             }
+
+                                            if isInlineContextOpen then
+                                                div {
+                                                    attr.``class`` "mt-2 p-3 has-background-light"
+
+                                                    p {
+                                                        attr.``class`` "is-size-7 has-text-grey mb-2"
+                                                        text "Target: "
+                                                        code { text phi.PhiId }
+                                                    }
+
+                                                    div {
+                                                        attr.``class`` "field is-grouped is-grouped-multiline mb-2"
+
+                                                        div {
+                                                            attr.``class`` "control"
+                                                            div {
+                                                                attr.``class`` "select is-small"
+                                                                select {
+                                                                    bind.input.string model.phiContextEntryDraftKind (fun v -> dispatch (SetPhiContextEntryDraftKind v))
+                                                                    forEach inlinePhiContextEntryKinds <| fun kind ->
+                                                                        option {
+                                                                            attr.value kind
+                                                                            text kind
+                                                                        }
+                                                                }
+                                                            }
+                                                        }
+
+                                                        div {
+                                                            attr.``class`` "control is-expanded"
+                                                            input {
+                                                                attr.``class`` "input is-small"
+                                                                attr.placeholder "Camera Shell, interface note, evidence ref..."
+                                                                bind.input.string model.phiContextEntryDraftValue (fun v -> dispatch (SetPhiContextEntryDraftValue v))
+                                                            }
+                                                        }
+                                                    }
+
+                                                    div {
+                                                        attr.``class`` "buttons are-small mb-0"
+
+                                                        button {
+                                                            attr.``class`` "button is-small is-info"
+                                                            attr.``type`` "button"
+                                                            on.click (fun _ -> dispatch (AddContextEntryToPhi phi.PhiId))
+                                                            text "Add"
+                                                        }
+
+                                                        button {
+                                                            attr.``class`` "button is-small is-light"
+                                                            attr.``type`` "button"
+                                                            on.click (fun _ -> dispatch CloseInlinePhiContextEntry)
+                                                            text "Done"
+                                                        }
+                                                    }
+                                                }
                                         }
                                 }
 
@@ -675,7 +750,7 @@ let homePage model dispatch =
 
                                 h3 {
                                     attr.``class`` "title is-6"
-                                    text "Add Context Entry"
+                                    text "Global Context Entry"
                                 }
 
                                 div {

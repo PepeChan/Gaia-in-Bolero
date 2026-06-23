@@ -24,6 +24,7 @@ type Model =
         phiDraftQuickTags: string
         phiDraftConfidence: string
         phiContextSnipDraft: string
+        inlinePhiContextTargetId: string option
         existingPhiContextTargetId: string
         phiContextEntryDraftKind: string
         phiContextEntryDraftValue: string
@@ -134,13 +135,21 @@ let buildSigmaBasisItemDecisionsFromLedger ledgerEvents =
                 decisions)
         Map.empty<string, CandidateDecisionValue>
 
-let phiContextEntryKinds =
+let inlinePhiContextEntryKinds =
     [
         "HostHint"
         "InterfaceHint"
         "ModeHint"
         "StateHint"
+        "FunctionHint"
         "ConstraintHint"
+        "Evidence"
+        "Note"
+    ]
+
+let phiContextEntryKinds =
+    [
+        yield! inlinePhiContextEntryKinds
         "Assumption"
         "Concern"
         "RiskHint"
@@ -148,6 +157,7 @@ let phiContextEntryKinds =
         "EvidenceRef"
         "Tag"
     ]
+    |> List.distinct
 
 let defaultPhiContextEntryKind = "HostHint"
 
@@ -212,6 +222,7 @@ let restoreProjectSnapshot (snapshot: ProjectSnapshot) (model: Model) =
             realizationLinkTargetIdDraft = ""
             realizationStatus = None
             phiContextSnipDraft = ""
+            inlinePhiContextTargetId = None
             existingPhiContextTargetId = ""
             phiContextEntryDraftKind = defaultPhiContextEntryKind
             phiContextEntryDraftValue = ""
@@ -254,6 +265,7 @@ let initModel =
         phiDraftQuickTags = ""
         phiDraftConfidence = "Medium"
         phiContextSnipDraft = ""
+        inlinePhiContextTargetId = None
         existingPhiContextTargetId = ""
         phiContextEntryDraftKind = defaultPhiContextEntryKind
         phiContextEntryDraftValue = ""
@@ -311,6 +323,7 @@ let clearProjectModel (model: Model) =
             phiDraftQuickTags = ""
             phiDraftConfidence = "Medium"
             phiContextSnipDraft = ""
+            inlinePhiContextTargetId = None
             existingPhiContextTargetId = ""
             phiContextEntryDraftKind = defaultPhiContextEntryKind
             phiContextEntryDraftValue = ""
@@ -409,10 +422,13 @@ type Message =
     | SetPhiDraftQuickTags of string
     | SetPhiDraftConfidence of string
     | SetPhiContextSnipDraft of string
+    | StartInlinePhiContextEntry of string
+    | CloseInlinePhiContextEntry
     | SetExistingPhiContextTargetId of string
     | SetPhiContextEntryDraftKind of string
     | SetPhiContextEntryDraftValue of string
     | AddContextEntryToExistingPhi
+    | AddContextEntryToPhi of string
     | IngestPhiDraft
     | ParseIngestedPhi of string
     | ParseAllIncludedPhi
