@@ -53,6 +53,10 @@ let private idExists objectId getId values =
     values
     |> List.exists (fun value -> getId value = objectId)
 
+let private tryFindById objectId getId values =
+    values
+    |> List.tryFind (fun value -> String.Equals(clean objectId, clean (getId value), StringComparison.OrdinalIgnoreCase))
+
 let private realizationObjectExists objectKind objectId (state: RealizationState) =
     match objectKind with
     | kind when kind = realizationObjectKindFR ->
@@ -487,6 +491,38 @@ let getRealizationObjectReadiness objectKind objectId (state: RealizationState) 
             Missing
     | _ -> Missing
 
+let private getRealizationObjectName objectKind objectId (state: RealizationState) =
+    let name =
+        match objectKind with
+        | kind when kind = realizationObjectKindFR ->
+            state.Sigma.FRs
+            |> tryFindById objectId (fun (item: FR) -> item.Id)
+            |> Option.map (fun item -> item.Name)
+        | kind when kind = realizationObjectKindDP ->
+            state.Sigma.DPs
+            |> tryFindById objectId (fun (item: DP) -> item.Id)
+            |> Option.map (fun item -> item.Name)
+        | kind when kind = realizationObjectKindTF ->
+            state.Sigma.TFs
+            |> tryFindById objectId (fun (item: TF) -> item.Id)
+            |> Option.map (fun item -> item.Name)
+        | kind when kind = realizationObjectKindCTQ ->
+            state.Sigma.CTQs
+            |> tryFindById objectId (fun (item: CTQ) -> item.Id)
+            |> Option.map (fun item -> item.Name)
+        | kind when kind = realizationObjectKindPart ->
+            state.Sigma.Parts
+            |> tryFindById objectId (fun (item: Part) -> item.Id)
+            |> Option.map (fun item -> item.Name)
+        | kind when kind = realizationObjectKindVV ->
+            state.VVItems
+            |> tryFindById objectId (fun (item: VVItem) -> item.Id)
+            |> Option.map (fun item -> item.Name)
+        | _ ->
+            None
+
+    name |> Option.defaultValue ""
+
 let getHostReadiness hostValue (state: RealizationState) =
     let partIds, dpIds, tfIds, ctqIds, vvIds = getHostContinuityIds hostValue state
 
@@ -517,6 +553,77 @@ let getHostReadiness hostValue (state: RealizationState) =
         CTQ = ctqReadiness
         VV = vvReadiness
         Overall = overall
+    }
+
+type RealizationTraceNode =
+    {
+        ObjectKind: string
+        ObjectId: string
+        ObjectName: string
+        Readiness: ReadinessState
+        MissingNextKind: string option
+        Children: RealizationTraceNode list
+    }
+
+type HostRealizationTrace =
+    {
+        HostValue: string
+        Readiness: ReadinessState
+        Parts: RealizationTraceNode list
+    }
+
+let private makeRealizationTraceNode objectKind objectId missingNextKind children (state: RealizationState) =
+    {
+        ObjectKind = objectKind
+        ObjectId = objectId
+        ObjectName = getRealizationObjectName objectKind objectId state
+        Readiness = getRealizationObjectReadiness objectKind objectId state
+        MissingNextKind =
+            if children |> List.isEmpty then
+                missingNextKind
+            else
+                None
+        Children = children
+    }
+
+let getHostRealizationTrace hostValue (state: RealizationState) =
+    let rec buildPartNode partId =
+        let children =
+            getDpIdsForPart partId state
+            |> List.map buildDpNode
+
+        makeRealizationTraceNode realizationObjectKindPart partId (Some realizationObjectKindDP) children state
+
+    and buildDpNode dpId =
+        let children =
+            getTfIdsForDp dpId state
+            |> List.map buildTfNode
+
+        makeRealizationTraceNode realizationObjectKindDP dpId (Some realizationObjectKindTF) children state
+
+    and buildTfNode tfId =
+        let children =
+            getCtqIdsForTf tfId state
+            |> List.map buildCtqNode
+
+        makeRealizationTraceNode realizationObjectKindTF tfId (Some realizationObjectKindCTQ) children state
+
+    and buildCtqNode ctqId =
+        let children =
+            getVvIdsForCtq ctqId state
+            |> List.map buildVvNode
+
+        makeRealizationTraceNode realizationObjectKindCTQ ctqId (Some "VV") children state
+
+    and buildVvNode vvId =
+        makeRealizationTraceNode realizationObjectKindVV vvId None [] state
+
+    {
+        HostValue = hostValue
+        Readiness = (getHostReadiness hostValue state).Overall
+        Parts =
+            getPartIdsForHost hostValue state
+            |> List.map buildPartNode
     }
 
 let getGapReadiness totalCount gapCount =

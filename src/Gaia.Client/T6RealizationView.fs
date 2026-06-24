@@ -101,6 +101,12 @@ let private renderObjectReadiness objectKind readiness =
         renderReadinessBadge "" true readiness
     }
 
+let private formatTraceObjectLabel (node: RealizationTraceNode) =
+    if node.ObjectName = "" then
+        node.ObjectId
+    else
+        node.ObjectId + " " + node.ObjectName
+
 let private renderReadinessCell objectKind readiness values =
     td {
         renderObjectReadiness objectKind readiness
@@ -490,6 +496,98 @@ let private renderObjectsTable (state: RealizationState) =
             }
     }
 
+let private renderRealizationTraceSection (model: Model) =
+    let state = model.realizationState
+    let traces =
+        getRealizationSourceHosts model
+        |> List.map (fun entry -> getHostRealizationTrace entry.Value state)
+
+    let renderMissingNextLink missingKind =
+        div {
+            attr.``class`` "mt-1"
+            renderReadinessBadge ("Missing " + missingKind) false Missing
+        }
+
+    let rec renderTraceNode (node: RealizationTraceNode) =
+        li {
+            div {
+                attr.``class`` "is-flex is-align-items-center is-flex-wrap-wrap"
+                renderObjectKindTag node.ObjectKind
+                span {
+                    attr.``class`` "ml-1"
+                    text (formatTraceObjectLabel node)
+                }
+                span {
+                    attr.``class`` "ml-2"
+                    renderReadinessBadge "" true node.Readiness
+                }
+            }
+
+            match node.MissingNextKind with
+            | None -> empty()
+            | Some missingKind -> renderMissingNextLink missingKind
+
+            match node.Children with
+            | [] -> empty()
+            | children ->
+                ul {
+                    forEach children <| fun child ->
+                        renderTraceNode child
+                }
+        }
+
+    let renderHostTrace (trace: HostRealizationTrace) =
+        li {
+            div {
+                attr.``class`` "is-flex is-align-items-center is-flex-wrap-wrap"
+                strong { text "Host: " }
+                span {
+                    attr.``class`` "ml-1"
+                    text trace.HostValue
+                }
+                span {
+                    attr.``class`` "ml-2"
+                    renderReadinessBadge "" true trace.Readiness
+                }
+            }
+
+            match trace.Parts with
+            | [] ->
+                p {
+                    attr.``class`` "is-size-7 has-text-grey mt-1"
+                    text "No Parts linked."
+                }
+            | parts ->
+                ul {
+                    forEach parts <| fun part ->
+                        renderTraceNode part
+                }
+        }
+
+    div {
+        attr.``class`` "box"
+
+        h3 {
+            attr.``class`` "title is-5"
+            text "Realization Trace"
+        }
+
+        match traces with
+        | [] ->
+            p {
+                attr.``class`` "has-text-grey"
+                text "No known Host atoms are available yet."
+            }
+        | hostTraces ->
+            div {
+                attr.``class`` "content"
+                ul {
+                    forEach hostTraces <| fun trace ->
+                        renderHostTrace trace
+                }
+            }
+    }
+
 let private renderLinksTable (state: RealizationState) =
     let linkRows = getRealizationLinkRows state
 
@@ -588,6 +686,7 @@ let renderT6RealizationTab (model: Model) dispatch =
                 attr.``class`` "column is-8"
                 renderHostCompletenessTable model
                 renderT6Summary model
+                renderRealizationTraceSection model
                 renderObjectsTable state
                 renderLinksTable state
             }
