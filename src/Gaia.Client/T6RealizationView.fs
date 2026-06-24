@@ -51,9 +51,9 @@ let private renderRealizationStatusTag status =
 
 let private readinessBadgeClass readiness =
     match readiness with
-    | Missing -> "readiness-badge cognopy-readiness-missing"
-    | Partial -> "readiness-badge cognopy-readiness-partial"
-    | Complete -> "readiness-badge cognopy-readiness-complete"
+    | Missing -> "readiness-badge readiness-missing"
+    | Partial -> "readiness-badge readiness-partial"
+    | Complete -> "readiness-badge readiness-complete"
 
 let private semanticObjectClass objectKind =
     tryGetCognopyObjectClass objectKind
@@ -62,6 +62,12 @@ let private semanticObjectClass objectKind =
 let private semanticObjectRowClass objectKind =
     tryGetCognopyObjectRowClass objectKind
     |> Option.defaultValue ""
+
+let private renderObjectKindTag objectKind =
+    span {
+        attr.``class`` (semanticObjectClass objectKind)
+        text objectKind
+    }
 
 let private renderReadinessBadge prefix showLabel readiness =
     let label =
@@ -85,12 +91,19 @@ let private renderReadinessBadge prefix showLabel readiness =
         }
 
         if body <> "" then
-            span { text body }
+            text body
     }
 
-let private renderReadinessCell readiness values =
-    td {
+let private renderObjectReadiness objectKind readiness =
+    concat {
+        renderObjectKindTag objectKind
+        text " "
         renderReadinessBadge "" true readiness
+    }
+
+let private renderReadinessCell objectKind readiness values =
+    td {
+        renderObjectReadiness objectKind readiness
         div {
             attr.``class`` "readiness-cell-detail"
             text (formatNone values)
@@ -335,11 +348,11 @@ let private renderHostCompletenessTable (model: Model) =
                             tr {
                                 td { text entry.Value }
                                 td { text (string entry.SupportCount) }
-                                renderReadinessCell readiness.Part partIds
-                                renderReadinessCell readiness.DP dpIds
-                                renderReadinessCell readiness.TF tfIds
-                                renderReadinessCell readiness.CTQ ctqIds
-                                renderReadinessCell readiness.VV vvIds
+                                renderReadinessCell realizationObjectKindPart readiness.Part partIds
+                                renderReadinessCell realizationObjectKindDP readiness.DP dpIds
+                                renderReadinessCell realizationObjectKindTF readiness.TF tfIds
+                                renderReadinessCell realizationObjectKindCTQ readiness.CTQ ctqIds
+                                renderReadinessCell realizationObjectKindVV readiness.VV vvIds
                                 td { renderReadinessBadge "" true readiness.Overall }
                                 td { renderRealizationStatusTag status }
                             }
@@ -348,10 +361,10 @@ let private renderHostCompletenessTable (model: Model) =
             }
     }
 
-let private renderGapRow (label: string) readiness (values: string list) =
+let private renderGapRow (label: string) objectKind readiness (values: string list) =
     tr {
         td { text label }
-        td { renderReadinessBadge "" true readiness }
+        td { renderObjectReadiness objectKind readiness }
         td { text (string (List.length values)) }
         td { text (formatNone values) }
     }
@@ -393,11 +406,11 @@ let private renderT6Summary (model: Model) =
                 }
 
                 tbody {
-                    renderGapRow "Hosts without Parts" hostReadiness hostsWithoutParts
-                    renderGapRow "Parts without DPs" partReadiness partsWithoutDPs
-                    renderGapRow "DPs without TFs" dpReadiness dpsWithoutTFs
-                    renderGapRow "TFs without CTQs" tfReadiness tfsWithoutCTQs
-                    renderGapRow "CTQs without VV" ctqReadiness ctqsWithoutVV
+                    renderGapRow "Hosts without Parts" realizationObjectKindPart hostReadiness hostsWithoutParts
+                    renderGapRow "Parts without DPs" realizationObjectKindDP partReadiness partsWithoutDPs
+                    renderGapRow "DPs without TFs" realizationObjectKindTF dpReadiness dpsWithoutTFs
+                    renderGapRow "TFs without CTQs" realizationObjectKindCTQ tfReadiness tfsWithoutCTQs
+                    renderGapRow "CTQs without VV" realizationObjectKindVV ctqReadiness ctqsWithoutVV
                 }
             }
         }
@@ -410,12 +423,7 @@ let private renderObjectRow (state: RealizationState) (objectKind: string, objec
     tr {
         attr.``class`` (semanticObjectRowClass objectKind)
         td {
-            span {
-                attr.``class`` (semanticObjectClass objectKind)
-                text objectKind
-            }
-            text " "
-            renderReadinessBadge "" true readiness
+            renderObjectReadiness objectKind readiness
         }
         td { code { text objectId } }
         td { text objectName }
