@@ -429,6 +429,10 @@ let update (jsRuntime: IJSRuntime) message model =
                 realizationStatus = Some ("Linked " + linkId + ".") }
             |> appendLedgerEvent "RealizationLinkCreated" linkId "Realization link created" detail
             |> fun updatedModel -> updatedModel, Cmd.none
+    | SetRealizationNavigationOperator value ->
+        { model with realizationNavigationOperator = value }, Cmd.none
+    | SetRealizationNavigationTarget value ->
+        { model with realizationNavigationTarget = value }, Cmd.none
     | SetPhiDraftRawStatement value ->
         { model with phiDraftRawStatement = value }, Cmd.none
 

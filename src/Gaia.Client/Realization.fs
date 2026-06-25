@@ -336,7 +336,7 @@ let private targetsFor sourceId links =
 let private sourcesFor targetId links =
     links
     |> List.choose (fun (source, target) ->
-        if target = targetId then
+        if equalsId target targetId then
             Some source
         else
             None)
@@ -351,6 +351,40 @@ let private partToDpLinks (state: RealizationState) =
         else
             source, target)
     |> distinctLinkPairs
+
+let getFrIdsForFunction functionValue (state: RealizationState) =
+    reachableTargetIds [ functionValue ] state.Function_to_FR
+
+let getFunctionValuesForFR frId (state: RealizationState) =
+    sourcesFor frId state.Function_to_FR
+    |> distinctIds
+
+let getDpIdsForFR frId (state: RealizationState) =
+    reachableTargetIds [ frId ] state.Sigma.FR_to_DP
+
+let getFrIdsForDp dpId (state: RealizationState) =
+    sourcesFor dpId state.Sigma.FR_to_DP
+    |> distinctIds
+
+let getHostValuesForPart partId (state: RealizationState) =
+    sourcesFor partId state.Host_to_Part
+    |> distinctIds
+
+let getPartIdsForDp dpId (state: RealizationState) =
+    sourcesFor dpId (partToDpLinks state)
+    |> distinctIds
+
+let getDpIdsForTf tfId (state: RealizationState) =
+    sourcesFor tfId state.Sigma.DP_to_TF
+    |> distinctIds
+
+let getTfIdsForCtq ctqId (state: RealizationState) =
+    sourcesFor ctqId state.Sigma.TF_to_CTQ
+    |> distinctIds
+
+let getCtqIdsForVv vvId (state: RealizationState) =
+    sourcesFor vvId state.CTQ_to_VV
+    |> distinctIds
 
 let getPartIdsForHost hostValue (state: RealizationState) =
     reachableTargetIds [ hostValue ] state.Host_to_Part
@@ -491,7 +525,7 @@ let getRealizationObjectReadiness objectKind objectId (state: RealizationState) 
             Missing
     | _ -> Missing
 
-let private getRealizationObjectName objectKind objectId (state: RealizationState) =
+let getRealizationObjectName objectKind objectId (state: RealizationState) =
     let name =
         match objectKind with
         | kind when kind = realizationObjectKindFR ->

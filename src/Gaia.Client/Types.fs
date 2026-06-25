@@ -293,6 +293,24 @@ let realizationLinkKinds =
 
 let defaultRealizationLinkKind = realizationLinkKindHostToPart
 
+let realizationSourceKindHost = "Host"
+let realizationSourceKindFunction = "Function"
+
+let realizationNavigationOperatorUpstream = "Upstream"
+let realizationNavigationOperatorDownstream = "Downstream"
+let realizationNavigationOperatorTopology = "Topology"
+let realizationNavigationOperatorCompleteness = "Completeness"
+
+let realizationNavigationOperators =
+    [
+        realizationNavigationOperatorUpstream
+        realizationNavigationOperatorDownstream
+        realizationNavigationOperatorTopology
+        realizationNavigationOperatorCompleteness
+    ]
+
+let defaultRealizationNavigationOperator = realizationNavigationOperatorUpstream
+
 let private normalizeCognopySemanticKind (value: string) =
     if isNull value then
         ""

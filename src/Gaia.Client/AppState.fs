@@ -67,6 +67,8 @@ type Model =
         realizationLinkSourceIdDraft: string
         realizationLinkTargetIdDraft: string
         realizationStatus: string option
+        realizationNavigationOperator: string
+        realizationNavigationTarget: string
     }
 
 let demoScenarios = DemoData.demoScenarios
@@ -221,6 +223,8 @@ let restoreProjectSnapshot (snapshot: ProjectSnapshot) (model: Model) =
             realizationLinkSourceIdDraft = ""
             realizationLinkTargetIdDraft = ""
             realizationStatus = None
+            realizationNavigationOperator = defaultRealizationNavigationOperator
+            realizationNavigationTarget = ""
             phiContextSnipDraft = ""
             inlinePhiContextTargetId = None
             existingPhiContextTargetId = ""
@@ -308,6 +312,8 @@ let initModel =
         realizationLinkSourceIdDraft = ""
         realizationLinkTargetIdDraft = ""
         realizationStatus = None
+        realizationNavigationOperator = defaultRealizationNavigationOperator
+        realizationNavigationTarget = ""
     }
 
 let clearProjectModel (model: Model) =
@@ -366,6 +372,8 @@ let clearProjectModel (model: Model) =
             realizationLinkSourceIdDraft = ""
             realizationLinkTargetIdDraft = ""
             realizationStatus = None
+            realizationNavigationOperator = defaultRealizationNavigationOperator
+            realizationNavigationTarget = ""
     }
 
 let buildSphynxSampleSnapshot () =
@@ -478,6 +486,8 @@ type Message =
     | SetRealizationLinkSourceIdDraft of string
     | SetRealizationLinkTargetIdDraft of string
     | CreateRealizationLink
+    | SetRealizationNavigationOperator of string
+    | SetRealizationNavigationTarget of string
 
 let appendLedgerEvent eventKind targetId summary detail (model: Model) =
     { model with
