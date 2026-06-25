@@ -589,6 +589,385 @@ let getHostReadiness hostValue (state: RealizationState) =
         Overall = overall
     }
 
+type RealizationNavigationTarget =
+    {
+        Value: string
+        ObjectKind: string
+        ObjectId: string
+        Label: string
+    }
+
+type RealizationNavigationNode =
+    {
+        ObjectKind: string
+        ObjectId: string
+        ObjectName: string
+        Readiness: ReadinessState
+        MissingNextKind: string option
+        DetailLines: string list
+        Children: RealizationNavigationNode list
+    }
+
+type RealizationNavigationGap =
+    {
+        OwnerKind: string
+        OwnerId: string
+        OwnerName: string
+        MissingKind: string
+        PathLabels: string list
+    }
+
+type RealizationTargetTopology =
+    {
+        Target: RealizationNavigationNode
+        UpstreamPaths: RealizationNavigationNode list list
+        DownstreamTree: RealizationNavigationNode
+        Completeness: ReadinessState
+        MissingGaps: RealizationNavigationGap list
+    }
+
+let private cleanNavigationText (value: string) =
+    clean value
+
+let private equalsNavigationText left right =
+    String.Equals(cleanNavigationText left, cleanNavigationText right, StringComparison.OrdinalIgnoreCase)
+
+let encodeRealizationNavigationTarget (objectKind: string) (objectId: string) =
+    objectKind + "|" + objectId
+
+let private makeRealizationNavigationTarget (objectKind: string) (objectId: string) (label: string) =
+    {
+        Value = encodeRealizationNavigationTarget objectKind objectId
+        ObjectKind = objectKind
+        ObjectId = objectId
+        Label = label
+    }
+
+let private distinctNavigationTargets targets =
+    targets
+    |> List.fold
+        (fun selected target ->
+            if selected |> List.exists (fun existing -> equalsNavigationText existing.Value target.Value) then
+                selected
+            else
+                selected @ [ target ])
+        []
+
+let private distinctObjectTargets (targets: (string * string) list) =
+    targets
+    |> List.fold
+        (fun selected (objectKind, objectId) ->
+            if selected |> List.exists (fun (existingKind, existingId) -> equalsNavigationText existingKind objectKind && equalsNavigationText existingId objectId) then
+                selected
+            else
+                selected @ [ objectKind, objectId ])
+        []
+
+let getRealizationNavigationTargetOptions (model: Model) =
+    let state = model.realizationState
+
+    [
+        yield!
+            getRealizationSourceHosts model
+            |> List.map (fun entry ->
+                makeRealizationNavigationTarget
+                    realizationSourceKindHost
+                    entry.Value
+                    (entry.Value + " (Host; support " + string entry.SupportCount + ")"))
+        yield!
+            getRealizationSourceFunctions model
+            |> List.map (fun entry ->
+                makeRealizationNavigationTarget
+                    realizationSourceKindFunction
+                    entry.Value
+                    (entry.Value + " (Function; support " + string entry.SupportCount + ")"))
+        yield!
+            state.Sigma.FRs
+            |> List.map (fun item ->
+                makeRealizationNavigationTarget realizationObjectKindFR item.Id (realizationObjectKindFR + ": " + item.Id + " - " + item.Name))
+        yield!
+            state.Sigma.DPs
+            |> List.map (fun item ->
+                makeRealizationNavigationTarget realizationObjectKindDP item.Id (realizationObjectKindDP + ": " + item.Id + " - " + item.Name))
+        yield!
+            state.Sigma.TFs
+            |> List.map (fun item ->
+                makeRealizationNavigationTarget realizationObjectKindTF item.Id (realizationObjectKindTF + ": " + item.Id + " - " + item.Name))
+        yield!
+            state.Sigma.CTQs
+            |> List.map (fun item ->
+                makeRealizationNavigationTarget realizationObjectKindCTQ item.Id (realizationObjectKindCTQ + ": " + item.Id + " - " + item.Name))
+        yield!
+            state.Sigma.Parts
+            |> List.map (fun item ->
+                makeRealizationNavigationTarget realizationObjectKindPart item.Id (realizationObjectKindPart + ": " + item.Id + " - " + item.Name))
+        yield!
+            state.VVItems
+            |> List.map (fun item ->
+                makeRealizationNavigationTarget realizationObjectKindVV item.Id (realizationObjectKindVV + ": " + item.Id + " - " + item.Name))
+    ]
+    |> distinctNavigationTargets
+
+let tryFindRealizationNavigationTarget selectedValue (model: Model) =
+    getRealizationNavigationTargetOptions model
+    |> List.tryFind (fun target -> equalsNavigationText target.Value selectedValue)
+
+let getSelectedRealizationNavigationOperator (model: Model) =
+    if realizationNavigationOperators |> List.contains model.realizationNavigationOperator then
+        model.realizationNavigationOperator
+    else
+        defaultRealizationNavigationOperator
+
+let formatRealizationNavigationMissingKind (missingKind: string) =
+    if missingKind = realizationObjectKindVV then
+        "VV"
+    else
+        missingKind
+
+let getRealizationNavigationObjectName (objectKind: string) (objectId: string) (state: RealizationState) =
+    if objectKind = realizationSourceKindHost || objectKind = realizationSourceKindFunction then
+        ""
+    else
+        getRealizationObjectName objectKind objectId state
+
+let formatRealizationNavigationObjectLabel (objectKind: string) (objectId: string) (objectName: string) =
+    if objectKind = realizationSourceKindHost || objectKind = realizationSourceKindFunction then
+        objectId
+    elif objectName = "" then
+        objectId
+    else
+        objectId + " - " + objectName
+
+let formatRealizationNavigationNodeLabel (node: RealizationNavigationNode) =
+    formatRealizationNavigationObjectLabel node.ObjectKind node.ObjectId node.ObjectName
+
+let private getFunctionDirectReadiness (functionValue: string) (state: RealizationState) =
+    if getFrIdsForFunction functionValue state |> List.isEmpty then
+        Missing
+    else
+        Complete
+
+let private getNavigationDirectReadiness (objectKind: string) (objectId: string) (state: RealizationState) =
+    match objectKind with
+    | kind when kind = realizationSourceKindHost -> (getHostReadiness objectId state).Overall
+    | kind when kind = realizationSourceKindFunction -> getFunctionDirectReadiness objectId state
+    | _ -> getRealizationObjectReadiness objectKind objectId state
+
+let private formatSourceSummaryLines (sourceKind: string) (sourceValue: string) (model: Model) =
+    let entries =
+        if sourceKind = realizationSourceKindHost then
+            getRealizationSourceHosts model
+        elif sourceKind = realizationSourceKindFunction then
+            getRealizationSourceFunctions model
+        else
+            []
+
+    match entries |> List.tryFind (fun entry -> equalsNavigationText entry.Value sourceValue) with
+    | Some entry ->
+        [
+            sourceKind + " source is present in accepted or known Sigma context."
+            "Support count: " + string entry.SupportCount + "."
+            if not (String.IsNullOrWhiteSpace(entry.Provenance)) then
+                "Provenance: " + entry.Provenance + "."
+            if not (String.IsNullOrWhiteSpace(entry.SourcePhiId)) then
+                "Source Phi: " + entry.SourcePhiId + "."
+            if not (List.isEmpty entry.SupportingPhiIds) then
+                "Supporting Phi IDs: " + String.concat ", " entry.SupportingPhiIds + "."
+        ]
+    | None -> [ "No upstream realization parent." ]
+
+let private makeNavigationNode (objectKind: string) (objectId: string) missingNextKind detailLines children (model: Model) =
+    let state = model.realizationState
+
+    {
+        ObjectKind = objectKind
+        ObjectId = objectId
+        ObjectName = getRealizationNavigationObjectName objectKind objectId state
+        Readiness = getNavigationDirectReadiness objectKind objectId state
+        MissingNextKind =
+            if children |> List.isEmpty then
+                missingNextKind |> Option.map formatRealizationNavigationMissingKind
+            else
+                None
+        DetailLines = detailLines
+        Children = children
+    }
+
+let private sourceDetailLines (objectKind: string) (objectId: string) (model: Model) =
+    if objectKind = realizationSourceKindHost || objectKind = realizationSourceKindFunction then
+        formatSourceSummaryLines objectKind objectId model
+    else
+        []
+
+let getRealizationDownstreamChildTargets (objectKind: string) (objectId: string) (state: RealizationState) =
+    let targets, missingKind =
+        match objectKind with
+        | kind when kind = realizationSourceKindHost ->
+            (
+                getPartIdsForHost objectId state
+                |> List.map (fun childId -> realizationObjectKindPart, childId),
+                Some realizationObjectKindPart
+            )
+        | kind when kind = realizationSourceKindFunction ->
+            (
+                getFrIdsForFunction objectId state
+                |> List.map (fun childId -> realizationObjectKindFR, childId),
+                Some realizationObjectKindFR
+            )
+        | kind when kind = realizationObjectKindFR ->
+            (
+                getDpIdsForFR objectId state
+                |> List.map (fun childId -> realizationObjectKindDP, childId),
+                Some realizationObjectKindDP
+            )
+        | kind when kind = realizationObjectKindPart ->
+            (
+                getDpIdsForPart objectId state
+                |> List.map (fun childId -> realizationObjectKindDP, childId),
+                Some realizationObjectKindDP
+            )
+        | kind when kind = realizationObjectKindDP ->
+            (
+                getTfIdsForDp objectId state
+                |> List.map (fun childId -> realizationObjectKindTF, childId),
+                Some realizationObjectKindTF
+            )
+        | kind when kind = realizationObjectKindTF ->
+            (
+                getCtqIdsForTf objectId state
+                |> List.map (fun childId -> realizationObjectKindCTQ, childId),
+                Some realizationObjectKindCTQ
+            )
+        | kind when kind = realizationObjectKindCTQ ->
+            (
+                getVvIdsForCtq objectId state
+                |> List.map (fun childId -> realizationObjectKindVV, childId),
+                Some "VV"
+            )
+        | _ -> [], None
+
+    distinctObjectTargets targets, missingKind
+
+let getRealizationUpstreamParentTargets (objectKind: string) (objectId: string) (state: RealizationState) =
+    let targets =
+        match objectKind with
+        | kind when kind = realizationObjectKindFR ->
+            getFunctionValuesForFR objectId state
+            |> List.map (fun parentId -> realizationSourceKindFunction, parentId)
+        | kind when kind = realizationObjectKindPart ->
+            getHostValuesForPart objectId state
+            |> List.map (fun parentId -> realizationSourceKindHost, parentId)
+        | kind when kind = realizationObjectKindDP ->
+            [
+                yield!
+                    getPartIdsForDp objectId state
+                    |> List.map (fun parentId -> realizationObjectKindPart, parentId)
+                yield!
+                    getFrIdsForDp objectId state
+                    |> List.map (fun parentId -> realizationObjectKindFR, parentId)
+            ]
+        | kind when kind = realizationObjectKindTF ->
+            getDpIdsForTf objectId state
+            |> List.map (fun parentId -> realizationObjectKindDP, parentId)
+        | kind when kind = realizationObjectKindCTQ ->
+            getTfIdsForCtq objectId state
+            |> List.map (fun parentId -> realizationObjectKindTF, parentId)
+        | kind when kind = realizationObjectKindVV ->
+            getCtqIdsForVv objectId state
+            |> List.map (fun parentId -> realizationObjectKindCTQ, parentId)
+        | _ -> []
+
+    distinctObjectTargets targets
+
+let private navigationVisitKey (objectKind: string) (objectId: string) =
+    objectKind.ToUpperInvariant() + "|" + objectId.ToUpperInvariant()
+
+let rec private buildDownstreamTree visited (objectKind: string) (objectId: string) (model: Model) =
+    let state = model.realizationState
+    let visitKey = navigationVisitKey objectKind objectId
+    let childTargets, missingNextKind = getRealizationDownstreamChildTargets objectKind objectId state
+
+    let children =
+        childTargets
+        |> List.filter (fun (childKind, childId) -> not (visited |> Set.contains (navigationVisitKey childKind childId)))
+        |> List.map (fun (childKind, childId) -> buildDownstreamTree (visited |> Set.add visitKey) childKind childId model)
+
+    makeNavigationNode objectKind objectId missingNextKind (sourceDetailLines objectKind objectId model) children model
+
+let getDownstreamTree objectKind objectId (model: Model) =
+    buildDownstreamTree Set.empty objectKind objectId model
+
+let rec private buildUpstreamPaths visited (objectKind: string) (objectId: string) (model: Model) =
+    let state = model.realizationState
+    let visitKey = navigationVisitKey objectKind objectId
+    let node = makeNavigationNode objectKind objectId None (sourceDetailLines objectKind objectId model) [] model
+    let parentTargets =
+        getRealizationUpstreamParentTargets objectKind objectId state
+        |> List.filter (fun (parentKind, parentId) -> not (visited |> Set.contains (navigationVisitKey parentKind parentId)))
+
+    match parentTargets with
+    | [] -> [ [ node ] ]
+    | parents ->
+        parents
+        |> List.collect (fun (parentKind, parentId) ->
+            buildUpstreamPaths (visited |> Set.add visitKey) parentKind parentId model
+            |> List.map (fun path -> path @ [ node ]))
+
+let getUpstreamChains objectKind objectId (model: Model) =
+    buildUpstreamPaths Set.empty objectKind objectId model
+
+let rec getTargetCompleteness (objectKind: string) (objectId: string) (state: RealizationState) =
+    if objectKind = realizationObjectKindVV then
+        getRealizationObjectReadiness objectKind objectId state
+    else
+        let childTargets, _ = getRealizationDownstreamChildTargets objectKind objectId state
+
+        match childTargets with
+        | [] -> Missing
+        | children ->
+            let childReadiness =
+                children
+                |> List.map (fun (childKind, childId) -> getTargetCompleteness childKind childId state)
+
+            if childReadiness |> List.forall (fun readiness -> readiness = Complete) then
+                Complete
+            else
+                Partial
+
+let rec private collectTargetCompletenessGaps (objectKind: string) (objectId: string) pathLabels (model: Model) =
+    let state = model.realizationState
+    let objectName = getRealizationNavigationObjectName objectKind objectId state
+    let pathLabel = formatRealizationNavigationObjectLabel objectKind objectId objectName
+    let pathLabels = pathLabels @ [ pathLabel ]
+    let childTargets, missingNextKind = getRealizationDownstreamChildTargets objectKind objectId state
+
+    match missingNextKind, childTargets with
+    | Some missingKind, [] ->
+        [
+            {
+                OwnerKind = objectKind
+                OwnerId = objectId
+                OwnerName = objectName
+                MissingKind = formatRealizationNavigationMissingKind missingKind
+                PathLabels = pathLabels
+            }
+        ]
+    | _ ->
+        childTargets
+        |> List.collect (fun (childKind, childId) -> collectTargetCompletenessGaps childKind childId pathLabels model)
+
+let getTargetCompletenessGaps objectKind objectId (model: Model) =
+    collectTargetCompletenessGaps objectKind objectId [] model
+
+let getTargetTopology (objectKind: string) (objectId: string) (model: Model) =
+    {
+        Target = makeNavigationNode objectKind objectId None (sourceDetailLines objectKind objectId model) [] model
+        UpstreamPaths = getUpstreamChains objectKind objectId model
+        DownstreamTree = getDownstreamTree objectKind objectId model
+        Completeness = getTargetCompleteness objectKind objectId model.realizationState
+        MissingGaps = getTargetCompletenessGaps objectKind objectId model
+    }
+
 type RealizationTraceNode =
     {
         ObjectKind: string

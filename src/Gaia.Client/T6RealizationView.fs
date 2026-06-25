@@ -456,323 +456,31 @@ let private getObjectRows (state: RealizationState) : (string * string * string)
         yield! state.VVItems |> List.map (fun item -> realizationObjectKindVV, item.Id, item.Name)
     ]
 
-type private NavigationTarget =
-    {
-        Value: string
-        ObjectKind: string
-        ObjectId: string
-        Label: string
-    }
-
-type private NavigationNode =
-    {
-        ObjectKind: string
-        ObjectId: string
-        ObjectName: string
-        Readiness: ReadinessState
-        MissingNextKind: string option
-        DetailLines: string list
-        Children: NavigationNode list
-    }
-
-type private NavigationGap =
-    {
-        OwnerKind: string
-        OwnerId: string
-        OwnerName: string
-        MissingKind: string
-        PathLabels: string list
-    }
-
-let private cleanNavigationText (value: string) =
-    if isNull value then
-        ""
-    else
-        value.Trim()
-
-let private equalsNavigationText left right =
-    String.Equals(cleanNavigationText left, cleanNavigationText right, StringComparison.OrdinalIgnoreCase)
-
-let private encodeNavigationTarget objectKind objectId =
-    objectKind + "|" + objectId
-
-let private makeNavigationTarget objectKind objectId label =
-    {
-        Value = encodeNavigationTarget objectKind objectId
-        ObjectKind = objectKind
-        ObjectId = objectId
-        Label = label
-    }
-
-let private distinctNavigationTargets targets =
-    targets
-    |> List.fold
-        (fun selected target ->
-            if selected |> List.exists (fun existing -> equalsNavigationText existing.Value target.Value) then
-                selected
-            else
-                selected @ [ target ])
-        []
-
-let private getNavigationTargetOptions (model: Model) =
-    let state = model.realizationState
-
-    [
-        yield!
-            getRealizationSourceHosts model
-            |> List.map (fun entry ->
-                makeNavigationTarget
-                    realizationSourceKindHost
-                    entry.Value
-                    (entry.Value + " (Host; support " + string entry.SupportCount + ")"))
-        yield!
-            getRealizationSourceFunctions model
-            |> List.map (fun entry ->
-                makeNavigationTarget
-                    realizationSourceKindFunction
-                    entry.Value
-                    (entry.Value + " (Function; support " + string entry.SupportCount + ")"))
-        yield!
-            getObjectRows state
-            |> List.map (fun (objectKind, objectId, objectName) ->
-                makeNavigationTarget objectKind objectId (objectKind + ": " + formatIdName objectId objectName))
-    ]
-    |> distinctNavigationTargets
-
-let private tryFindSelectedNavigationTarget (model: Model) =
-    getNavigationTargetOptions model
-    |> List.tryFind (fun target -> equalsNavigationText target.Value model.realizationNavigationTarget)
-
-let private getSelectedNavigationOperator (model: Model) =
-    if realizationNavigationOperators |> List.contains model.realizationNavigationOperator then
-        model.realizationNavigationOperator
-    else
-        defaultRealizationNavigationOperator
-
-let private formatNavigationKindForMissing missingKind =
-    if missingKind = realizationObjectKindVV then
-        "VV"
-    else
-        missingKind
-
-let private getNavigationObjectName objectKind objectId (state: RealizationState) =
-    if objectKind = realizationSourceKindHost || objectKind = realizationSourceKindFunction then
-        ""
-    else
-        getRealizationObjectName objectKind objectId state
-
-let private formatNavigationObjectLabel objectKind objectId objectName =
-    if objectKind = realizationSourceKindHost || objectKind = realizationSourceKindFunction then
-        objectId
-    elif objectName = "" then
-        objectId
-    else
-        objectId + " - " + objectName
-
-let private getFunctionDirectReadiness functionValue (state: RealizationState) =
-    if getFrIdsForFunction functionValue state |> List.isEmpty then
-        Missing
-    else
-        Complete
-
-let private getNavigationDirectReadiness objectKind objectId (state: RealizationState) =
-    match objectKind with
-    | kind when kind = realizationSourceKindHost -> (getHostReadiness objectId state).Overall
-    | kind when kind = realizationSourceKindFunction -> getFunctionDirectReadiness objectId state
-    | _ -> getRealizationObjectReadiness objectKind objectId state
-
-let private makeNavigationNode objectKind objectId missingNextKind detailLines children (state: RealizationState) =
-    {
-        ObjectKind = objectKind
-        ObjectId = objectId
-        ObjectName = getNavigationObjectName objectKind objectId state
-        Readiness = getNavigationDirectReadiness objectKind objectId state
-        MissingNextKind =
-            if children |> List.isEmpty then
-                missingNextKind |> Option.map formatNavigationKindForMissing
-            else
-                None
-        DetailLines = detailLines
-        Children = children
-    }
-
-let private getDownstreamChildTargets objectKind objectId (state: RealizationState) =
-    match objectKind with
-    | kind when kind = realizationSourceKindHost ->
-        (
-            getPartIdsForHost objectId state
-            |> List.map (fun childId -> realizationObjectKindPart, childId),
-            Some realizationObjectKindPart
-        )
-    | kind when kind = realizationSourceKindFunction ->
-        (
-            getFrIdsForFunction objectId state
-            |> List.map (fun childId -> realizationObjectKindFR, childId),
-            Some realizationObjectKindFR
-        )
-    | kind when kind = realizationObjectKindFR ->
-        (
-            getDpIdsForFR objectId state
-            |> List.map (fun childId -> realizationObjectKindDP, childId),
-            Some realizationObjectKindDP
-        )
-    | kind when kind = realizationObjectKindPart ->
-        (
-            getDpIdsForPart objectId state
-            |> List.map (fun childId -> realizationObjectKindDP, childId),
-            Some realizationObjectKindDP
-        )
-    | kind when kind = realizationObjectKindDP ->
-        (
-            getTfIdsForDp objectId state
-            |> List.map (fun childId -> realizationObjectKindTF, childId),
-            Some realizationObjectKindTF
-        )
-    | kind when kind = realizationObjectKindTF ->
-        (
-            getCtqIdsForTf objectId state
-            |> List.map (fun childId -> realizationObjectKindCTQ, childId),
-            Some realizationObjectKindCTQ
-        )
-    | kind when kind = realizationObjectKindCTQ ->
-        (
-            getVvIdsForCtq objectId state
-            |> List.map (fun childId -> realizationObjectKindVV, childId),
-            Some "VV"
-        )
-    | _ -> [], None
-
-let private getUpstreamParentTargets objectKind objectId (state: RealizationState) =
-    match objectKind with
-    | kind when kind = realizationObjectKindFR ->
-        getFunctionValuesForFR objectId state
-        |> List.map (fun parentId -> realizationSourceKindFunction, parentId)
-    | kind when kind = realizationObjectKindPart ->
-        getHostValuesForPart objectId state
-        |> List.map (fun parentId -> realizationSourceKindHost, parentId)
-    | kind when kind = realizationObjectKindDP ->
-        [
-            yield!
-                getPartIdsForDp objectId state
-                |> List.map (fun parentId -> realizationObjectKindPart, parentId)
-            yield!
-                getFrIdsForDp objectId state
-                |> List.map (fun parentId -> realizationObjectKindFR, parentId)
-        ]
-    | kind when kind = realizationObjectKindTF ->
-        getDpIdsForTf objectId state
-        |> List.map (fun parentId -> realizationObjectKindDP, parentId)
-    | kind when kind = realizationObjectKindCTQ ->
-        getTfIdsForCtq objectId state
-        |> List.map (fun parentId -> realizationObjectKindTF, parentId)
-    | kind when kind = realizationObjectKindVV ->
-        getCtqIdsForVv objectId state
-        |> List.map (fun parentId -> realizationObjectKindCTQ, parentId)
-    | _ -> []
-
-let private formatSourceSummaryLines sourceKind sourceValue (model: Model) =
-    let entries =
-        if sourceKind = realizationSourceKindHost then
-            getRealizationSourceHosts model
-        elif sourceKind = realizationSourceKindFunction then
-            getRealizationSourceFunctions model
-        else
-            []
-
-    match entries |> List.tryFind (fun entry -> equalsNavigationText entry.Value sourceValue) with
-    | Some entry ->
-        [
-            sourceKind + " source is present in accepted or known Sigma context."
-            "Support count: " + string entry.SupportCount + "."
-            if not (String.IsNullOrWhiteSpace(entry.Provenance)) then
-                "Provenance: " + entry.Provenance + "."
-            if not (String.IsNullOrWhiteSpace(entry.SourcePhiId)) then
-                "Source Phi: " + entry.SourcePhiId + "."
-            if not (List.isEmpty entry.SupportingPhiIds) then
-                "Supporting Phi IDs: " + String.concat ", " entry.SupportingPhiIds + "."
-        ]
-    | None -> [ "No upstream realization parent." ]
-
-let rec private buildDownstreamNavigationNode (model: Model) objectKind objectId =
-    let state = model.realizationState
-    let childTargets, missingNextKind = getDownstreamChildTargets objectKind objectId state
-
-    let children =
-        childTargets
-        |> List.map (fun (childKind, childId) -> buildDownstreamNavigationNode model childKind childId)
-
-    makeNavigationNode objectKind objectId missingNextKind [] children state
-
-let rec private buildUpstreamNavigationNode (model: Model) objectKind objectId =
-    let state = model.realizationState
-    let parentTargets = getUpstreamParentTargets objectKind objectId state
-
-    let parents =
-        parentTargets
-        |> List.map (fun (parentKind, parentId) -> buildUpstreamNavigationNode model parentKind parentId)
-
-    let detailLines =
-        if objectKind = realizationSourceKindHost || objectKind = realizationSourceKindFunction then
-            formatSourceSummaryLines objectKind objectId model
-        else
-            []
-
-    makeNavigationNode objectKind objectId None detailLines parents state
-
-let rec private getNavigationCompleteness objectKind objectId (state: RealizationState) =
-    if objectKind = realizationObjectKindVV then
-        getRealizationObjectReadiness objectKind objectId state
-    else
-        let childTargets, _ = getDownstreamChildTargets objectKind objectId state
-
-        match childTargets with
-        | [] -> Missing
-        | children ->
-            let childReadiness =
-                children
-                |> List.map (fun (childKind, childId) -> getNavigationCompleteness childKind childId state)
-
-            if childReadiness |> List.forall (fun readiness -> readiness = Complete) then
-                Complete
-            else
-                Partial
-
-let rec private collectNavigationGaps objectKind objectId pathLabels (state: RealizationState) =
-    let objectName = getNavigationObjectName objectKind objectId state
-    let pathLabel = formatNavigationObjectLabel objectKind objectId objectName
-    let pathLabels = pathLabels @ [ pathLabel ]
-    let childTargets, missingNextKind = getDownstreamChildTargets objectKind objectId state
-
-    match missingNextKind, childTargets with
-    | Some missingKind, [] ->
-        [
-            {
-                OwnerKind = objectKind
-                OwnerId = objectId
-                OwnerName = objectName
-                MissingKind = formatNavigationKindForMissing missingKind
-                PathLabels = pathLabels
-            }
-        ]
-    | _ ->
-        childTargets
-        |> List.collect (fun (childKind, childId) -> collectNavigationGaps childKind childId pathLabels state)
-
 let private renderNavigationMissingNext missingKind =
     div {
         attr.``class`` "mt-1"
         renderReadinessBadge ("Missing " + missingKind) false Missing
     }
 
-let rec private renderNavigationNode (node: NavigationNode) =
+let private isProjectionTarget (target: RealizationNavigationNode) (node: RealizationNavigationNode) =
+    String.Equals(target.ObjectKind, node.ObjectKind, StringComparison.OrdinalIgnoreCase)
+    && String.Equals(target.ObjectId, node.ObjectId, StringComparison.OrdinalIgnoreCase)
+
+let private renderProjectionNodeSummary emphasize (node: RealizationNavigationNode) =
+    span {
+        attr.``class`` (if emphasize then "has-text-weight-semibold" else "")
+        renderObjectKindTag node.ObjectKind
+        span {
+            attr.``class`` "ml-1"
+            text (formatRealizationNavigationNodeLabel node)
+        }
+    }
+
+let rec private renderNavigationNode (node: RealizationNavigationNode) =
     li {
         div {
             attr.``class`` "is-flex is-align-items-center is-flex-wrap-wrap"
-            renderObjectKindTag node.ObjectKind
-            span {
-                attr.``class`` "ml-1"
-                text (formatNavigationObjectLabel node.ObjectKind node.ObjectId node.ObjectName)
-            }
+            renderProjectionNodeSummary false node
             span {
                 attr.``class`` "ml-2"
                 renderReadinessBadge "" true node.Readiness
@@ -798,30 +506,83 @@ let rec private renderNavigationNode (node: NavigationNode) =
             }
     }
 
-let private renderNavigationTree node =
+let private renderProjectionTarget (node: RealizationNavigationNode) =
     div {
-        attr.``class`` "content"
-        ul {
-            renderNavigationNode node
+        attr.``class`` "notification is-link is-light py-3 my-3"
+        div {
+            attr.``class`` "is-flex is-align-items-center is-flex-wrap-wrap"
+            strong {
+                attr.``class`` "mr-2"
+                text "Target"
+            }
+            renderProjectionNodeSummary true node
+            span {
+                attr.``class`` "ml-2"
+                renderReadinessBadge "" true node.Readiness
+            }
         }
+
+        forEach node.DetailLines <| fun detailLine ->
+            p {
+                attr.``class`` "is-size-7 mt-2"
+                text detailLine
+            }
     }
 
-let private renderNoUpstreamParent node =
-    if List.isEmpty node.Children && List.isEmpty node.DetailLines then
+let private renderUpstreamPath (target: RealizationNavigationNode) (path: RealizationNavigationNode list) =
+    li {
+        forEach (path |> List.mapi (fun index node -> index, node)) <| fun (index, node) ->
+            concat {
+                if index > 0 then
+                    span {
+                        attr.``class`` "mx-1 has-text-grey"
+                        text "->"
+                    }
+
+                renderProjectionNodeSummary (isProjectionTarget target node) node
+            }
+    }
+
+let private renderUpstreamProjection (topology: RealizationTargetTopology) =
+    let upstreamPaths =
+        topology.UpstreamPaths
+        |> List.filter (fun path -> List.length path > 1)
+
+    if List.isEmpty upstreamPaths then
         p {
             attr.``class`` "has-text-grey"
             text "No upstream realization parent."
         }
     else
-        empty()
+        ul {
+            forEach upstreamPaths <| fun path ->
+                renderUpstreamPath topology.Target path
+        }
 
-let private renderNavigationGapRow gap =
+let private renderDownstreamProjection (topology: RealizationTargetTopology) =
+    if topology.DownstreamTree.Children |> List.isEmpty then
+        div {
+            p {
+                attr.``class`` "has-text-grey"
+                text "No downstream realization nodes are linked yet."
+            }
+
+            match topology.DownstreamTree.MissingNextKind with
+            | None -> empty()
+            | Some missingKind -> renderNavigationMissingNext missingKind
+        }
+    else
+        ul {
+            renderNavigationNode topology.DownstreamTree
+        }
+
+let private renderNavigationGapRow (gap: RealizationNavigationGap) =
     tr {
         td {
             renderObjectKindTag gap.OwnerKind
             span {
                 attr.``class`` "ml-1"
-                text (formatNavigationObjectLabel gap.OwnerKind gap.OwnerId gap.OwnerName)
+                text (formatRealizationNavigationObjectLabel gap.OwnerKind gap.OwnerId gap.OwnerName)
             }
         }
         td {
@@ -830,12 +591,12 @@ let private renderNavigationGapRow gap =
         td { text (String.concat " -> " gap.PathLabels) }
     }
 
-let private renderCompletenessGaps gaps =
+let private renderCompletenessGaps (gaps: RealizationNavigationGap list) =
     match gaps with
     | [] ->
         p {
             attr.``class`` "has-text-grey"
-            text "No missing next links."
+            text "The selected target has no missing next realization link."
         }
     | missingGaps ->
         div {
@@ -856,59 +617,50 @@ let private renderCompletenessGaps gaps =
             }
         }
 
-let private renderNavigationResult (model: Model) (target: NavigationTarget) =
-    let selectedOperator = getSelectedNavigationOperator model
-    let state = model.realizationState
+let private renderNavigationResult (model: Model) (target: RealizationNavigationTarget) =
+    let selectedOperator = getSelectedRealizationNavigationOperator model
+    let topology = getTargetTopology target.ObjectKind target.ObjectId model
 
     div {
         attr.``class`` "mt-4"
 
+        h4 {
+            attr.``class`` "title is-6"
+            text "Navigation Projection"
+        }
+
         match selectedOperator with
         | value when value = realizationNavigationOperatorUpstream ->
-            let upstreamNode = buildUpstreamNavigationNode model target.ObjectKind target.ObjectId
-            renderNavigationTree upstreamNode
-            renderNoUpstreamParent upstreamNode
+            h5 {
+                attr.``class`` "subtitle is-6 mb-2"
+                text "Upstream"
+            }
+            renderUpstreamProjection topology
+            renderProjectionTarget topology.Target
         | value when value = realizationNavigationOperatorDownstream ->
-            buildDownstreamNavigationNode model target.ObjectKind target.ObjectId
-            |> renderNavigationTree
+            renderProjectionTarget topology.Target
+            h5 {
+                attr.``class`` "subtitle is-6 mb-2"
+                text "Downstream"
+            }
+            renderDownstreamProjection topology
         | value when value = realizationNavigationOperatorTopology ->
-            let upstreamNode = buildUpstreamNavigationNode model target.ObjectKind target.ObjectId
-            let downstreamNode = buildDownstreamNavigationNode model target.ObjectKind target.ObjectId
-
             div {
                 attr.``class`` "content"
-                h4 {
-                    attr.``class`` "title is-6"
-                    text "Upstream Context"
-                }
-                ul { renderNavigationNode upstreamNode }
-                renderNoUpstreamParent upstreamNode
-                h4 {
-                    attr.``class`` "title is-6 mt-4"
-                    text "Downstream Realization"
-                }
-                ul { renderNavigationNode downstreamNode }
+                h5 { text "Upstream" }
+                renderUpstreamProjection topology
+                renderProjectionTarget topology.Target
+                h5 { text "Downstream" }
+                renderDownstreamProjection topology
             }
         | value when value = realizationNavigationOperatorCompleteness ->
-            let readiness = getNavigationCompleteness target.ObjectKind target.ObjectId state
-            let gaps = collectNavigationGaps target.ObjectKind target.ObjectId [] state
-            let objectName = getNavigationObjectName target.ObjectKind target.ObjectId state
+            let targetWithCompleteness =
+                { topology.Target with Readiness = topology.Completeness }
 
             div {
                 attr.``class`` "content"
-                div {
-                    attr.``class`` "is-flex is-align-items-center is-flex-wrap-wrap mb-3"
-                    renderObjectKindTag target.ObjectKind
-                    span {
-                        attr.``class`` "ml-1"
-                        text (formatNavigationObjectLabel target.ObjectKind target.ObjectId objectName)
-                    }
-                    span {
-                        attr.``class`` "ml-2"
-                        renderReadinessBadge "" true readiness
-                    }
-                }
-                renderCompletenessGaps gaps
+                renderProjectionTarget targetWithCompleteness
+                renderCompletenessGaps topology.MissingGaps
             }
         | _ ->
             p {
@@ -918,8 +670,8 @@ let private renderNavigationResult (model: Model) (target: NavigationTarget) =
     }
 
 let private renderNavigationOperatorsSection (model: Model) dispatch =
-    let targetOptions = getNavigationTargetOptions model
-    let selectedTarget = tryFindSelectedNavigationTarget model
+    let targetOptions = getRealizationNavigationTargetOptions model
+    let selectedTarget = tryFindRealizationNavigationTarget model.realizationNavigationTarget model
 
     div {
         attr.``class`` "box"
