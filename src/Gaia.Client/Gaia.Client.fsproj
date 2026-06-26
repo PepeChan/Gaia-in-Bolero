@@ -15,6 +15,7 @@
     <Compile Include="Workflow.fs" />
     <Compile Include="FactsReconstruction.fs" />
     <Compile Include="InquiryAnswer.fs" />
+    <Compile Include="InquiryAnswerProjection.fs" />
     <Compile Include="Realization.fs" />
     <Compile Include="AppUpdate.fs" />
     <Compile Include="T2ParsingView.fs" />

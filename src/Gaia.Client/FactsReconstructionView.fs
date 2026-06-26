@@ -9,6 +9,7 @@ open Gaia.Client.Workflow
 open Gaia.Client.FactsReconstruction
 open Gaia.Client.Inquiry
 open Gaia.Client.InquiryAnswer
+open Gaia.Client.InquiryAnswerProjection
 
 let private renderMuted textValue =
     p {
@@ -382,37 +383,6 @@ let private renderAnswerFactsPreview (answer: InquiryAnswer) =
                 (fun () -> renderAnswerFactsTable "No additional supporting facts." additionalFacts)
         }
 
-let private formatInquiryTarget targetKind targetId =
-    if String.IsNullOrWhiteSpace targetId then
-        targetKind + ": Auto-selected target"
-    else
-        targetKind + ": " + targetId
-
-let private isPrimaryReasonFact (fact: InquiryAnswerFact) =
-    match fact.Kind with
-    | Reason
-    | Warning
-    | Status ->
-        fact.Label <> "Maturity stage"
-        && fact.Label <> "Governance state"
-    | _ -> false
-
-let private tryPrimaryReason (primaryFacts: InquiryAnswerFact list) =
-    primaryFacts
-    |> List.tryFind isPrimaryReasonFact
-    |> Option.map (fun fact -> fact.Value)
-
-let private tryRecommendedNextStep (maturity: InquiryMaturityContext) (primaryFacts: InquiryAnswerFact list) =
-    match maturity.RecommendedNextStep with
-    | Some step -> Some step
-    | None ->
-        primaryFacts
-        |> List.tryPick (fun fact ->
-            if fact.Kind = SuggestedAction then
-                Some fact.Value
-            else
-                None)
-
 let private renderInquiryCardLine label value =
     p {
         attr.``class`` "mb-2"
@@ -434,23 +404,7 @@ let private renderInquiryCountTag label count =
     }
 
 let private renderInquiryCard (result: FactsReconstructionResult) (answer: InquiryAnswer) dispatch =
-    let maturity = answer.MaturityContext
-    let primaryFacts, additionalFacts = splitAnswerFactsByProfile answer
-    let primaryReason =
-        tryPrimaryReason primaryFacts
-        |> Option.defaultValue maturity.PrimaryMessage
-
-    let evidenceStatus =
-        if maturity.HasEvidence then
-            "Evidence available"
-        else
-            "No evidence attached"
-
-    let ledgerStatus =
-        if maturity.HasLedgerHistory then
-            "Ledger history available"
-        else
-            "No related ledger events"
+    let projection = projectInquiryAnswerCard result answer
 
     div {
         attr.``class`` "box facts-reconstruction-result"
@@ -462,7 +416,7 @@ let private renderInquiryCard (result: FactsReconstructionResult) (answer: Inqui
 
         h2 {
             attr.``class`` "title is-5 mb-3"
-            text result.Question
+            text projection.Question
         }
 
         div {
@@ -473,39 +427,39 @@ let private renderInquiryCard (result: FactsReconstructionResult) (answer: Inqui
             }
             span {
                 attr.``class`` "tag is-light"
-                text (formatInquiryTarget result.TargetKind result.TargetId)
+                text projection.TargetLabel
             }
             span {
                 attr.``class`` "tag is-warning is-light"
-                text (formatInquiryMaturityStage maturity.MaturityStage)
+                text projection.MaturityLabel
             }
         }
 
         div {
             attr.``class`` "notification is-info is-light facts-reconstruction-summary"
-            text (formatInquiryAnswerSummary answer)
+            text projection.Summary
         }
 
         div {
             attr.``class`` "content mb-3"
-            renderInquiryCardLine "Maturity stage" (formatInquiryMaturityStage maturity.MaturityStage)
-            renderInquiryCardSemanticLine "Governance state" "Decision" maturity.GovernanceState
-            renderInquiryCardLine "Primary reason" primaryReason
+            renderInquiryCardLine "Maturity stage" projection.MaturityLabel
+            renderInquiryCardSemanticLine "Governance state" "Decision" projection.GovernanceState
+            renderInquiryCardLine "Primary reason" projection.PrimaryReason
 
-            match tryRecommendedNextStep maturity primaryFacts with
+            match projection.RecommendedNextStep with
             | None -> empty()
             | Some step -> renderInquiryCardLine "Recommended next step" step
 
-            renderInquiryCardSemanticLine "Evidence status" "Evidence" evidenceStatus
-            renderInquiryCardLine "Ledger status" ledgerStatus
+            renderInquiryCardSemanticLine "Evidence status" "Evidence" projection.EvidenceStatus
+            renderInquiryCardLine "Ledger status" projection.LedgerStatus
         }
 
         div {
             attr.``class`` "tags mb-4"
-            renderInquiryCountTag "Primary facts" primaryFacts.Length
-            renderInquiryCountTag "Additional facts" additionalFacts.Length
-            renderInquiryCountTag "Source Phi" result.SourcePhiIds.Length
-            renderInquiryCountTag "Ledger events" result.RelatedLedgerEvents.Length
+            renderInquiryCountTag "Primary facts" projection.PrimaryFactCount
+            renderInquiryCountTag "Additional facts" projection.AdditionalFactCount
+            renderInquiryCountTag "Source Phi" projection.SourcePhiCount
+            renderInquiryCountTag "Ledger events" projection.LedgerEventCount
         }
 
         div {
