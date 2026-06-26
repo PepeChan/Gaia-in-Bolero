@@ -17,6 +17,7 @@
     <Compile Include="InquiryAnswer.fs" />
     <Compile Include="InquiryAnswerProjection.fs" />
     <Compile Include="Realization.fs" />
+    <Compile Include="RealizationInquiryEngine.fs" />
     <Compile Include="AppUpdate.fs" />
     <Compile Include="T2ParsingView.fs" />
     <Compile Include="T4CandidateView.fs" />
