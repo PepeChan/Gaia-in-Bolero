@@ -433,6 +433,8 @@ let update (jsRuntime: IJSRuntime) message model =
         { model with realizationNavigationOperator = value }, Cmd.none
     | SetRealizationNavigationTarget value ->
         { model with realizationNavigationTarget = value }, Cmd.none
+    | SetRealizationInquiryQuestion value ->
+        { model with realizationInquiryQuestion = value }, Cmd.none
     | SetPhiDraftRawStatement value ->
         { model with phiDraftRawStatement = value }, Cmd.none
 

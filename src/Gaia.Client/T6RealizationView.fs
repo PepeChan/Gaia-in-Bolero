@@ -6,6 +6,7 @@ open Bolero.Html
 open Gaia.Client.Types
 open Gaia.Client.AppState
 open Gaia.Client.Realization
+open Gaia.Client.RealizationInquiryEngine
 
 let private formatNone (values: string list) =
     match values with
@@ -669,6 +670,143 @@ let private renderNavigationResult (model: Model) (target: RealizationNavigation
             }
     }
 
+let private renderRealizationInquiryNodeTag (node: RealizationInquiryNode) =
+    span {
+        attr.``class`` "tag is-light"
+        text (node.ObjectKind + " " + node.Label)
+    }
+
+let private renderRealizationInquiryLines emptyText lines =
+    match lines with
+    | [] ->
+        p {
+            attr.``class`` "has-text-grey"
+            text emptyText
+        }
+    | values ->
+        ul {
+            forEach values <| fun line ->
+                li { text line }
+        }
+
+let private renderRealizationInquiryResult (result: RealizationInquiryResult) =
+    div {
+        attr.``class`` "mt-4"
+
+        div {
+            attr.``class`` "notification is-light py-3"
+            p {
+                attr.``class`` "heading mb-1"
+                text (formatRealizationInquiryQuestion result.Question)
+            }
+            p {
+                attr.``class`` "mb-2"
+                strong { text result.Summary }
+            }
+            div {
+                attr.``class`` "is-flex is-align-items-center is-flex-wrap-wrap"
+                renderRealizationInquiryNodeTag result.Target
+                span {
+                    attr.``class`` "ml-2"
+                    renderReadinessBadge "" true result.Target.Readiness
+                }
+            }
+        }
+
+        div {
+            attr.``class`` "columns is-variable is-4"
+
+            div {
+                attr.``class`` "column"
+                h5 {
+                    attr.``class`` "subtitle is-6 mb-2"
+                    text "Answer"
+                }
+                renderRealizationInquiryLines "No answer lines available." result.AnswerLines
+            }
+
+            div {
+                attr.``class`` "column"
+                h5 {
+                    attr.``class`` "subtitle is-6 mb-2"
+                    text "Path"
+                }
+                renderRealizationInquiryLines "No realization path available." result.PathLines
+            }
+        }
+
+        if not (List.isEmpty result.RelatedNodes) then
+            div {
+                attr.``class`` "mb-3"
+                h5 {
+                    attr.``class`` "subtitle is-6 mb-2"
+                    text "Related nodes"
+                }
+                div {
+                    attr.``class`` "tags mb-0"
+                    forEach result.RelatedNodes <| fun node ->
+                        renderRealizationInquiryNodeTag node
+                }
+            }
+    }
+
+let private renderRealizationInquirySection (model: Model) (target: RealizationNavigationTarget) dispatch =
+    let selectedQuestionKey = getRealizationInquiryQuestionKeyOrDefault model.realizationInquiryQuestion
+    let selectedQuestion = getRealizationInquiryQuestionOrDefault model.realizationInquiryQuestion
+    let inquiryResult = resolveRealizationInquiryForTarget selectedQuestion target model
+
+    div {
+        attr.``class`` "mt-5"
+
+        h4 {
+            attr.``class`` "title is-6"
+            text "Ask Cognopy: Realization Inquiry"
+        }
+
+        div {
+            attr.``class`` "columns is-variable is-3"
+
+            div {
+                attr.``class`` "column is-6"
+                div {
+                    attr.``class`` "field"
+                    label {
+                        attr.``class`` "label"
+                        text "Inquiry"
+                    }
+                    div {
+                        attr.``class`` "control"
+                        div {
+                            attr.``class`` "select is-fullwidth"
+                            select {
+                                bind.input.string selectedQuestionKey (fun value -> dispatch (SetRealizationInquiryQuestion value))
+                                forEach realizationInquiryQuestionOptions <| fun (value, label) ->
+                                    renderOption value label
+                            }
+                        }
+                    }
+                }
+            }
+
+            div {
+                attr.``class`` "column is-6"
+                div {
+                    attr.``class`` "field"
+                    label {
+                        attr.``class`` "label"
+                        text "Selected realization node"
+                    }
+                    p {
+                        attr.``class`` "control"
+                        code { text target.Label }
+                    }
+                }
+            }
+        }
+
+        renderRealizationInquiryResult inquiryResult
+    }
+
 let private renderNavigationOperatorsSection (model: Model) dispatch =
     let targetOptions = getRealizationNavigationTargetOptions model
     let selectedTarget = tryFindRealizationNavigationTarget model.realizationNavigationTarget model
@@ -734,7 +872,9 @@ let private renderNavigationOperatorsSection (model: Model) dispatch =
         }
 
         match selectedTarget, targetOptions with
-        | Some target, _ -> renderNavigationResult model target
+        | Some target, _ ->
+            renderNavigationResult model target
+            renderRealizationInquirySection model target dispatch
         | None, [] ->
             p {
                 attr.``class`` "has-text-grey"

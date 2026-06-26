@@ -30,11 +30,44 @@ type RealizationInquiryResult =
         PathLines: string list
     }
 
+let defaultRealizationInquiryQuestion = WhyDoesThisExist
+
+let encodeRealizationInquiryQuestion = function
+    | WhyDoesThisExist -> "WhyDoesThisExist"
+    | WhatDependsOnThis -> "WhatDependsOnThis"
+    | WhatIsMissing -> "WhatIsMissing"
+    | ShowRealizationPath -> "ShowRealizationPath"
+
 let formatRealizationInquiryQuestion = function
     | WhyDoesThisExist -> "Why does this exist?"
     | WhatDependsOnThis -> "What depends on this?"
     | WhatIsMissing -> "What is missing?"
     | ShowRealizationPath -> "Show realization path"
+
+let realizationInquiryQuestionOptions =
+    [
+        WhyDoesThisExist
+        WhatDependsOnThis
+        WhatIsMissing
+        ShowRealizationPath
+    ]
+    |> List.map (fun question -> encodeRealizationInquiryQuestion question, formatRealizationInquiryQuestion question)
+
+let tryDecodeRealizationInquiryQuestion = function
+    | "WhyDoesThisExist" -> Some WhyDoesThisExist
+    | "WhatDependsOnThis" -> Some WhatDependsOnThis
+    | "WhatIsMissing" -> Some WhatIsMissing
+    | "ShowRealizationPath" -> Some ShowRealizationPath
+    | _ -> None
+
+let getRealizationInquiryQuestionOrDefault value =
+    tryDecodeRealizationInquiryQuestion value
+    |> Option.defaultValue defaultRealizationInquiryQuestion
+
+let getRealizationInquiryQuestionKeyOrDefault value =
+    value
+    |> getRealizationInquiryQuestionOrDefault
+    |> encodeRealizationInquiryQuestion
 
 let private nodeFromNavigationNode (node: RealizationNavigationNode) =
     {
