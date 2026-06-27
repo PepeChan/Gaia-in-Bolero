@@ -689,8 +689,10 @@ let private renderRealizationInquiryLines emptyText lines =
                 li { text line }
         }
 
-let private renderRealizationInquiryResult (result: RealizationInquiryResult) dispatch =
+let private renderRealizationInquiryResult (model: Model) (result: RealizationInquiryResult) dispatch =
     let canConvertToIntake = canConvertRealizationInquiryToIntake result
+    let duplicateInvestigationExists =
+        canConvertToIntake && hasDuplicateRealizationInquiryIntake result model
 
     div {
         attr.``class`` "mt-4"
@@ -716,15 +718,21 @@ let private renderRealizationInquiryResult (result: RealizationInquiryResult) di
         }
 
         if canConvertToIntake then
-            div {
-                attr.``class`` "buttons mb-3"
-                button {
-                    attr.``class`` "button is-link is-light"
-                    attr.``type`` "button"
-                    on.click (fun _ -> dispatch (PrefillPhiDraft (buildPhiDraftFromRealizationInquiry result)))
-                    text "Convert to Intake"
+            if duplicateInvestigationExists then
+                div {
+                    attr.``class`` "notification is-warning is-light py-2 mb-3"
+                    text "An investigation already exists for this gap."
                 }
-            }
+            else
+                div {
+                    attr.``class`` "buttons mb-3"
+                    button {
+                        attr.``class`` "button is-link is-light"
+                        attr.``type`` "button"
+                        on.click (fun _ -> dispatch (PrefillPhiDraft (buildPhiDraftFromRealizationInquiry result)))
+                        text "Send to Investigation Backlog"
+                    }
+                }
 
         div {
             attr.``class`` "columns is-variable is-4"
@@ -827,7 +835,7 @@ let private renderRealizationInquirySection (model: Model) (target: RealizationN
             }
         }
 
-        renderRealizationInquiryResult inquiryResult dispatch
+        renderRealizationInquiryResult model inquiryResult dispatch
     }
 
 let private renderNavigationOperatorsSection (model: Model) dispatch =

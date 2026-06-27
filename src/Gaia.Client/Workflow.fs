@@ -40,6 +40,21 @@ let splitTags (value: string) =
         |> Array.filter (fun tag -> tag <> "")
         |> Array.toList
 
+let private normalizeMarkerText (value: string) =
+    if String.IsNullOrWhiteSpace(value) then
+        ""
+    else
+        value.Trim().ToLowerInvariant()
+
+let private hasTag (marker: string) (value: string) =
+    value
+    |> splitTags
+    |> List.exists (fun tag -> normalizeMarkerText tag = normalizeMarkerText marker)
+
+let isDerivedInquiryPhi (phi: PhiIntake) =
+    String.Equals(phi.Source, t6RealizationInquirySource, StringComparison.OrdinalIgnoreCase)
+    || hasTag derivedInquiryTag phi.TypeText
+
 let buildPhiContext phi phiContextEntries =
     {
         Phi = phi
@@ -190,6 +205,7 @@ let chooseContextAwareValue baseValue contextValue tagValue =
 
 let parsePhiContext (phiContext: PhiContext) =
     let baseParse = Engine.parseIntake phiContext.Phi
+    let isDerivedInquiry = isDerivedInquiryPhi phiContext.Phi
 
     let hostValue, hostProvenance =
         chooseContextAwareValue
@@ -243,8 +259,16 @@ let parsePhiContext (phiContext: PhiContext) =
             + " Context-aware T2 v1 parsed PhiContext. Candidate provenance: "
             + provenanceSummary
             + "."
+            + (if isDerivedInquiry then
+                   " DerivedInquiry=True."
+               else
+                   "")
         DeltaConstrain = baseParse.DeltaConstrain || hasConstraintContext
         ContextBounded = baseParse.ContextBounded || not (List.isEmpty phiContext.PhiContextEntries) || not (List.isEmpty phiContext.ExistingTags) }
+
+let private isDerivedInquiryParse (parse: PhiParse) =
+    not (isNull parse.ExposureNotes)
+    && parse.ExposureNotes.IndexOf("DerivedInquiry=True", StringComparison.OrdinalIgnoreCase) >= 0
 
 let private getExposureProvenance atomKind (parse: PhiParse) =
     let marker = atomKind + "="
@@ -281,9 +305,31 @@ let private combineProvenance values =
     match distinct with
     | [] -> "Text"
     | [ value ] -> value
+    | values when values |> List.exists (fun value -> value.IndexOf("DerivedInquiry", StringComparison.OrdinalIgnoreCase) >= 0) ->
+        String.concat ", " values
     | values when values |> List.contains "Combined" -> "Combined"
     | values when values |> List.contains "Text" && values.Length > 1 -> "Combined"
     | _ -> String.concat ", " distinct
+
+let private addDerivedInquiryProvenance (provenance: string) isDerivedInquiry =
+    if isDerivedInquiry then
+        combineProvenance [ provenance; "DerivedInquiry" ]
+    else
+        provenance
+
+let private isDerivedSigmaEntry (entry: SigmaContextEntry) =
+    not (String.IsNullOrWhiteSpace(entry.Provenance))
+    && entry.Provenance.IndexOf("DerivedInquiry", StringComparison.OrdinalIgnoreCase) >= 0
+
+let private chooseIndependentSupportEntries entries =
+    let nonDerivedEntries =
+        entries
+        |> List.filter (fun entry -> not (isDerivedSigmaEntry entry))
+
+    if List.isEmpty nonDerivedEntries then
+        entries |> List.truncate 1
+    else
+        nonDerivedEntries
 
 let buildSigmaContextEntries atomKind (getValue: PhiParse -> string) (sequencedParsedPhis: (int * PhiParse) list) =
     sequencedParsedPhis
@@ -301,21 +347,22 @@ let buildSigmaContextEntries atomKind (getValue: PhiParse -> string) (sequencedP
                     ParseSequenceNumber = parseSequenceNumber
                     SupportCount = 1
                     SupportingPhiIds = [ parse.PhiId ]
-                    Provenance = getExposureProvenance atomKind parse
+                    Provenance = addDerivedInquiryProvenance (getExposureProvenance atomKind parse) (isDerivedInquiryParse parse)
                 })
     |> List.groupBy (fun entry -> entry.Value)
     |> List.map (fun (_, entries) ->
-        let firstEntry = entries |> List.head
+        let supportEntries = chooseIndependentSupportEntries entries
+        let firstEntry = supportEntries |> List.head
 
         let supportingPhiIds =
-            entries
+            supportEntries
             |> List.map (fun entry -> entry.SourcePhiId)
             |> List.distinct
 
         { firstEntry with
             SupportCount = List.length supportingPhiIds
             SupportingPhiIds = supportingPhiIds
-            Provenance = entries |> List.map (fun entry -> entry.Provenance) |> combineProvenance })
+            Provenance = supportEntries |> List.map (fun entry -> entry.Provenance) |> combineProvenance })
 
 let buildSigmaContext (sequencedParsedPhis: (int * PhiParse) list) =
     {
@@ -346,6 +393,9 @@ let buildConstraintContextEntries (contextEntries: PhiContextEntry list) (sequen
             parseByPhiId
             |> Map.tryFind entry.PhiId
             |> Option.map (fun (parseSequenceNumber, parse) ->
+                let provenance =
+                    addDerivedInquiryProvenance "ContextEntry" (isDerivedInquiryParse parse)
+
                 {
                     Value = entry.Value
                     SourcePhiId = entry.PhiId
@@ -353,17 +403,18 @@ let buildConstraintContextEntries (contextEntries: PhiContextEntry list) (sequen
                     ParseSequenceNumber = parseSequenceNumber
                     SupportCount = 1
                     SupportingPhiIds = [ entry.PhiId ]
-                    Provenance = "ContextEntry"
+                    Provenance = provenance
                 }))
     |> List.groupBy (fun entry -> entry.Value)
     |> List.map (fun (_, entries) ->
-        let firstEntry = entries |> List.head
-        let supportingPhiIds = entries |> List.map (fun entry -> entry.SourcePhiId) |> List.distinct
+        let supportEntries = chooseIndependentSupportEntries entries
+        let firstEntry = supportEntries |> List.head
+        let supportingPhiIds = supportEntries |> List.map (fun entry -> entry.SourcePhiId) |> List.distinct
 
         { firstEntry with
             SupportCount = List.length supportingPhiIds
             SupportingPhiIds = supportingPhiIds
-            Provenance = entries |> List.map (fun entry -> entry.Provenance) |> combineProvenance })
+            Provenance = supportEntries |> List.map (fun entry -> entry.Provenance) |> combineProvenance })
 
 let buildSigmaContextWithContextEntries (contextEntries: PhiContextEntry list) (sequencedParsedPhis: (int * PhiParse) list) =
     let sigmaContext = buildSigmaContext sequencedParsedPhis
@@ -1183,6 +1234,7 @@ let appendSigmaBasisItemDecisionLedgerEvent actionScope decision context model =
             (formatSigmaBasisItemLedgerDetail actionScope decision context)
 
 let parsePhiIntoModel (phi: PhiIntake) (model: Model) =
+    let isDerivedInquiry = isDerivedInquiryPhi phi
     let beforeSigma =
         model.parsedPhis
         |> getIncludedSequencedParsedPhis model.excludedPhiIds
@@ -1199,12 +1251,21 @@ let parsePhiIntoModel (phi: PhiIntake) (model: Model) =
         |> buildSigmaContextWithContextEntries model.phiContextEntries
 
     let alreadyKnownAtoms =
-        buildAlreadyKnownAtomGroups parse.PhiId beforeSigma parse
+        if isDerivedInquiry then
+            emptyDeltaSigmaAtomGroups
+        else
+            buildAlreadyKnownAtomGroups parse.PhiId beforeSigma parse
+
+    let replayReason =
+        if isDerivedInquiry then
+            "This derived inquiry Phi was parsed; repeated Sigma-derived context is not counted as independent reinforcement."
+        else
+            "This Phi was parsed, so its exposed atoms can enter current Sigma."
 
     let lastReplayAction =
         createDeltaSigmaAnalysis
             ("Parsed " + parse.PhiId)
-            "This Phi was parsed, so its exposed atoms can enter current Sigma."
+            replayReason
             parse.PhiId
             parse.Statement
             alreadyKnownAtoms

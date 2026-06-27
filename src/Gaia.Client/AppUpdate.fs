@@ -132,6 +132,14 @@ let addContextEntryToPhi phiId (model: Model) =
         refreshedModel
         |> appendPhiContextEntryLedgerEvent entry
 
+let private containsDraftMarker (marker: string) (value: string) =
+    not (String.IsNullOrWhiteSpace(value))
+    && value.IndexOf(marker, StringComparison.OrdinalIgnoreCase) >= 0
+
+let private isDerivedInquiryDraft (source: string) (quickTags: string) =
+    String.Equals(source, t6RealizationInquirySource, StringComparison.OrdinalIgnoreCase)
+    || containsDraftMarker derivedInquiryTag quickTags
+
 let createInquiryResolvedLedgerEvent (result: FactsReconstructionResult) ledgerEvents =
     let answer =
         inquiryAnswerFromFactsReconstructionResult result
@@ -621,8 +629,14 @@ let update (jsRuntime: IJSRuntime) message model =
     | IngestPhiDraft ->
         let timestamp = DateTime.UtcNow
         let phiId = "PHI-" + timestamp.ToString("yyyyMMdd-HHmmss")
+        let contextProvenance =
+            if isDerivedInquiryDraft model.phiDraftSource model.phiDraftQuickTags then
+                "T6RealizationInquiry"
+            else
+                "OneSecSnip"
+
         let contextEntries =
-            parsePhiContextSnipLines phiId 1 "OneSecSnip" model.phiContextSnipDraft
+            parsePhiContextSnipLines phiId 1 contextProvenance model.phiContextSnipDraft
 
         let intake =
             {

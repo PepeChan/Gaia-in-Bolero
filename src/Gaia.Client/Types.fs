@@ -165,6 +165,13 @@ type PhiDraftPrefill =
         StatusMessage: string
     }
 
+let t6RealizationInquirySource = "T6 Realization Inquiry"
+let derivedInquiryTag = "derived-inquiry"
+let derivedInquiryContextKind = "DerivedInquiry"
+let t6InquiryTargetContextKind = "T6InquiryTarget"
+let t6InquiryGapKeyContextKind = "T6InquiryGapKey"
+let t6InquiryQuestionContextKind = "T6InquiryQuestion"
+
 type LedgerEvent =
     {
         EventId: string
