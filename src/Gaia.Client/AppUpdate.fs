@@ -350,13 +350,23 @@ let update (jsRuntime: IJSRuntime) message model =
                         ContentRef = model.evidenceContentRef
                     }
 
+                let detail =
+                    model.evidenceCaptureKind
+                    + " | "
+                    + title
+                    + " | "
+                    + model.evidenceTargetKind
+                    + " | "
+                    + targetLabel
+
                 { model with
                     evidenceRecords = model.evidenceRecords @ [ evidenceRecord ]
                     evidenceTitle = ""
                     evidenceNotes = ""
                     evidenceContentRef = ""
-                    evidenceStatus = Some ("Evidence reference captured: " + evidenceId) },
-                Cmd.none
+                    evidenceStatus = Some ("Evidence reference captured: " + evidenceId) }
+                |> appendLedgerEvent "EvidenceReferenceCreated" evidenceId "Evidence reference created" detail
+                |> fun updatedModel -> updatedModel, Cmd.none
     | SetRealizationObjectKindDraft value ->
         { model with realizationObjectKindDraft = value }, Cmd.none
     | SetRealizationObjectIdDraft value ->

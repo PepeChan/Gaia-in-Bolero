@@ -5,6 +5,7 @@ open Bolero
 open Bolero.Html
 open Gaia.Client.Types
 open Gaia.Client.AppState
+open Gaia.Client.EvidenceView
 open Gaia.Client.Realization
 open Gaia.Client.RealizationInquiryEngine
 
@@ -1143,6 +1144,8 @@ let renderT6RealizationTab (model: Model) dispatch =
                 attr.``class`` "column is-4"
                 renderCreateObjectForm model dispatch
                 renderCreateLinkForm model dispatch
+                renderEvidenceCapturePanel model dispatch
+                renderSelectedEvidenceReferences model
             }
 
             div {

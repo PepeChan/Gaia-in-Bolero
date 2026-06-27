@@ -248,18 +248,6 @@ let renderTopNavigation activeTab dispatch =
 
             li {
                 attr.``class`` (
-                    if activeTab = EvidenceTab then
-                        "is-active"
-                    else
-                        "")
-                a {
-                    on.click (fun _ -> dispatch (SelectTopNavigationTab EvidenceTab))
-                    text "Evidence"
-                }
-            }
-
-            li {
-                attr.``class`` (
                     if activeTab = DesignRealizationTab then
                         "is-active"
                     else
