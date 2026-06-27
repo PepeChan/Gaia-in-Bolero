@@ -18,6 +18,7 @@ type Model =
         persistenceStatus: string option
         selectedScenarioId: string option
         scenarioResolution: ResolutionView option
+        phiDraftStatus: string option
         phiDraftRawStatement: string
         phiDraftTriggerContext: string
         phiDraftSource: string
@@ -195,6 +196,7 @@ let restoreProjectSnapshot (snapshot: ProjectSnapshot) (model: Model) =
             selectedPhiParse = None
             selectedPhiResolution = None
             lastReplayAction = None
+            phiDraftStatus = None
             phiBatchParseStatus = None
             cognitionReviewTargetFilter = defaultCognitionReviewTargetFilter
             cognitionReviewDecisionFilter = defaultCognitionReviewDecisionFilter
@@ -265,6 +267,7 @@ let initModel =
         persistenceStatus = None
         selectedScenarioId = selectedScenarioId
         scenarioResolution = scenarioResolution
+        phiDraftStatus = None
         phiDraftRawStatement = ""
         phiDraftTriggerContext = ""
         phiDraftSource = ""
@@ -326,6 +329,7 @@ let clearProjectModel (model: Model) =
             exportJson = ""
             importJson = ""
             persistenceStatus = None
+            phiDraftStatus = None
             phiDraftRawStatement = ""
             phiDraftTriggerContext = ""
             phiDraftSource = ""
@@ -428,6 +432,7 @@ type Message =
     | SelectScenario of string
     | Error of exn
     | ClearError
+    | PrefillPhiDraft of PhiDraftPrefill
     | SetPhiDraftRawStatement of string
     | SetPhiDraftTriggerContext of string
     | SetPhiDraftSource of string

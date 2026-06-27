@@ -689,7 +689,9 @@ let private renderRealizationInquiryLines emptyText lines =
                 li { text line }
         }
 
-let private renderRealizationInquiryResult (result: RealizationInquiryResult) =
+let private renderRealizationInquiryResult (result: RealizationInquiryResult) dispatch =
+    let canConvertToIntake = canConvertRealizationInquiryToIntake result
+
     div {
         attr.``class`` "mt-4"
 
@@ -712,6 +714,17 @@ let private renderRealizationInquiryResult (result: RealizationInquiryResult) =
                 }
             }
         }
+
+        if canConvertToIntake then
+            div {
+                attr.``class`` "buttons mb-3"
+                button {
+                    attr.``class`` "button is-link is-light"
+                    attr.``type`` "button"
+                    on.click (fun _ -> dispatch (PrefillPhiDraft (buildPhiDraftFromRealizationInquiry result)))
+                    text "Convert to Intake"
+                }
+            }
 
         div {
             attr.``class`` "columns is-variable is-4"
@@ -747,6 +760,16 @@ let private renderRealizationInquiryResult (result: RealizationInquiryResult) =
                     forEach result.RelatedNodes <| fun node ->
                         renderRealizationInquiryNodeTag node
                 }
+            }
+
+        if not (List.isEmpty result.RecommendedNextSteps) then
+            div {
+                attr.``class`` "mb-3"
+                h5 {
+                    attr.``class`` "subtitle is-6 mb-2"
+                    text "Recommended next step"
+                }
+                renderRealizationInquiryLines "No recommended next step." result.RecommendedNextSteps
             }
     }
 
@@ -804,7 +827,7 @@ let private renderRealizationInquirySection (model: Model) (target: RealizationN
             }
         }
 
-        renderRealizationInquiryResult inquiryResult
+        renderRealizationInquiryResult inquiryResult dispatch
     }
 
 let private renderNavigationOperatorsSection (model: Model) dispatch =

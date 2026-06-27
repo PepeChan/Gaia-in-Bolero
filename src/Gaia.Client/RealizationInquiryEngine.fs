@@ -1,5 +1,6 @@
 module Gaia.Client.RealizationInquiryEngine
 
+open System
 open Gaia.Client.AppState
 open Gaia.Client.Realization
 open Gaia.Client.Types
@@ -27,6 +28,7 @@ type RealizationInquiryResult =
         AnswerLines: string list
         RelatedNodes: RealizationInquiryNode list
         MissingGaps: RealizationNavigationGap list
+        RecommendedNextSteps: string list
         PathLines: string list
     }
 
@@ -117,6 +119,12 @@ let private formatMissingGap (gap: RealizationNavigationGap) =
 
     ownerLabel + " is missing " + gap.MissingKind + "."
 
+let private formatRecommendedNextStepForGap (gap: RealizationNavigationGap) =
+    let ownerLabel =
+        formatRealizationNavigationObjectLabel gap.OwnerKind gap.OwnerId gap.OwnerName
+
+    "Identify or create " + gap.MissingKind + " for " + ownerLabel + "."
+
 let private upstreamPathLines (topology: RealizationTargetTopology) : string list =
     topology.UpstreamPaths
     |> List.filter (fun path -> List.length path > 1)
@@ -147,6 +155,7 @@ let private buildWhyDoesThisExist (topology: RealizationTargetTopology) : Realiz
             |> List.filter (fun node -> node.ObjectKind <> topology.Target.ObjectKind || node.ObjectId <> topology.Target.ObjectId)
             |> List.map nodeFromNavigationNode
         MissingGaps = []
+        RecommendedNextSteps = []
         PathLines = upstreamLines
     }
 
@@ -172,6 +181,14 @@ let private buildWhatDependsOnThis (topology: RealizationTargetTopology) : Reali
             downstreamNodes
             |> List.map formatNodeReference
 
+    let recommendedNextSteps =
+        if List.isEmpty downstreamNodes then
+            match topology.DownstreamTree.MissingNextKind with
+            | Some missingKind -> [ "Identify or create the next " + missingKind + " for " + formatNodeReference target + "." ]
+            | None -> []
+        else
+            []
+
     {
         Question = WhatDependsOnThis
         Target = target
@@ -179,6 +196,7 @@ let private buildWhatDependsOnThis (topology: RealizationTargetTopology) : Reali
         AnswerLines = answerLines
         RelatedNodes = downstreamNodes
         MissingGaps = []
+        RecommendedNextSteps = recommendedNextSteps
         PathLines = downstreamPaths
     }
 
@@ -187,6 +205,10 @@ let private buildWhatIsMissing (topology: RealizationTargetTopology) : Realizati
     let missingLines =
         topology.MissingGaps
         |> List.map formatMissingGap
+
+    let recommendedNextSteps =
+        topology.MissingGaps
+        |> List.map formatRecommendedNextStepForGap
 
     let summary =
         if List.isEmpty topology.MissingGaps then
@@ -201,6 +223,7 @@ let private buildWhatIsMissing (topology: RealizationTargetTopology) : Realizati
         AnswerLines = if List.isEmpty missingLines then [ "No missing realization gaps found." ] else missingLines
         RelatedNodes = []
         MissingGaps = topology.MissingGaps
+        RecommendedNextSteps = recommendedNextSteps
         PathLines =
             topology.MissingGaps
             |> List.map (fun gap -> String.concat " -> " gap.PathLabels)
@@ -225,7 +248,65 @@ let private buildShowRealizationPath (topology: RealizationTargetTopology) : Rea
         AnswerLines = answerLines
         RelatedNodes = flattenDownstreamNodes topology.DownstreamTree
         MissingGaps = topology.MissingGaps
+        RecommendedNextSteps =
+            topology.MissingGaps
+            |> List.map formatRecommendedNextStepForGap
         PathLines = pathLines
+    }
+
+let canConvertRealizationInquiryToIntake (result: RealizationInquiryResult) =
+    not (List.isEmpty result.MissingGaps)
+    || not (List.isEmpty result.RecommendedNextSteps)
+
+let private formatDraftList prefix values =
+    values
+    |> List.map (fun value -> prefix + value)
+
+let private getMissingKnowledgeLines (result: RealizationInquiryResult) =
+    result.MissingGaps
+    |> List.map formatMissingGap
+
+let private getDraftTags (result: RealizationInquiryResult) =
+    [
+        "realization"
+        "missing-knowledge"
+        yield! result.MissingGaps |> List.map (fun gap -> gap.MissingKind.ToLowerInvariant())
+        if List.isEmpty result.MissingGaps && not (List.isEmpty result.RecommendedNextSteps) then
+            "recommended-next-step"
+    ]
+    |> List.distinct
+    |> String.concat ", "
+
+let buildPhiDraftFromRealizationInquiry (result: RealizationInquiryResult) : PhiDraftPrefill =
+    let missingKnowledgeLines = getMissingKnowledgeLines result
+    let targetLine = "Target: " + result.Target.ObjectKind + " " + result.Target.Label + "."
+
+    let rawLines =
+        [
+            "Realization inquiry found a knowledge gap."
+            targetLine
+            result.Summary
+            yield! formatDraftList "Missing knowledge: " missingKnowledgeLines
+            yield! formatDraftList "Recommended next step: " result.RecommendedNextSteps
+        ]
+        |> List.filter (fun line -> not (String.IsNullOrWhiteSpace(line)))
+
+    let contextLines =
+        [
+            "note=Created from T6 realization inquiry: " + formatRealizationInquiryQuestion result.Question
+            "note=" + result.Summary
+            yield! missingKnowledgeLines |> List.map (fun line -> "gap=" + line)
+            yield! result.RecommendedNextSteps |> List.map (fun line -> "next-step=" + line)
+        ]
+
+    {
+        RawStatement = String.concat Environment.NewLine rawLines
+        TriggerContext = "T6 inquiry exposed missing realization knowledge for " + result.Target.Label + "."
+        Source = "T6 Realization Inquiry"
+        QuickTags = getDraftTags result
+        Confidence = "Medium"
+        ContextSnip = String.concat Environment.NewLine contextLines
+        StatusMessage = "Draft Phi created from T6 inquiry. Review and edit before ingestion."
     }
 
 let resolveRealizationInquiryForTopology question (topology: RealizationTargetTopology) : RealizationInquiryResult =

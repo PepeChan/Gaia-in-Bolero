@@ -154,6 +154,17 @@ type PhiContext =
         PhiContextEntries: PhiContextEntry list
     }
 
+type PhiDraftPrefill =
+    {
+        RawStatement: string
+        TriggerContext: string
+        Source: string
+        QuickTags: string
+        Confidence: string
+        ContextSnip: string
+        StatusMessage: string
+    }
+
 type LedgerEvent =
     {
         EventId: string

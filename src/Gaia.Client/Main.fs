@@ -476,6 +476,14 @@ let homePage model dispatch =
                                 text "Forward inquiries are still captured as PhiIntake records and parsed by the existing T1-T5 machinery."
                             }
 
+                            match model.phiDraftStatus with
+                            | None -> empty()
+                            | Some status ->
+                                div {
+                                    attr.``class`` "notification is-info is-light py-2"
+                                    text status
+                                }
+
                             div {
                                 attr.``class`` "field"
                                 label {

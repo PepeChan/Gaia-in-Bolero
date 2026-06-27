@@ -435,6 +435,17 @@ let update (jsRuntime: IJSRuntime) message model =
         { model with realizationNavigationTarget = value }, Cmd.none
     | SetRealizationInquiryQuestion value ->
         { model with realizationInquiryQuestion = value }, Cmd.none
+    | PrefillPhiDraft draft ->
+        { model with
+            activeTopNavigationTab = GaiaProbeTab
+            phiDraftStatus = Some draft.StatusMessage
+            phiDraftRawStatement = draft.RawStatement
+            phiDraftTriggerContext = draft.TriggerContext
+            phiDraftSource = draft.Source
+            phiDraftQuickTags = draft.QuickTags
+            phiDraftConfidence = draft.Confidence
+            phiContextSnipDraft = draft.ContextSnip },
+        Cmd.none
     | SetPhiDraftRawStatement value ->
         { model with phiDraftRawStatement = value }, Cmd.none
 
@@ -639,6 +650,7 @@ let update (jsRuntime: IJSRuntime) message model =
             phiDraftSource = ""
             phiDraftQuickTags = ""
             phiDraftConfidence = "Medium"
+            phiDraftStatus = None
             phiContextSnipDraft = ""
             phiContextEntries = model.phiContextEntries @ contextEntries
             phiBatchParseStatus = None }
