@@ -12,7 +12,7 @@ let renderEvidenceLibrary (evidenceRecords: EvidenceRecord list) =
 
         h2 {
             attr.``class`` "title is-5"
-            text "Evidence Library"
+            text "Evidence / Context References"
         }
 
         match evidenceRecords with
@@ -77,7 +77,7 @@ let renderEvidenceTab (model: Model) dispatch =
 
                     h2 {
                         attr.``class`` "title is-5"
-                        text "1sec Stamp"
+                        text "1sec Snip"
                     }
 
                     div {
@@ -199,7 +199,7 @@ let renderEvidenceTab (model: Model) dispatch =
                         attr.``class`` "button is-link is-fullwidth"
                         attr.``type`` "button"
                         on.click (fun _ -> dispatch CreateEvidenceRecord)
-                        text "Create 1sec Stamp"
+                        text "Create 1sec Snip"
                     }
 
                     match model.evidenceStatus with

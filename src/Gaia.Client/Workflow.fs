@@ -443,8 +443,15 @@ let formatSigmaEvidenceTarget atomKind (entry: SigmaContextEntry) =
     + String.concat ", " entry.SupportingPhiIds
     + ")"
 
+let formatRealizationEvidenceTarget objectKind objectId objectName =
+    if String.IsNullOrWhiteSpace(objectName) then
+        objectKind + ": " + objectId
+    else
+        objectKind + ": " + objectId + " - " + objectName
+
 let getEvidenceTargetOptionsForKind targetKind (model: Model) =
     let sigmaContext = getCurrentSigmaContext model
+    let state = model.realizationState
 
     match targetKind with
     | "Phi" ->
@@ -468,6 +475,24 @@ let getEvidenceTargetOptionsForKind targetKind (model: Model) =
     | "Constraint" ->
         sigmaContext.Constraints
         |> List.map (fun entry -> entry.Value, formatSigmaEvidenceTarget "Constraint" entry)
+    | "FR" ->
+        state.Sigma.FRs
+        |> List.map (fun item -> item.Id, formatRealizationEvidenceTarget "FR" item.Id item.Name)
+    | "DP" ->
+        state.Sigma.DPs
+        |> List.map (fun item -> item.Id, formatRealizationEvidenceTarget "DP" item.Id item.Name)
+    | "TF" ->
+        state.Sigma.TFs
+        |> List.map (fun item -> item.Id, formatRealizationEvidenceTarget "TF" item.Id item.Name)
+    | "CTQ" ->
+        state.Sigma.CTQs
+        |> List.map (fun item -> item.Id, formatRealizationEvidenceTarget "CTQ" item.Id item.Name)
+    | "VV" ->
+        state.VVItems
+        |> List.map (fun item -> item.Id, formatRealizationEvidenceTarget "VV" item.Id item.Name)
+    | "Part" ->
+        state.Sigma.Parts
+        |> List.map (fun item -> item.Id, formatRealizationEvidenceTarget "Part" item.Id item.Name)
     | _ ->
         []
 

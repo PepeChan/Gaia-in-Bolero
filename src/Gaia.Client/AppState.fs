@@ -75,8 +75,36 @@ type Model =
 
 let demoScenarios = DemoData.demoScenarios
 let defaultProjectName = "Untitled Project"
-let evidenceCaptureKinds = [ "Manual note"; "Screenshot placeholder"; "File reference"; "External observation" ]
-let evidenceTargetKinds = [ "Phi"; "Function"; "Mode"; "Interface"; "State"; "Host"; "Constraint" ]
+let evidenceCaptureKinds =
+    [
+        "Engineering evidence"
+        "Supporting document"
+        "Analysis note"
+        "Test note"
+        "Simulation reference"
+        "Decision rationale"
+        "Manual note"
+        "Screenshot placeholder"
+        "File reference"
+        "External observation"
+    ]
+
+let evidenceTargetKinds =
+    [
+        "Phi"
+        "Host"
+        "Function"
+        "FR"
+        "DP"
+        "TF"
+        "CTQ"
+        "VV"
+        "Part"
+        "Mode"
+        "Interface"
+        "State"
+        "Constraint"
+    ]
 let defaultEvidenceCaptureKind = "Manual note"
 let defaultEvidenceTargetKind = "Phi"
 let defaultCognitionReviewTargetFilter = "All"
