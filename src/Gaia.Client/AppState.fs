@@ -19,6 +19,10 @@ type Model =
         selectedScenarioId: string option
         scenarioResolution: ResolutionView option
         phiDraftStatus: string option
+        phiDraftInputClass: string
+        phiDraftActor: string
+        phiDraftMission: string
+        phiDraftOperationalContext: string
         phiDraftRawStatement: string
         phiDraftTriggerContext: string
         phiDraftSource: string
@@ -75,6 +79,19 @@ type Model =
 
 let demoScenarios = DemoData.demoScenarios
 let defaultProjectName = "Untitled Project"
+let phiInputClasses =
+    [
+        "Observation"
+        "Need"
+        "Concern"
+        "Question"
+        "Constraint"
+        "Assumption"
+        "Decision"
+        "Evidence"
+        "Other"
+    ]
+let defaultPhiDraftInputClass = ""
 let evidenceCaptureKinds =
     [
         "Engineering evidence"
@@ -225,6 +242,10 @@ let restoreProjectSnapshot (snapshot: ProjectSnapshot) (model: Model) =
             selectedPhiResolution = None
             lastReplayAction = None
             phiDraftStatus = None
+            phiDraftInputClass = defaultPhiDraftInputClass
+            phiDraftActor = ""
+            phiDraftMission = ""
+            phiDraftOperationalContext = ""
             phiBatchParseStatus = None
             cognitionReviewTargetFilter = defaultCognitionReviewTargetFilter
             cognitionReviewDecisionFilter = defaultCognitionReviewDecisionFilter
@@ -296,6 +317,10 @@ let initModel =
         selectedScenarioId = selectedScenarioId
         scenarioResolution = scenarioResolution
         phiDraftStatus = None
+        phiDraftInputClass = defaultPhiDraftInputClass
+        phiDraftActor = ""
+        phiDraftMission = ""
+        phiDraftOperationalContext = ""
         phiDraftRawStatement = ""
         phiDraftTriggerContext = ""
         phiDraftSource = ""
@@ -358,6 +383,10 @@ let clearProjectModel (model: Model) =
             importJson = ""
             persistenceStatus = None
             phiDraftStatus = None
+            phiDraftInputClass = defaultPhiDraftInputClass
+            phiDraftActor = ""
+            phiDraftMission = ""
+            phiDraftOperationalContext = ""
             phiDraftRawStatement = ""
             phiDraftTriggerContext = ""
             phiDraftSource = ""
@@ -461,6 +490,10 @@ type Message =
     | Error of exn
     | ClearError
     | PrefillPhiDraft of PhiDraftPrefill
+    | SetPhiDraftInputClass of string
+    | SetPhiDraftActor of string
+    | SetPhiDraftMission of string
+    | SetPhiDraftOperationalContext of string
     | SetPhiDraftRawStatement of string
     | SetPhiDraftTriggerContext of string
     | SetPhiDraftSource of string

@@ -69,6 +69,10 @@ type PhiIntake =
     {
         PhiId: string
         Date: string
+        InputClass: string option
+        Actor: string option
+        Mission: string option
+        OperationalContext: string option
         Source: string
         Context: string
         Confidence: string

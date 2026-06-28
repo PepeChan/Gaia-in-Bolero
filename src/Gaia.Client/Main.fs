@@ -31,6 +31,13 @@ let router = Router.infer SetPage (fun model -> model.page)
 
 type Main = Template<"wwwroot/main.html">
 
+let private optionalMetadata label value =
+    match value with
+    | Some text when not (String.IsNullOrWhiteSpace(text)) ->
+        Some (label + ": " + text)
+    | _ ->
+        None
+
 let renderPersistenceTab (model: Model) dispatch =
     div {
         attr.``class`` "mb-6 pb-5"
@@ -473,6 +480,90 @@ let homePage model dispatch =
                                 }
 
                             div {
+                                attr.``class`` "columns is-variable is-2 mb-0"
+
+                                div {
+                                    attr.``class`` "column is-5"
+                                    div {
+                                        attr.``class`` "field"
+                                        label {
+                                            attr.``class`` "label"
+                                            text "Input class"
+                                        }
+                                        div {
+                                            attr.``class`` "control"
+                                            div {
+                                                attr.``class`` "select is-fullwidth"
+                                                select {
+                                                    bind.input.string model.phiDraftInputClass (fun v -> dispatch (SetPhiDraftInputClass v))
+                                                    option {
+                                                        attr.value ""
+                                                        text "Unclassified"
+                                                    }
+                                                    forEach phiInputClasses <| fun inputClass ->
+                                                        option {
+                                                            attr.value inputClass
+                                                            text inputClass
+                                                        }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                div {
+                                    attr.``class`` "column is-7"
+                                    div {
+                                        attr.``class`` "field"
+                                        label {
+                                            attr.``class`` "label"
+                                            text "Actor"
+                                        }
+                                        div {
+                                            attr.``class`` "control"
+                                            input {
+                                                attr.``class`` "input"
+                                                attr.placeholder "Stakeholder, user, team..."
+                                                bind.input.string model.phiDraftActor (fun v -> dispatch (SetPhiDraftActor v))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            div {
+                                attr.``class`` "field"
+                                label {
+                                    attr.``class`` "label"
+                                    text "Mission"
+                                }
+                                div {
+                                    attr.``class`` "control"
+                                    input {
+                                        attr.``class`` "input"
+                                        attr.placeholder "What is the larger objective?"
+                                        bind.input.string model.phiDraftMission (fun v -> dispatch (SetPhiDraftMission v))
+                                    }
+                                }
+                            }
+
+                            div {
+                                attr.``class`` "field"
+                                label {
+                                    attr.``class`` "label"
+                                    text "Operational context"
+                                }
+                                div {
+                                    attr.``class`` "control"
+                                    input {
+                                        attr.``class`` "input"
+                                        attr.placeholder "Where or when does this apply?"
+                                        bind.input.string model.phiDraftOperationalContext (fun v -> dispatch (SetPhiDraftOperationalContext v))
+                                    }
+                                }
+                            }
+
+                            div {
                                 attr.``class`` "field"
                                 label {
                                     attr.``class`` "label"
@@ -618,6 +709,17 @@ let homePage model dispatch =
                                     attr.``class`` "content"
                                     forEach phis <| fun phi ->
                                         let inquiry = inquiryFromPhiIntake phi
+                                        let intakeMetadata =
+                                            [
+                                                optionalMetadata "Class" phi.InputClass
+                                                optionalMetadata "Actor" phi.Actor
+                                                optionalMetadata "Mission" phi.Mission
+                                                optionalMetadata "Operational context" phi.OperationalContext
+                                                if String.IsNullOrWhiteSpace(phi.Source) then None else Some ("Source: " + phi.Source)
+                                                if String.IsNullOrWhiteSpace(phi.Confidence) then None else Some ("Confidence: " + phi.Confidence)
+                                            ]
+                                            |> List.choose id
+                                            |> String.concat " | "
 
                                         div {
                                             attr.``class`` "box"
@@ -638,10 +740,11 @@ let homePage model dispatch =
                                             p {
                                                 text phi.RawStatement
                                             }
-                                            p {
-                                                attr.``class`` "is-size-7 has-text-grey"
-                                                text ("Source: " + phi.Source + " | Confidence: " + phi.Confidence)
-                                            }
+                                            if not (String.IsNullOrWhiteSpace(intakeMetadata)) then
+                                                p {
+                                                    attr.``class`` "is-size-7 has-text-grey"
+                                                    text intakeMetadata
+                                                }
                                             let contextEntries =
                                                 model.phiContextEntries
                                                 |> List.filter (fun entry -> entry.PhiId = phi.PhiId)

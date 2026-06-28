@@ -21,6 +21,14 @@ let cleanFormValue (value: string) =
     else
         value.Trim()
 
+let optionalFormValue value =
+    let cleaned = cleanFormValue value
+
+    if String.IsNullOrWhiteSpace(cleaned) then
+        None
+    else
+        Some cleaned
+
 let normalizeProjectFileNamePart (value: string) =
     let source =
         if String.IsNullOrWhiteSpace(value) then
@@ -447,6 +455,10 @@ let update (jsRuntime: IJSRuntime) message model =
         { model with
             activeTopNavigationTab = GaiaProbeTab
             phiDraftStatus = Some draft.StatusMessage
+            phiDraftInputClass = defaultPhiDraftInputClass
+            phiDraftActor = ""
+            phiDraftMission = ""
+            phiDraftOperationalContext = ""
             phiDraftRawStatement = draft.RawStatement
             phiDraftTriggerContext = draft.TriggerContext
             phiDraftSource = draft.Source
@@ -454,6 +466,18 @@ let update (jsRuntime: IJSRuntime) message model =
             phiDraftConfidence = draft.Confidence
             phiContextSnipDraft = draft.ContextSnip },
         Cmd.none
+    | SetPhiDraftInputClass value ->
+        { model with phiDraftInputClass = value }, Cmd.none
+
+    | SetPhiDraftActor value ->
+        { model with phiDraftActor = value }, Cmd.none
+
+    | SetPhiDraftMission value ->
+        { model with phiDraftMission = value }, Cmd.none
+
+    | SetPhiDraftOperationalContext value ->
+        { model with phiDraftOperationalContext = value }, Cmd.none
+
     | SetPhiDraftRawStatement value ->
         { model with phiDraftRawStatement = value }, Cmd.none
 
@@ -642,6 +666,10 @@ let update (jsRuntime: IJSRuntime) message model =
             {
                 PhiId = phiId
                 Date = timestamp.ToString("yyyy-MM-dd")
+                InputClass = optionalFormValue model.phiDraftInputClass
+                Actor = optionalFormValue model.phiDraftActor
+                Mission = optionalFormValue model.phiDraftMission
+                OperationalContext = optionalFormValue model.phiDraftOperationalContext
                 Source = model.phiDraftSource
                 Context = model.phiDraftTriggerContext
                 Confidence = model.phiDraftConfidence
@@ -659,6 +687,10 @@ let update (jsRuntime: IJSRuntime) message model =
 
         { model with
             ingestedPhis = intake :: model.ingestedPhis
+            phiDraftInputClass = defaultPhiDraftInputClass
+            phiDraftActor = ""
+            phiDraftMission = ""
+            phiDraftOperationalContext = ""
             phiDraftRawStatement = ""
             phiDraftTriggerContext = ""
             phiDraftSource = ""
