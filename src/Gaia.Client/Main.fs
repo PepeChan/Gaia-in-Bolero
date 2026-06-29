@@ -933,6 +933,8 @@ let homePage model dispatch =
                             model.lastReplayAction
                             model.candidateDecisions
                             model.sigmaBasisItemDecisions
+                            model.parseAmendmentDraft
+                            model.parseAmendmentStatus
                             dispatch
 
                         renderCognitionReviewPanel model includedSequencedParsedPhis currentSigmaContext dispatch

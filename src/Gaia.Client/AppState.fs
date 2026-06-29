@@ -34,6 +34,8 @@ type Model =
         phiContextEntryDraftKind: string
         phiContextEntryDraftValue: string
         phiBatchParseStatus: string option
+        parseAmendmentDraft: ParseAmendmentDraft option
+        parseAmendmentStatus: string option
         cognitionReviewTargetFilter: string
         cognitionReviewDecisionFilter: string
         cognitionReviewTextFilter: string
@@ -247,6 +249,8 @@ let restoreProjectSnapshot (snapshot: ProjectSnapshot) (model: Model) =
             phiDraftMission = ""
             phiDraftOperationalContext = ""
             phiBatchParseStatus = None
+            parseAmendmentDraft = None
+            parseAmendmentStatus = None
             cognitionReviewTargetFilter = defaultCognitionReviewTargetFilter
             cognitionReviewDecisionFilter = defaultCognitionReviewDecisionFilter
             cognitionReviewTextFilter = ""
@@ -332,6 +336,8 @@ let initModel =
         phiContextEntryDraftKind = defaultPhiContextEntryKind
         phiContextEntryDraftValue = ""
         phiBatchParseStatus = None
+        parseAmendmentDraft = None
+        parseAmendmentStatus = None
         cognitionReviewTargetFilter = defaultCognitionReviewTargetFilter
         cognitionReviewDecisionFilter = defaultCognitionReviewDecisionFilter
         cognitionReviewTextFilter = ""
@@ -398,6 +404,8 @@ let clearProjectModel (model: Model) =
             phiContextEntryDraftKind = defaultPhiContextEntryKind
             phiContextEntryDraftValue = ""
             phiBatchParseStatus = None
+            parseAmendmentDraft = None
+            parseAmendmentStatus = None
             cognitionReviewTargetFilter = defaultCognitionReviewTargetFilter
             cognitionReviewDecisionFilter = defaultCognitionReviewDecisionFilter
             cognitionReviewTextFilter = ""
@@ -511,6 +519,13 @@ type Message =
     | ParseIngestedPhi of string
     | ParseAllIncludedPhi
     | ToggleExcludeParsedPhi of string
+    | StartParseAmendment of string * string * string * string
+    | SetParseAmendmentProposedKind of string
+    | SetParseAmendmentProposedText of string
+    | SetParseAmendmentReason of string
+    | PreviewParseAmendment
+    | ConfirmParseAmendment
+    | CancelParseAmendment
     | SetCognitionReviewTargetFilter of string
     | SetCognitionReviewDecisionFilter of string
     | SetCognitionReviewTextFilter of string

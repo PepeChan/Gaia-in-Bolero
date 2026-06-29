@@ -165,6 +165,28 @@ type PhiDraftPrefill =
         StatusMessage: string
     }
 
+type ParseAmendmentDraft =
+    {
+        SourcePhiId: string
+        OriginalAtomKind: string
+        OriginalAtomText: string
+        SourcePhiStatement: string
+        Provenance: string
+        ProposedAtomKind: string
+        ProposedAtomText: string
+        Reason: string
+        PreviewRequested: bool
+    }
+
+let parsedExposureAtomKinds =
+    [
+        "Function"
+        "Mode"
+        "Interface"
+        "State"
+        "Host"
+    ]
+
 let t6RealizationInquirySource = "T6 Realization Inquiry"
 let derivedInquiryTag = "derived-inquiry"
 let derivedInquiryContextKind = "DerivedInquiry"
