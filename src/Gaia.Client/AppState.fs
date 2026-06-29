@@ -19,6 +19,10 @@ type Model =
         selectedScenarioId: string option
         scenarioResolution: ResolutionView option
         phiDraftStatus: string option
+        phiDraftInputClass: string
+        phiDraftActor: string
+        phiDraftMission: string
+        phiDraftOperationalContext: string
         phiDraftRawStatement: string
         phiDraftTriggerContext: string
         phiDraftSource: string
@@ -30,6 +34,8 @@ type Model =
         phiContextEntryDraftKind: string
         phiContextEntryDraftValue: string
         phiBatchParseStatus: string option
+        parseAmendmentDraft: ParseAmendmentDraft option
+        parseAmendmentStatus: string option
         cognitionReviewTargetFilter: string
         cognitionReviewDecisionFilter: string
         cognitionReviewTextFilter: string
@@ -75,6 +81,19 @@ type Model =
 
 let demoScenarios = DemoData.demoScenarios
 let defaultProjectName = "Untitled Project"
+let phiInputClasses =
+    [
+        "Observation"
+        "Need"
+        "Concern"
+        "Question"
+        "Constraint"
+        "Assumption"
+        "Decision"
+        "Evidence"
+        "Other"
+    ]
+let defaultPhiDraftInputClass = ""
 let evidenceCaptureKinds =
     [
         "Engineering evidence"
@@ -225,7 +244,13 @@ let restoreProjectSnapshot (snapshot: ProjectSnapshot) (model: Model) =
             selectedPhiResolution = None
             lastReplayAction = None
             phiDraftStatus = None
+            phiDraftInputClass = defaultPhiDraftInputClass
+            phiDraftActor = ""
+            phiDraftMission = ""
+            phiDraftOperationalContext = ""
             phiBatchParseStatus = None
+            parseAmendmentDraft = None
+            parseAmendmentStatus = None
             cognitionReviewTargetFilter = defaultCognitionReviewTargetFilter
             cognitionReviewDecisionFilter = defaultCognitionReviewDecisionFilter
             cognitionReviewTextFilter = ""
@@ -296,6 +321,10 @@ let initModel =
         selectedScenarioId = selectedScenarioId
         scenarioResolution = scenarioResolution
         phiDraftStatus = None
+        phiDraftInputClass = defaultPhiDraftInputClass
+        phiDraftActor = ""
+        phiDraftMission = ""
+        phiDraftOperationalContext = ""
         phiDraftRawStatement = ""
         phiDraftTriggerContext = ""
         phiDraftSource = ""
@@ -307,6 +336,8 @@ let initModel =
         phiContextEntryDraftKind = defaultPhiContextEntryKind
         phiContextEntryDraftValue = ""
         phiBatchParseStatus = None
+        parseAmendmentDraft = None
+        parseAmendmentStatus = None
         cognitionReviewTargetFilter = defaultCognitionReviewTargetFilter
         cognitionReviewDecisionFilter = defaultCognitionReviewDecisionFilter
         cognitionReviewTextFilter = ""
@@ -358,6 +389,10 @@ let clearProjectModel (model: Model) =
             importJson = ""
             persistenceStatus = None
             phiDraftStatus = None
+            phiDraftInputClass = defaultPhiDraftInputClass
+            phiDraftActor = ""
+            phiDraftMission = ""
+            phiDraftOperationalContext = ""
             phiDraftRawStatement = ""
             phiDraftTriggerContext = ""
             phiDraftSource = ""
@@ -369,6 +404,8 @@ let clearProjectModel (model: Model) =
             phiContextEntryDraftKind = defaultPhiContextEntryKind
             phiContextEntryDraftValue = ""
             phiBatchParseStatus = None
+            parseAmendmentDraft = None
+            parseAmendmentStatus = None
             cognitionReviewTargetFilter = defaultCognitionReviewTargetFilter
             cognitionReviewDecisionFilter = defaultCognitionReviewDecisionFilter
             cognitionReviewTextFilter = ""
@@ -461,6 +498,10 @@ type Message =
     | Error of exn
     | ClearError
     | PrefillPhiDraft of PhiDraftPrefill
+    | SetPhiDraftInputClass of string
+    | SetPhiDraftActor of string
+    | SetPhiDraftMission of string
+    | SetPhiDraftOperationalContext of string
     | SetPhiDraftRawStatement of string
     | SetPhiDraftTriggerContext of string
     | SetPhiDraftSource of string
@@ -478,6 +519,13 @@ type Message =
     | ParseIngestedPhi of string
     | ParseAllIncludedPhi
     | ToggleExcludeParsedPhi of string
+    | StartParseAmendment of string * string * string * string
+    | SetParseAmendmentProposedKind of string
+    | SetParseAmendmentProposedText of string
+    | SetParseAmendmentReason of string
+    | PreviewParseAmendment
+    | ConfirmParseAmendment
+    | CancelParseAmendment
     | SetCognitionReviewTargetFilter of string
     | SetCognitionReviewDecisionFilter of string
     | SetCognitionReviewTextFilter of string

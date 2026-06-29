@@ -65,10 +65,21 @@ let parseDerivationEntry context value =
     | "Gamma Only" -> GammaOnly
     | _ -> failProjectJson (context + " has unknown derivation entry '" + value + "'.")
 
+let writeOptionalString (json: JsonObject) (propertyName: string) (value: string option) =
+    match value with
+    | Some text when not (String.IsNullOrWhiteSpace(text)) ->
+        json[propertyName] <- JsonValue.Create(text)
+    | _ ->
+        ()
+
 let phiIntakeToJson (phi: PhiIntake) =
     let json = JsonObject()
     json["PhiId"] <- JsonValue.Create(phi.PhiId)
     json["Date"] <- JsonValue.Create(phi.Date)
+    writeOptionalString json "InputClass" phi.InputClass
+    writeOptionalString json "Actor" phi.Actor
+    writeOptionalString json "Mission" phi.Mission
+    writeOptionalString json "OperationalContext" phi.OperationalContext
     json["Source"] <- JsonValue.Create(phi.Source)
     json["Context"] <- JsonValue.Create(phi.Context)
     json["Confidence"] <- JsonValue.Create(phi.Confidence)
@@ -317,6 +328,24 @@ let readString context propertyName (json: JsonObject) =
         with _ ->
             failProjectJson (context + "." + propertyName + " must be a string.")
 
+let readOptionalString context propertyName (json: JsonObject) =
+    match tryReadProperty propertyName json with
+    | None ->
+        None
+    | Some node ->
+        if isNull node then
+            None
+        else
+            try
+                let value = node.GetValue<string>()
+
+                if String.IsNullOrWhiteSpace(value) then
+                    None
+                else
+                    Some value
+            with _ ->
+                failProjectJson (context + "." + propertyName + " must be a string or null.")
+
 let readInt context propertyName (json: JsonObject) =
     let node = readProperty context propertyName json
 
@@ -399,6 +428,10 @@ let readPhiIntake context (json: JsonObject) =
     {
         PhiId = readString context "PhiId" json
         Date = readString context "Date" json
+        InputClass = readOptionalString context "InputClass" json
+        Actor = readOptionalString context "Actor" json
+        Mission = readOptionalString context "Mission" json
+        OperationalContext = readOptionalString context "OperationalContext" json
         Source = readString context "Source" json
         Context = readString context "Context" json
         Confidence = readString context "Confidence" json

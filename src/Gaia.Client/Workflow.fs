@@ -270,10 +270,10 @@ let private isDerivedInquiryParse (parse: PhiParse) =
     not (isNull parse.ExposureNotes)
     && parse.ExposureNotes.IndexOf("DerivedInquiry=True", StringComparison.OrdinalIgnoreCase) >= 0
 
-let private getExposureProvenance atomKind (parse: PhiParse) =
+let getExposureProvenance atomKind (parse: PhiParse) =
     let marker = atomKind + "="
     let notes = if isNull parse.ExposureNotes then "" else parse.ExposureNotes
-    let index = notes.IndexOf(marker, StringComparison.OrdinalIgnoreCase)
+    let index = notes.LastIndexOf(marker, StringComparison.OrdinalIgnoreCase)
 
     if index < 0 then
         "Text"
@@ -295,6 +295,33 @@ let private getExposureProvenance atomKind (parse: PhiParse) =
             "Text"
         else
             trimmed
+
+let getExposureAtomValue atomKind (parse: PhiParse) =
+    match atomKind with
+    | "Function" -> parse.Exposure.Function
+    | "Mode" -> parse.Exposure.Mode
+    | "Interface" -> parse.Exposure.Interface
+    | "State" -> parse.Exposure.State
+    | "Host" -> parse.Exposure.HostCandidate
+    | _ -> ""
+
+let updateExposureAtomValue atomKind value (parse: PhiParse) =
+    let exposure =
+        match atomKind with
+        | "Function" ->
+            { parse.Exposure with Function = value }
+        | "Mode" ->
+            { parse.Exposure with Mode = value }
+        | "Interface" ->
+            { parse.Exposure with Interface = value }
+        | "State" ->
+            { parse.Exposure with State = value }
+        | "Host" ->
+            { parse.Exposure with HostCandidate = value }
+        | _ ->
+            parse.Exposure
+
+    { parse with Exposure = exposure }
 
 let private combineProvenance values =
     let distinct =
