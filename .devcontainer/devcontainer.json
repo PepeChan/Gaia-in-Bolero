@@ -1,0 +1,21 @@
+{
+  "name": "Gaia Bolero Dev",
+  "image": "mcr.microsoft.com/dotnet/sdk:8.0",
+
+  
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ionide.ionide-fsharp",
+        "ms-dotnettools.csharp"
+      ]
+    }
+  },
+
+  "features": {
+    "ghcr.io/devcontainers/features/node:2": {
+      "version": "20"
+    }
+  }
+}
