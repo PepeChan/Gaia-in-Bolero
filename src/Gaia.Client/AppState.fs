@@ -36,6 +36,7 @@ type Model =
         phiBatchParseStatus: string option
         parseAmendmentDraft: ParseAmendmentDraft option
         parseAmendmentStatus: string option
+        selectedParsedAtomReviewKind: string option
         cognitionReviewTargetFilter: string
         cognitionReviewDecisionFilter: string
         cognitionReviewTextFilter: string
@@ -251,6 +252,7 @@ let restoreProjectSnapshot (snapshot: ProjectSnapshot) (model: Model) =
             phiBatchParseStatus = None
             parseAmendmentDraft = None
             parseAmendmentStatus = None
+            selectedParsedAtomReviewKind = None
             cognitionReviewTargetFilter = defaultCognitionReviewTargetFilter
             cognitionReviewDecisionFilter = defaultCognitionReviewDecisionFilter
             cognitionReviewTextFilter = ""
@@ -338,6 +340,7 @@ let initModel =
         phiBatchParseStatus = None
         parseAmendmentDraft = None
         parseAmendmentStatus = None
+        selectedParsedAtomReviewKind = None
         cognitionReviewTargetFilter = defaultCognitionReviewTargetFilter
         cognitionReviewDecisionFilter = defaultCognitionReviewDecisionFilter
         cognitionReviewTextFilter = ""
@@ -406,6 +409,7 @@ let clearProjectModel (model: Model) =
             phiBatchParseStatus = None
             parseAmendmentDraft = None
             parseAmendmentStatus = None
+            selectedParsedAtomReviewKind = None
             cognitionReviewTargetFilter = defaultCognitionReviewTargetFilter
             cognitionReviewDecisionFilter = defaultCognitionReviewDecisionFilter
             cognitionReviewTextFilter = ""
@@ -526,6 +530,8 @@ type Message =
     | PreviewParseAmendment
     | ConfirmParseAmendment
     | CancelParseAmendment
+    | SelectParsedAtomReviewKind of string
+    | ClearParsedAtomReviewKind
     | SetCognitionReviewTargetFilter of string
     | SetCognitionReviewDecisionFilter of string
     | SetCognitionReviewTextFilter of string

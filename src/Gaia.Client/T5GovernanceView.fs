@@ -175,12 +175,10 @@ let buildParsedAtomReviewRows
     sequencedParsedPhis
     |> List.collect (fun (_, parse: PhiParse) ->
         parsedExposureAtomKinds
-        |> List.choose (fun atomKind ->
-            let atomText = getExposureAtomValue atomKind parse
-
-            if String.IsNullOrWhiteSpace(atomText) then
-                None
-            else
+        |> List.collect (fun atomKind ->
+            getExposureAtomValue atomKind parse
+            |> splitExposureAtomValues
+            |> List.map (fun atomText ->
                 let candidateStatus =
                     tryFindParsedAtomCandidateStatus
                         candidateDeltas
@@ -191,19 +189,18 @@ let buildParsedAtomReviewRows
                         atomText
                         parse.PhiId
 
-                Some
-                    {
-                        AtomKind = atomKind
-                        AtomText = atomText
-                        SourcePhiId = parse.PhiId
-                        SourcePhiStatement = parse.Statement
-                        Provenance = getExposureProvenance atomKind parse
-                        CandidateId = candidateStatus |> Option.map fst
-                        CandidateGovernanceStatus =
-                            candidateStatus
-                            |> Option.map snd
-                            |> Option.defaultValue "No current candidate group"
-                    }))
+                {
+                    AtomKind = atomKind
+                    AtomText = atomText
+                    SourcePhiId = parse.PhiId
+                    SourcePhiStatement = parse.Statement
+                    Provenance = getExposureProvenance atomKind parse
+                    CandidateId = candidateStatus |> Option.map fst
+                    CandidateGovernanceStatus =
+                        candidateStatus
+                        |> Option.map snd
+                        |> Option.defaultValue "No current candidate group"
+                })))
 
 let renderParseAmendmentPreview (draft: ParseAmendmentDraft) =
     div {
@@ -362,11 +359,234 @@ let renderParseAmendmentPanel (draft: ParseAmendmentDraft option) status dispatc
             }
     }
 
+let parsedAtomReviewKindLabels =
+    [
+        "Function", "Functions"
+        "Mode", "Modes"
+        "Interface", "Interfaces"
+        "State", "States"
+        "Host", "Hosts"
+    ]
+
+let getParsedAtomReviewKindLabel atomKind =
+    parsedAtomReviewKindLabels
+    |> List.tryFind (fun (kind, _) -> kind = atomKind)
+    |> Option.map snd
+    |> Option.defaultValue atomKind
+
+let getSigmaEntriesForParsedAtomKind atomKind sigmaContext =
+    match atomKind with
+    | "Function" -> sigmaContext.Functions
+    | "Mode" -> sigmaContext.Modes
+    | "Interface" -> sigmaContext.Interfaces
+    | "State" -> sigmaContext.States
+    | "Host" -> sigmaContext.Hosts
+    | _ -> []
+
+let parsedAtomReviewButtonClass selectedKind atomKind =
+    if selectedKind = Some atomKind then
+        "tag is-link is-medium"
+    else
+        "tag is-light is-medium"
+
+let isParseAmendmentDraftForRow (row: ParsedAtomReviewRow) (draft: ParseAmendmentDraft) =
+    draft.SourcePhiId = row.SourcePhiId
+    && draft.OriginalAtomKind = row.AtomKind
+    && draft.OriginalAtomText = row.AtomText
+
+let renderParseAmendmentInlineEditor (amendment: ParseAmendmentDraft) dispatch =
+    div {
+        attr.``class`` "sigma-basis-detail-block"
+
+        div {
+            attr.``class`` "columns is-variable is-3 mb-2"
+
+            div {
+                attr.``class`` "column is-4"
+                p {
+                    attr.``class`` "heading mb-1"
+                    text "Original kind"
+                }
+                p { text amendment.OriginalAtomKind }
+            }
+
+            div {
+                attr.``class`` "column is-8"
+                p {
+                    attr.``class`` "heading mb-1"
+                    text "Original atom"
+                }
+                p {
+                    attr.``class`` "sigma-basis-atom mb-0"
+                    text amendment.OriginalAtomText
+                }
+            }
+        }
+
+        p {
+            attr.``class`` "is-size-7 has-text-grey mb-1"
+            strong { text "Source Phi: " }
+            code { text amendment.SourcePhiId }
+        }
+
+        p {
+            attr.``class`` "is-size-7 has-text-grey mb-3"
+            text "The original Phi text remains unchanged; only the parsed exposure atom is amended."
+        }
+
+        div {
+            attr.``class`` "columns is-variable is-3 mb-0"
+
+            div {
+                attr.``class`` "column is-4"
+                label {
+                    attr.``class`` "label is-size-7"
+                    text "Proposed kind"
+                }
+                div {
+                    attr.``class`` "select is-fullwidth is-small"
+                    select {
+                        bind.input.string amendment.ProposedAtomKind (fun value -> dispatch (SetParseAmendmentProposedKind value))
+                        forEach parsedExposureAtomKinds <| fun atomKind ->
+                            option {
+                                attr.value atomKind
+                                text atomKind
+                            }
+                    }
+                }
+            }
+
+            div {
+                attr.``class`` "column is-8"
+                label {
+                    attr.``class`` "label is-size-7"
+                    text "Proposed atom text"
+                }
+                input {
+                    attr.``class`` "input is-small"
+                    bind.input.string amendment.ProposedAtomText (fun value -> dispatch (SetParseAmendmentProposedText value))
+                }
+            }
+        }
+
+        div {
+            attr.``class`` "field"
+            label {
+                attr.``class`` "label is-size-7"
+                text "Reason"
+            }
+            textarea {
+                attr.``class`` "textarea is-small"
+                attr.style "min-height: 4rem;"
+                bind.input.string amendment.Reason (fun value -> dispatch (SetParseAmendmentReason value))
+            }
+        }
+
+        if amendment.PreviewRequested then
+            renderParseAmendmentPreview amendment
+
+        div {
+            attr.``class`` "buttons are-small mb-0"
+            button {
+                attr.``class`` "button is-info is-light"
+                attr.``type`` "button"
+                on.click (fun _ -> dispatch PreviewParseAmendment)
+                text "Preview impact"
+            }
+
+            if amendment.PreviewRequested then
+                button {
+                    attr.``class`` "button is-warning"
+                    attr.``type`` "button"
+                    on.click (fun _ -> dispatch ConfirmParseAmendment)
+                    text "Confirm amendment"
+                }
+
+            button {
+                attr.``class`` "button is-light"
+                attr.``type`` "button"
+                on.click (fun _ -> dispatch CancelParseAmendment)
+                text "Cancel"
+            }
+        }
+    }
+
+let renderParsedAtomReviewRow (row: ParsedAtomReviewRow) amendmentDraft dispatch =
+    div {
+        attr.``class`` "sigma-basis-item"
+
+        div {
+            attr.``class`` "columns is-variable is-3 mb-2"
+
+            div {
+                attr.``class`` "column is-7"
+
+                div {
+                    attr.``class`` "tags mb-2"
+                    span {
+                        attr.``class`` "tag is-light"
+                        text ("Kind: " + row.AtomKind)
+                    }
+                    span {
+                        attr.``class`` "tag is-info is-light"
+                        text ("Source: " + row.SourcePhiId)
+                    }
+                    span {
+                        attr.``class`` "tag is-light"
+                        text ("Provenance: " + row.Provenance)
+                    }
+                }
+
+                p {
+                    attr.``class`` "sigma-basis-atom mb-0"
+                    strong { text "Atom value: " }
+                    text row.AtomText
+                }
+            }
+
+            div {
+                attr.``class`` "column is-3"
+                p {
+                    attr.``class`` "heading mb-1"
+                    text "Candidate / governance"
+                }
+                p {
+                    attr.``class`` "is-size-7 mb-1"
+                    text row.CandidateGovernanceStatus
+                }
+
+                match row.CandidateId with
+                | None -> empty()
+                | Some candidateId ->
+                    code { text candidateId }
+            }
+
+            div {
+                attr.``class`` "column is-2"
+                button {
+                    attr.``class`` "button is-small is-warning is-light is-fullwidth"
+                    attr.``type`` "button"
+                    on.click (fun _ ->
+                        dispatch
+                            (StartParseAmendment
+                                (row.SourcePhiId, row.AtomKind, row.AtomText, row.Provenance)))
+                    text "Amend parsing"
+                }
+            }
+        }
+
+        match amendmentDraft with
+        | Some amendment when isParseAmendmentDraftForRow row amendment ->
+            renderParseAmendmentInlineEditor amendment dispatch
+        | _ -> empty()
+    }
+
 let renderParsedAtomReviewTable
     sequencedParsedPhis
     sigmaContext
     candidateDecisions
     sigmaBasisItemDecisions
+    selectedParsedAtomReviewKind
     parseAmendmentDraft
     parseAmendmentStatus
     dispatch =
@@ -380,69 +600,89 @@ let renderParsedAtomReviewTable
             text "Review Parsed Atoms"
         }
 
-        match atomRows with
-        | [] ->
-            p {
-                attr.``class`` "has-text-grey"
-                text "No parsed atoms available."
-            }
-        | rows ->
-            div {
-                attr.``class`` "table-container"
-                table {
-                    attr.``class`` "table is-fullwidth is-striped is-narrow"
+        div {
+            attr.``class`` "tags are-medium mb-3"
+            forEach parsedAtomReviewKindLabels <| fun (atomKind, label) ->
+                let count = getSigmaEntriesForParsedAtomKind atomKind sigmaContext |> List.length
 
-                    thead {
-                        tr {
-                            th { text "Atom text" }
-                            th { text "Kind" }
-                            th { text "Source Phi" }
-                            th { text "Provenance" }
-                            th { text "Candidate / governance" }
-                            th { text "Action" }
+                button {
+                    attr.``class`` (parsedAtomReviewButtonClass selectedParsedAtomReviewKind atomKind)
+                    attr.``type`` "button"
+                    on.click (fun _ -> dispatch (SelectParsedAtomReviewKind atomKind))
+                    text (label + ": " + string count)
+                }
+        }
+
+        match selectedParsedAtomReviewKind with
+        | None ->
+            p {
+                attr.``class`` "is-size-7 has-text-grey"
+                text "Select a kind count above to review just those parsed atoms."
+            }
+        | Some atomKind ->
+            let selectedRows =
+                atomRows
+                |> List.filter (fun row -> row.AtomKind = atomKind)
+
+            div {
+                attr.``class`` "cognition-review-section"
+
+                div {
+                    attr.``class`` "level is-mobile mb-3"
+
+                    div {
+                        attr.``class`` "level-left"
+                        div {
+                            h4 {
+                                attr.``class`` "title is-6 mb-1"
+                                text (getParsedAtomReviewKindLabel atomKind + " Review")
+                            }
+                            p {
+                                attr.``class`` "has-text-grey mb-0"
+                                text "Selected-kind parsed atom review"
+                            }
                         }
                     }
 
-                    tbody {
-                        forEach rows <| fun row ->
-                            tr {
-                                td { text row.AtomText }
-                                td {
-                                    span {
-                                        attr.``class`` "tag is-light"
-                                        text row.AtomKind
-                                    }
-                                }
-                                td { code { text row.SourcePhiId } }
-                                td { text row.Provenance }
-                                td {
-                                    match row.CandidateId with
-                                    | None ->
-                                        text row.CandidateGovernanceStatus
-                                    | Some candidateId ->
-                                        p {
-                                            attr.``class`` "mb-1"
-                                            text row.CandidateGovernanceStatus
-                                        }
-                                        code { text candidateId }
-                                }
-                                td {
-                                    button {
-                                        attr.``class`` "button is-small is-warning is-light"
-                                        attr.``type`` "button"
-                                        on.click (fun _ ->
-                                            dispatch
-                                                (StartParseAmendment
-                                                    (row.SourcePhiId, row.AtomKind, row.AtomText, row.Provenance)))
-                                        text "Amend parsing"
-                                    }
-                                }
+                    div {
+                        attr.``class`` "level-right"
+                        div {
+                            attr.``class`` "buttons are-small mb-0"
+                            span {
+                                attr.``class`` "tag is-light"
+                                text ("Atom rows: " + string (List.length selectedRows))
                             }
+                            button {
+                                attr.``class`` "button is-small is-light"
+                                attr.``type`` "button"
+                                on.click (fun _ -> dispatch ClearParsedAtomReviewKind)
+                                text "Close"
+                            }
+                        }
                     }
                 }
-            }
 
-        renderParseAmendmentPanel parseAmendmentDraft parseAmendmentStatus dispatch
+                match parseAmendmentStatus with
+                | None -> empty()
+                | Some message ->
+                    div {
+                        attr.``class`` "notification is-info is-light py-2"
+                        text message
+                    }
+
+                match selectedRows with
+                | [] ->
+                    p {
+                        attr.``class`` "has-text-grey"
+                        text ("No " + (getParsedAtomReviewKindLabel atomKind).ToLowerInvariant() + " parsed atoms are currently exposed.")
+                    }
+                | rows ->
+                    div {
+                        attr.``class`` "sigma-basis-list"
+                        forEach rows <| fun row ->
+                            renderParsedAtomReviewRow row parseAmendmentDraft dispatch
+                    }
+            }
     }
 
 let cognitionReviewTargetFilters = [ "All"; "Host"; "Interface"; "State"; "Mode"; "Constraint"; "Reinforced Atom" ]
@@ -1081,7 +1321,7 @@ let renderCognitionReviewPanel (model: Model) sequencedParsedPhis sigmaContext d
             renderTopReinforcedAtomsReview sigmaContext
         }
 
-        hr {}
+        hr { attr.``class`` "my-4" }
 
         h3 {
             attr.``class`` "title is-6"
@@ -1207,6 +1447,7 @@ let renderOperationalSummaryTablesPanel
     lastReplayAction
     (candidateDecisions: CandidateDecision list)
     sigmaBasisItemDecisions
+    selectedParsedAtomReviewKind
     parseAmendmentDraft
     parseAmendmentStatus
     dispatch =
@@ -1225,6 +1466,7 @@ let renderOperationalSummaryTablesPanel
             sigmaContext
             candidateDecisions
             sigmaBasisItemDecisions
+            selectedParsedAtomReviewKind
             parseAmendmentDraft
             parseAmendmentStatus
             dispatch

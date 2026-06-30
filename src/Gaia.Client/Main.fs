@@ -845,7 +845,7 @@ let homePage model dispatch =
                                 }
 
                             if not (List.isEmpty model.ingestedPhis) then
-                                hr {}
+                                hr { attr.``class`` "my-4" }
 
                                 h3 {
                                     attr.``class`` "title is-6"
@@ -933,6 +933,7 @@ let homePage model dispatch =
                             model.lastReplayAction
                             model.candidateDecisions
                             model.sigmaBasisItemDecisions
+                            model.selectedParsedAtomReviewKind
                             model.parseAmendmentDraft
                             model.parseAmendmentStatus
                             dispatch

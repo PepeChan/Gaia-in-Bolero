@@ -40,6 +40,34 @@ let splitTags (value: string) =
         |> Array.filter (fun tag -> tag <> "")
         |> Array.toList
 
+let splitExposureAtomValues (value: string) =
+    if String.IsNullOrWhiteSpace(value) then
+        []
+    else
+        value.Split([| ';'; '\n'; '\r' |], StringSplitOptions.RemoveEmptyEntries)
+        |> Array.map (fun atom -> atom.Trim())
+        |> Array.filter (fun atom -> atom <> "")
+        |> Array.fold
+            (fun atoms atom ->
+                if atoms |> List.exists (fun existing -> String.Equals(existing, atom, StringComparison.OrdinalIgnoreCase)) then
+                    atoms
+                else
+                    atoms @ [ atom ])
+            []
+
+let joinExposureAtomValues (values: string list) =
+    values
+    |> List.map (fun value -> if isNull value then "" else value.Trim())
+    |> List.filter (fun value -> value <> "")
+    |> List.fold
+        (fun atoms atom ->
+            if atoms |> List.exists (fun existing -> String.Equals(existing, atom, StringComparison.OrdinalIgnoreCase)) then
+                atoms
+            else
+                atoms @ [ atom ])
+        []
+    |> String.concat "; "
+
 let private normalizeMarkerText (value: string) =
     if String.IsNullOrWhiteSpace(value) then
         ""
@@ -348,7 +376,7 @@ let private isDerivedSigmaEntry (entry: SigmaContextEntry) =
     not (String.IsNullOrWhiteSpace(entry.Provenance))
     && entry.Provenance.IndexOf("DerivedInquiry", StringComparison.OrdinalIgnoreCase) >= 0
 
-let private chooseIndependentSupportEntries entries =
+let private chooseIndependentSupportEntries (entries: SigmaContextEntry list) =
     let nonDerivedEntries =
         entries
         |> List.filter (fun entry -> not (isDerivedSigmaEntry entry))
@@ -358,15 +386,29 @@ let private chooseIndependentSupportEntries entries =
     else
         nonDerivedEntries
 
-let buildSigmaContextEntries atomKind (getValue: PhiParse -> string) (sequencedParsedPhis: (int * PhiParse) list) =
-    sequencedParsedPhis
-    |> List.choose (fun (parseSequenceNumber, parse) ->
-        let value = getValue parse
+let private groupSigmaContextEntries (entries: SigmaContextEntry list) =
+    entries
+    |> List.groupBy (fun entry -> entry.Value)
+    |> List.map (fun (_, groupedEntries) ->
+        let supportEntries = chooseIndependentSupportEntries groupedEntries
+        let firstEntry = supportEntries |> List.head
 
-        if value = "" then
-            None
-        else
-            Some
+        let supportingPhiIds =
+            supportEntries
+            |> List.collect (fun entry -> entry.SupportingPhiIds)
+            |> List.distinct
+
+        { firstEntry with
+            SupportCount = List.length supportingPhiIds
+            SupportingPhiIds = supportingPhiIds
+            Provenance = supportEntries |> List.map (fun entry -> entry.Provenance) |> combineProvenance })
+
+let buildSigmaContextEntries atomKind (getValue: PhiParse -> string) (sequencedParsedPhis: (int * PhiParse) list) : SigmaContextEntry list =
+    sequencedParsedPhis
+    |> List.collect (fun (parseSequenceNumber, parse) ->
+        getValue parse
+        |> splitExposureAtomValues
+        |> List.map (fun value ->
                 {
                     Value = value
                     SourcePhiId = parse.PhiId
@@ -375,21 +417,46 @@ let buildSigmaContextEntries atomKind (getValue: PhiParse -> string) (sequencedP
                     SupportCount = 1
                     SupportingPhiIds = [ parse.PhiId ]
                     Provenance = addDerivedInquiryProvenance (getExposureProvenance atomKind parse) (isDerivedInquiryParse parse)
-                })
-    |> List.groupBy (fun entry -> entry.Value)
-    |> List.map (fun (_, entries) ->
-        let supportEntries = chooseIndependentSupportEntries entries
-        let firstEntry = supportEntries |> List.head
+                }))
+    |> groupSigmaContextEntries
 
-        let supportingPhiIds =
-            supportEntries
-            |> List.map (fun entry -> entry.SourcePhiId)
-            |> List.distinct
+let private generatedConstraintAtomMarker = "GeneratedConstraintAtoms="
 
-        { firstEntry with
-            SupportCount = List.length supportingPhiIds
-            SupportingPhiIds = supportingPhiIds
-            Provenance = supportEntries |> List.map (fun entry -> entry.Provenance) |> combineProvenance })
+let private getGeneratedConstraintAtoms (parse: PhiParse) =
+    let notes = if isNull parse.ExposureNotes then "" else parse.ExposureNotes
+    let markerIndex = notes.LastIndexOf(generatedConstraintAtomMarker, StringComparison.OrdinalIgnoreCase)
+
+    if markerIndex < 0 then
+        []
+    else
+        let remaining = notes.Substring(markerIndex + generatedConstraintAtomMarker.Length)
+        let stopIndex = remaining.IndexOf(".")
+
+        let atomText =
+            if stopIndex < 0 then
+                remaining
+            else
+                remaining.Substring(0, stopIndex)
+
+        atomText.Split([| "||" |], StringSplitOptions.RemoveEmptyEntries)
+        |> Array.toList
+        |> joinExposureAtomValues
+        |> splitExposureAtomValues
+
+let private buildGeneratedConstraintRawEntries (sequencedParsedPhis: (int * PhiParse) list) : SigmaContextEntry list =
+    sequencedParsedPhis
+    |> List.collect (fun (parseSequenceNumber, parse) ->
+        getGeneratedConstraintAtoms parse
+        |> List.map (fun value ->
+            {
+                Value = value
+                SourcePhiId = parse.PhiId
+                SourcePhiStatement = parse.Statement
+                ParseSequenceNumber = parseSequenceNumber
+                SupportCount = 1
+                SupportingPhiIds = [ parse.PhiId ]
+                Provenance = addDerivedInquiryProvenance "Generated" (isDerivedInquiryParse parse)
+            }))
 
 let buildSigmaContext (sequencedParsedPhis: (int * PhiParse) list) =
     {
@@ -398,10 +465,10 @@ let buildSigmaContext (sequencedParsedPhis: (int * PhiParse) list) =
         Interfaces = buildSigmaContextEntries "Interface" (fun parse -> parse.Exposure.Interface) sequencedParsedPhis
         States = buildSigmaContextEntries "State" (fun parse -> parse.Exposure.State) sequencedParsedPhis
         Hosts = buildSigmaContextEntries "Host" (fun parse -> parse.Exposure.HostCandidate) sequencedParsedPhis
-        Constraints = []
+        Constraints = buildGeneratedConstraintRawEntries sequencedParsedPhis |> groupSigmaContextEntries
     }
 
-let buildConstraintContextEntries (contextEntries: PhiContextEntry list) (sequencedParsedPhis: (int * PhiParse) list) =
+let private buildConstraintContextRawEntries (contextEntries: PhiContextEntry list) (sequencedParsedPhis: (int * PhiParse) list) : SigmaContextEntry list =
     let includedPhiIds =
         sequencedParsedPhis
         |> List.map (fun (_, parse) -> parse.PhiId)
@@ -432,16 +499,13 @@ let buildConstraintContextEntries (contextEntries: PhiContextEntry list) (sequen
                     SupportingPhiIds = [ entry.PhiId ]
                     Provenance = provenance
                 }))
-    |> List.groupBy (fun entry -> entry.Value)
-    |> List.map (fun (_, entries) ->
-        let supportEntries = chooseIndependentSupportEntries entries
-        let firstEntry = supportEntries |> List.head
-        let supportingPhiIds = supportEntries |> List.map (fun entry -> entry.SourcePhiId) |> List.distinct
 
-        { firstEntry with
-            SupportCount = List.length supportingPhiIds
-            SupportingPhiIds = supportingPhiIds
-            Provenance = supportEntries |> List.map (fun entry -> entry.Provenance) |> combineProvenance })
+let buildConstraintContextEntries (contextEntries: PhiContextEntry list) (sequencedParsedPhis: (int * PhiParse) list) : SigmaContextEntry list =
+    [
+        yield! buildGeneratedConstraintRawEntries sequencedParsedPhis
+        yield! buildConstraintContextRawEntries contextEntries sequencedParsedPhis
+    ]
+    |> groupSigmaContextEntries
 
 let buildSigmaContextWithContextEntries (contextEntries: PhiContextEntry list) (sequencedParsedPhis: (int * PhiParse) list) =
     let sigmaContext = buildSigmaContext sequencedParsedPhis
@@ -546,19 +610,13 @@ let emptyDeltaSigmaAtomGroups =
     }
 
 let getPhiAtomGroups (parse: PhiParse) =
-    let asAtom value =
-        if value = "" then
-            []
-        else
-            [ value ]
-
     {
-        FunctionAtoms = asAtom parse.Exposure.Function
-        ModeAtoms = asAtom parse.Exposure.Mode
-        InterfaceAtoms = asAtom parse.Exposure.Interface
-        StateAtoms = asAtom parse.Exposure.State
-        HostAtoms = asAtom parse.Exposure.HostCandidate
-        ConstraintAtoms = []
+        FunctionAtoms = splitExposureAtomValues parse.Exposure.Function
+        ModeAtoms = splitExposureAtomValues parse.Exposure.Mode
+        InterfaceAtoms = splitExposureAtomValues parse.Exposure.Interface
+        StateAtoms = splitExposureAtomValues parse.Exposure.State
+        HostAtoms = splitExposureAtomValues parse.Exposure.HostCandidate
+        ConstraintAtoms = getGeneratedConstraintAtoms parse
     }
 
 let getAddedAtomValues (beforeEntries: SigmaContextEntry list) (afterEntries: SigmaContextEntry list) =
@@ -603,7 +661,7 @@ let buildAlreadyKnownAtomGroups sourcePhiId (beforeSigma: SigmaContext) (parse: 
         InterfaceAtoms = getAlreadyKnownAtomValues sourcePhiId beforeSigma.Interfaces parseAtoms.InterfaceAtoms
         StateAtoms = getAlreadyKnownAtomValues sourcePhiId beforeSigma.States parseAtoms.StateAtoms
         HostAtoms = getAlreadyKnownAtomValues sourcePhiId beforeSigma.Hosts parseAtoms.HostAtoms
-        ConstraintAtoms = []
+        ConstraintAtoms = getAlreadyKnownAtomValues sourcePhiId beforeSigma.Constraints parseAtoms.ConstraintAtoms
     }
 
 let hasDeltaSigmaAtomChanges atomGroups =
@@ -791,7 +849,7 @@ let formulateCandidateDeltas (sigmaContext: SigmaContext) =
                         AddConstraint
                         "Constraint"
                         "Add exposed Constraint atoms as candidate Σ structure."
-                        "Constraint-relevant context entries were attached to parsed Phi."
+                        "Constraint-relevant atoms were generated by parsing or attached as Phi Context."
                         (formatSigmaBasisGroup "Constraint" sigmaContext.Constraints)
                         (summarizeEntryProvenance sigmaContext.Constraints)
 

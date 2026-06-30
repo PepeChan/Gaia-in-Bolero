@@ -45,6 +45,31 @@ let formatAffectedParseAmendmentGroups oldKind newKind =
     |> List.distinct
     |> String.concat ", "
 
+let atomTextEquals left right =
+    String.Equals(cleanFormValue left, cleanFormValue right, StringComparison.OrdinalIgnoreCase)
+
+let atomListContains atom atoms =
+    atoms
+    |> List.exists (fun existing -> atomTextEquals existing atom)
+
+let replaceAtomInList originalAtom proposedAtom atoms =
+    atoms
+    |> List.map (fun atom ->
+        if atomTextEquals atom originalAtom then
+            proposedAtom
+        else
+            atom)
+
+let removeAtomFromList atom atoms =
+    atoms
+    |> List.filter (fun existing -> not (atomTextEquals existing atom))
+
+let appendAtomToList atom atoms =
+    if atomListContains atom atoms then
+        atoms
+    else
+        atoms @ [ atom ]
+
 let tryValidateParseAmendment (draft: ParseAmendmentDraft) (model: Model) =
     let proposedKind = cleanFormValue draft.ProposedAtomKind
     let proposedText = cleanFormValue draft.ProposedAtomText
@@ -59,20 +84,22 @@ let tryValidateParseAmendment (draft: ParseAmendmentDraft) (model: Model) =
         | None ->
             Result.Error "The source Phi parse is no longer available."
         | Some parse ->
-            let currentOriginalText = getExposureAtomValue draft.OriginalAtomKind parse
+            let currentOriginalAtoms =
+                getExposureAtomValue draft.OriginalAtomKind parse
+                |> splitExposureAtomValues
 
-            if cleanFormValue currentOriginalText <> cleanFormValue draft.OriginalAtomText then
+            if not (atomListContains draft.OriginalAtomText currentOriginalAtoms) then
                 Result.Error "This parsed atom has changed since the amendment draft was opened. Start the amendment again from the current row."
             else
-                let currentTargetText = getExposureAtomValue proposedKind parse
+                let currentTargetAtoms =
+                    getExposureAtomValue proposedKind parse
+                    |> splitExposureAtomValues
 
-                if proposedKind <> draft.OriginalAtomKind && not (String.IsNullOrWhiteSpace(currentTargetText)) then
+                if proposedKind <> draft.OriginalAtomKind && atomListContains proposedText currentTargetAtoms then
                     Result.Error
                         ("The target "
                          + proposedKind
-                         + " slot already contains '"
-                         + currentTargetText
-                         + "'. Amend that atom directly before moving this one.")
+                         + " slot already contains that atom. Amend that atom directly before moving this one.")
                 else
                     Result.Ok
                         { draft with
@@ -81,14 +108,22 @@ let tryValidateParseAmendment (draft: ParseAmendmentDraft) (model: Model) =
                             Reason = reason }
 
 let applyParseAmendment (draft: ParseAmendmentDraft) (parse: PhiParse) =
+    let originalAtoms =
+        getExposureAtomValue draft.OriginalAtomKind parse
+        |> splitExposureAtomValues
+
     if draft.ProposedAtomKind = draft.OriginalAtomKind then
         parse
-        |> updateExposureAtomValue draft.ProposedAtomKind draft.ProposedAtomText
+        |> updateExposureAtomValue draft.ProposedAtomKind (originalAtoms |> replaceAtomInList draft.OriginalAtomText draft.ProposedAtomText |> joinExposureAtomValues)
         |> appendParseAmendmentExposureNote draft.ProposedAtomKind
     else
+        let targetAtoms =
+            getExposureAtomValue draft.ProposedAtomKind parse
+            |> splitExposureAtomValues
+
         parse
-        |> updateExposureAtomValue draft.OriginalAtomKind ""
-        |> updateExposureAtomValue draft.ProposedAtomKind draft.ProposedAtomText
+        |> updateExposureAtomValue draft.OriginalAtomKind (originalAtoms |> removeAtomFromList draft.OriginalAtomText |> joinExposureAtomValues)
+        |> updateExposureAtomValue draft.ProposedAtomKind (targetAtoms |> appendAtomToList draft.ProposedAtomText |> joinExposureAtomValues)
         |> appendParseAmendmentExposureNote draft.ProposedAtomKind
 
 let formatParseAmendmentLedgerDetail (draft: ParseAmendmentDraft) =
@@ -681,12 +716,17 @@ let update (jsRuntime: IJSRuntime) message model =
         | None ->
             { model with parseAmendmentStatus = Some "The selected parsed Phi is no longer available." }, Cmd.none
         | Some parse ->
-            let currentAtomText = getExposureAtomValue atomKind parse
+            let currentAtomAtoms =
+                getExposureAtomValue atomKind parse
+                |> splitExposureAtomValues
+
             let originalAtomText =
-                if String.IsNullOrWhiteSpace(currentAtomText) then
+                if atomListContains atomText currentAtomAtoms then
                     atomText
+                elif List.length currentAtomAtoms = 1 then
+                    currentAtomAtoms |> List.head
                 else
-                    currentAtomText
+                    atomText
 
             { model with
                 parseAmendmentDraft =
@@ -702,7 +742,8 @@ let update (jsRuntime: IJSRuntime) message model =
                             Reason = ""
                             PreviewRequested = false
                         }
-                parseAmendmentStatus = None },
+                parseAmendmentStatus = None
+                selectedParsedAtomReviewKind = Some atomKind },
             Cmd.none
 
     | SetParseAmendmentProposedKind value ->
@@ -825,6 +866,18 @@ let update (jsRuntime: IJSRuntime) message model =
         { model with
             parseAmendmentDraft = None
             parseAmendmentStatus = Some "Parse amendment cancelled." },
+        Cmd.none
+
+    | SelectParsedAtomReviewKind atomKind ->
+        if isValidParsedExposureAtomKind atomKind then
+            { model with selectedParsedAtomReviewKind = Some atomKind }, Cmd.none
+        else
+            model, Cmd.none
+
+    | ClearParsedAtomReviewKind ->
+        { model with
+            selectedParsedAtomReviewKind = None
+            parseAmendmentDraft = None },
         Cmd.none
 
     | SetCognitionReviewTargetFilter value ->
