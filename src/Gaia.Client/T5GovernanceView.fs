@@ -128,6 +128,15 @@ let renderT5GovernanceSummaryTable sigmaContext (candidateDecisions: CandidateDe
         }
     }
 
+type ParsedAtomCandidateLink =
+    {
+        Candidate: CandidateDelta
+        BasisItem: SigmaBasisItemReview
+        GroupGovernance: CandidateGroupGovernance
+        ClassDecision: CandidateDecisionValue
+        BasisDecision: CandidateDecisionValue
+    }
+
 type ParsedAtomReviewRow =
     {
         AtomKind: string
@@ -137,6 +146,7 @@ type ParsedAtomReviewRow =
         Provenance: string
         CandidateId: string option
         CandidateGovernanceStatus: string
+        CandidateLinks: ParsedAtomCandidateLink list
     }
 
 let formatAffectedParseAmendmentGroups oldKind newKind =
@@ -175,6 +185,59 @@ let tryFindParsedAtomCandidateStatus
              + "; class "
              + formatCandidateDecisionValue classDecision)))
 
+let private parsedAtomTextEquals (left: string) (right: string) =
+    let leftText = if isNull left then "" else left.Trim()
+    let rightText = if isNull right then "" else right.Trim()
+
+    String.Equals(leftText, rightText, StringComparison.OrdinalIgnoreCase)
+
+let private parsedAtomSourceMatches (sourcePhiId: string) (supportingPhiIds: string list) =
+    supportingPhiIds
+    |> List.exists (fun supportingPhiId -> String.Equals(supportingPhiId, sourcePhiId, StringComparison.OrdinalIgnoreCase))
+
+let buildParsedAtomCandidateLinks
+    candidateDeltas
+    (candidateDecisions: CandidateDecision list)
+    sigmaBasisItemDecisions
+    sequencedParsedPhis
+    atomKind
+    atomText
+    sourcePhiId =
+    candidateDeltas
+    |> List.collect (fun candidate ->
+        let groupGovernance =
+            buildCandidateGroupGovernance candidate candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
+
+        let classDecision = getCandidateDecisionValue candidate.CandidateId candidateDecisions
+
+        buildSigmaBasisItemReviews candidate sequencedParsedPhis
+        |> List.filter (fun basisItem ->
+            basisItem.Kind = atomKind
+            && parsedAtomTextEquals basisItem.AtomValue atomText
+            && parsedAtomSourceMatches sourcePhiId basisItem.SupportingPhiIds)
+        |> List.map (fun basisItem ->
+            {
+                Candidate = candidate
+                BasisItem = basisItem
+                GroupGovernance = groupGovernance
+                ClassDecision = classDecision
+                BasisDecision = getSigmaBasisItemDecisionValue basisItem.Key sigmaBasisItemDecisions
+            }))
+
+let formatParsedAtomCandidateGovernanceStatus candidateLinks =
+    match candidateLinks with
+    | [] -> "No current candidate group"
+    | links ->
+        links
+        |> List.distinctBy (fun link -> link.Candidate.CandidateId)
+        |> List.map (fun link ->
+            formatCandidateDeltaKind link.Candidate.Kind
+            + " / group "
+            + formatCandidateGroupStatus link.GroupGovernance.Status
+            + "; class "
+            + formatCandidateDecisionValue link.ClassDecision)
+        |> String.concat " | "
+
 let buildParsedAtomReviewRows
     sequencedParsedPhis
     sigmaContext
@@ -189,8 +252,8 @@ let buildParsedAtomReviewRows
             getExposureAtomValue atomKind parse
             |> splitExposureAtomValues
             |> List.map (fun atomText ->
-                let candidateStatus =
-                    tryFindParsedAtomCandidateStatus
+                let candidateLinks =
+                    buildParsedAtomCandidateLinks
                         candidateDeltas
                         candidateDecisions
                         sigmaBasisItemDecisions
@@ -205,11 +268,12 @@ let buildParsedAtomReviewRows
                     SourcePhiId = parse.PhiId
                     SourcePhiStatement = parse.Statement
                     Provenance = getExposureProvenance atomKind parse
-                    CandidateId = candidateStatus |> Option.map fst
-                    CandidateGovernanceStatus =
-                        candidateStatus
-                        |> Option.map snd
-                        |> Option.defaultValue "No current candidate group"
+                    CandidateId =
+                        candidateLinks
+                        |> List.tryHead
+                        |> Option.map (fun link -> link.Candidate.CandidateId)
+                    CandidateGovernanceStatus = formatParsedAtomCandidateGovernanceStatus candidateLinks
+                    CandidateLinks = candidateLinks
                 })))
 
 let renderOptionalCandidateGroupStatus = function
@@ -619,74 +683,397 @@ let renderParseAmendmentInlineEditor amendment candidateDecisions sigmaBasisItem
         }
     }
 
-let renderParsedAtomReviewRow row amendmentDraft candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis dispatch =
-    div {
-        attr.``class`` "sigma-basis-item"
-
+let renderAtomCandidateStatusTags candidateLinks =
+    match candidateLinks with
+    | [] ->
+        span {
+            attr.``class`` "tag is-light"
+            text "No candidate group"
+        }
+    | links ->
         div {
-            attr.``class`` "columns is-variable is-3 mb-2"
-
-            div {
-                attr.``class`` "column is-7"
-
-                div {
-                    attr.``class`` "tags mb-2"
+            attr.``class`` "tags mb-0"
+            forEach (links |> List.distinctBy (fun link -> link.Candidate.CandidateId)) <| fun link ->
+                concat {
                     span {
-                        attr.``class`` "tag is-light"
-                        text ("Kind: " + row.AtomKind)
+                        attr.``class`` "tag is-info is-light model-fitting-status-tag"
+                        text (formatCandidateDeltaKind link.Candidate.Kind)
                     }
-                    span {
-                        attr.``class`` "tag is-info is-light"
-                        text ("Source: " + row.SourcePhiId)
-                    }
-                    span {
-                        attr.``class`` "tag is-light"
-                        text ("Provenance: " + row.Provenance)
-                    }
+                    renderCandidateGroupStatusTag link.GroupGovernance.Status
+                    renderCandidateDecisionTag link.ClassDecision
                 }
+        }
 
-                p {
-                    attr.``class`` "sigma-basis-atom mb-0"
-                    strong { text "Atom value: " }
-                    text row.AtomText
-                }
+let countBasisDecisions decision candidateLinks =
+    candidateLinks
+    |> List.filter (fun link -> link.BasisDecision = decision)
+    |> List.length
+
+let renderAtomBasisStatusTags candidateLinks =
+    match candidateLinks with
+    | [] ->
+        span {
+            attr.``class`` "tag is-light"
+            text "No basis item"
+        }
+    | links ->
+        div {
+            attr.``class`` "tags mb-0"
+            span {
+                attr.``class`` "tag is-light"
+                text ("Basis items: " + string (List.length links))
             }
-
-            div {
-                attr.``class`` "column is-3"
-                p {
-                    attr.``class`` "heading mb-1"
-                    text "Candidate / governance"
-                }
-                p {
-                    attr.``class`` "is-size-7 mb-1"
-                    text row.CandidateGovernanceStatus
-                }
-
-                match row.CandidateId with
-                | None -> empty()
-                | Some candidateId ->
-                    code { text candidateId }
+            span {
+                attr.``class`` "tag is-light"
+                text ("Pending: " + string (countBasisDecisions Pending links))
             }
-
-            div {
-                attr.``class`` "column is-2"
-                button {
-                    attr.``class`` "button is-small is-warning is-light is-fullwidth"
-                    attr.``type`` "button"
-                    on.click (fun _ ->
-                        dispatch
-                            (StartParseAmendment
-                                (row.SourcePhiId, row.AtomKind, row.AtomText, row.Provenance)))
-                    text "Amend parsing"
-                }
+            span {
+                attr.``class`` "tag is-success is-light"
+                text ("Accepted: " + string (countBasisDecisions Accepted links))
+            }
+            span {
+                attr.``class`` "tag is-danger is-light"
+                text ("Rejected: " + string (countBasisDecisions Rejected links))
+            }
+            span {
+                attr.``class`` "tag is-warning is-light"
+                text ("Held: " + string (countBasisDecisions Held links))
             }
         }
 
+let renderParsedAtomAmendmentControl row amendmentDraft candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis dispatch =
+    match amendmentDraft with
+    | Some amendment when isParseAmendmentDraftForRow row amendment ->
+        renderParseAmendmentInlineEditor amendment candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis dispatch
+    | _ ->
+        div {
+            attr.``class`` "sigma-basis-detail-block"
+            p {
+                attr.``class`` "has-text-weight-semibold mb-2"
+                text "Amend atom kind/value"
+            }
+            p {
+                attr.``class`` "is-size-7 has-text-grey mb-3"
+                text "Open an amendment draft for this parsed atom, then preview and confirm the impact from this panel."
+            }
+            button {
+                attr.``class`` "button is-small is-warning is-light"
+                attr.``type`` "button"
+                on.click (fun _ ->
+                    dispatch
+                        (StartParseAmendment
+                            (row.SourcePhiId, row.AtomKind, row.AtomText, row.Provenance)))
+                text "Amend atom"
+            }
+        }
+
+let renderParsedAtomPhiChips phiIds =
+    let visiblePhiIds = phiIds |> List.truncate 5
+    let remainingCount = List.length phiIds - List.length visiblePhiIds
+
+    match phiIds with
+    | [] ->
+        p {
+            attr.``class`` "is-size-7 has-text-grey"
+            text "No supporting Phi IDs available."
+        }
+    | _ ->
+        div {
+            attr.``class`` "tags mb-0"
+            forEach visiblePhiIds <| fun phiId ->
+                span {
+                    attr.``class`` "tag is-link is-light"
+                    text phiId
+                }
+
+            if remainingCount > 0 then
+                span {
+                    attr.``class`` "tag is-light"
+                    text ("+" + string remainingCount + " more")
+                }
+        }
+
+let renderParsedAtomBasisItemActions basisItemKey decisionValue dispatch =
+    div {
+        attr.``class`` "buttons are-small mb-0"
+        button {
+            attr.``class`` (candidateDecisionButtonClass decisionValue Accepted "is-success")
+            attr.``type`` "button"
+            on.click (fun _ -> dispatch (SetSigmaBasisItemDecision (basisItemKey, Accepted)))
+            text "Accept"
+        }
+
+        button {
+            attr.``class`` (candidateDecisionButtonClass decisionValue Rejected "is-danger")
+            attr.``type`` "button"
+            on.click (fun _ -> dispatch (SetSigmaBasisItemDecision (basisItemKey, Rejected)))
+            text "Reject"
+        }
+
+        button {
+            attr.``class`` (candidateDecisionButtonClass decisionValue Held "is-warning")
+            attr.``type`` "button"
+            on.click (fun _ -> dispatch (SetSigmaBasisItemDecision (basisItemKey, Held)))
+            text "Hold"
+        }
+    }
+
+let renderParsedAtomBasisGovernance row ledgerEvents dispatch =
+    div {
+        attr.``class`` "sigma-basis-detail-block"
+
+        p {
+            attr.``class`` "has-text-weight-semibold mb-2"
+            text "Supporting basis governance"
+        }
+
+        match row.CandidateLinks with
+        | [] ->
+            p {
+                attr.``class`` "has-text-grey"
+                text "No T4/T5 basis item currently references this parsed atom."
+            }
+        | links ->
+            div {
+                attr.``class`` "sigma-basis-list"
+                forEach links <| fun link ->
+                    let basisItem = link.BasisItem
+                    let resetEvent = tryFindLatestParseAmendmentResetEventForBasisItem basisItem.Key ledgerEvents
+
+                    div {
+                        attr.``class`` "model-fitting-governance-row"
+
+                        div {
+                            attr.``class`` "columns is-variable is-3 is-vcentered mb-2"
+
+                            div {
+                                attr.``class`` "column is-7"
+                                p {
+                                    attr.``class`` "heading mb-1"
+                                    text (formatCandidateDeltaKind link.Candidate.Kind)
+                                }
+                                p {
+                                    attr.``class`` "sigma-basis-atom mb-1"
+                                    text (basisItem.Kind + " = " + basisItem.AtomValue)
+                                }
+                                renderParsedAtomPhiChips basisItem.SupportingPhiIds
+                            }
+
+                            div {
+                                attr.``class`` "column is-2"
+                                p {
+                                    attr.``class`` "heading mb-1"
+                                    text "Basis status"
+                                }
+                                renderCandidateDecisionTag link.BasisDecision
+                            }
+
+                            div {
+                                attr.``class`` "column is-3"
+                                renderParsedAtomBasisItemActions basisItem.Key link.BasisDecision dispatch
+                            }
+                        }
+
+                        match resetEvent with
+                        | None -> empty()
+                        | Some ledgerEvent ->
+                            div {
+                                attr.``class`` "notification is-warning is-light is-size-7 py-2 mb-0"
+                                text ledgerEvent.Detail
+                            }
+                    }
+            }
+    }
+
+let renderParsedAtomCandidateGovernance row dispatch =
+    div {
+        attr.``class`` "sigma-basis-detail-block"
+
+        p {
+            attr.``class`` "has-text-weight-semibold mb-2"
+            text "Candidate group governance"
+        }
+
+        match row.CandidateLinks |> List.distinctBy (fun link -> link.Candidate.CandidateId) with
+        | [] ->
+            p {
+                attr.``class`` "has-text-grey"
+                text "No candidate group currently applies to this atom."
+            }
+        | links ->
+            div {
+                attr.``class`` "sigma-basis-list"
+                forEach links <| fun link ->
+                    div {
+                        attr.``class`` "model-fitting-governance-row"
+
+                        div {
+                            attr.``class`` "columns is-variable is-3 is-vcentered mb-2"
+
+                            div {
+                                attr.``class`` "column is-5"
+                                p {
+                                    attr.``class`` "heading mb-1"
+                                    text "Candidate"
+                                }
+                                p {
+                                    attr.``class`` "mb-1"
+                                    text (formatCandidateDeltaKind link.Candidate.Kind)
+                                }
+                                code { text link.Candidate.CandidateId }
+                            }
+
+                            div {
+                                attr.``class`` "column is-3"
+                                p {
+                                    attr.``class`` "heading mb-1"
+                                    text "Group status"
+                                }
+                                renderCandidateGroupStatusTag link.GroupGovernance.Status
+                            }
+
+                            div {
+                                attr.``class`` "column is-4"
+                                renderCandidateGovernanceActions link.Candidate link.ClassDecision dispatch
+                            }
+                        }
+
+                        p {
+                            attr.``class`` "is-size-7 has-text-grey mb-1"
+                            text link.GroupGovernance.Explanation
+                        }
+
+                        match link.GroupGovernance.ConflictExplanation with
+                        | None -> empty()
+                        | Some conflict ->
+                            p {
+                                attr.``class`` "notification is-warning is-light cognition-review-helper is-size-7 mb-0"
+                                text conflict
+                            }
+                    }
+            }
+    }
+
+let renderParsedAtomReviewRow row amendmentDraft parseAmendmentStatus candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis ledgerEvents dispatch =
+    let isActiveAmendment =
         match amendmentDraft with
-        | Some amendment when isParseAmendmentDraftForRow row amendment ->
-            renderParseAmendmentInlineEditor amendment candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis dispatch
-        | _ -> empty()
+        | Some amendment -> isParseAmendmentDraftForRow row amendment
+        | None -> false
+
+    div {
+        attr.``class`` "card mb-3 model-fitting-atom-card"
+
+        div {
+            attr.``class`` "card-content"
+
+            div {
+                attr.``class`` "columns is-variable is-3 mb-2"
+
+                div {
+                    attr.``class`` "column is-3"
+                    p {
+                        attr.``class`` "heading mb-1"
+                        text "Source Phi"
+                    }
+                    code { text row.SourcePhiId }
+                }
+
+                div {
+                    attr.``class`` "column is-5"
+                    p {
+                        attr.``class`` "heading mb-1"
+                        text "Current atom"
+                    }
+                    p {
+                        attr.``class`` "sigma-basis-atom mb-0"
+                        strong { text (row.AtomKind + ": ") }
+                        text row.AtomText
+                    }
+                }
+
+                div {
+                    attr.``class`` "column is-4"
+                    p {
+                        attr.``class`` "heading mb-1"
+                        text "Provenance"
+                    }
+                    span {
+                        attr.``class`` "tag is-info is-light"
+                        text row.Provenance
+                    }
+                }
+            }
+
+            div {
+                attr.``class`` "model-fitting-raw-preview mb-3"
+                p {
+                    attr.``class`` "heading mb-1"
+                    text "Raw Phi preview"
+                }
+                p {
+                    attr.``class`` "mb-0"
+                    text row.SourcePhiStatement
+                }
+            }
+
+            div {
+                attr.``class`` "columns is-variable is-3 mb-2"
+
+                div {
+                    attr.``class`` "column is-6"
+                    p {
+                        attr.``class`` "heading mb-1"
+                        text "Candidate / governance status"
+                    }
+                    renderAtomCandidateStatusTags row.CandidateLinks
+                }
+
+                div {
+                    attr.``class`` "column is-6"
+                    p {
+                        attr.``class`` "heading mb-1"
+                        text "Supporting basis status"
+                    }
+                    renderAtomBasisStatusTags row.CandidateLinks
+                }
+            }
+
+            details {
+                attr.``class`` "model-fitting-panel"
+                attr.``open`` isActiveAmendment
+
+                summary {
+                    attr.``class`` "model-fitting-panel-summary"
+                    text "Edit / Govern"
+                }
+
+                div {
+                    attr.``class`` "model-fitting-panel-body"
+
+                    match amendmentDraft with
+                    | Some amendment when isParseAmendmentDraftForRow row amendment ->
+                        match parseAmendmentStatus with
+                        | None -> empty()
+                        | Some message ->
+                            div {
+                                attr.``class`` "notification is-info is-light py-2"
+                                text message
+                            }
+                    | _ -> empty()
+
+                    renderParsedAtomAmendmentControl
+                        row
+                        amendmentDraft
+                        candidateDecisions
+                        sigmaBasisItemDecisions
+                        sequencedParsedPhis
+                        dispatch
+
+                    renderParsedAtomBasisGovernance row ledgerEvents dispatch
+                    renderParsedAtomCandidateGovernance row dispatch
+                }
+            }
+        }
     }
 
 let renderParsedAtomReviewTable
@@ -697,6 +1084,7 @@ let renderParsedAtomReviewTable
     selectedParsedAtomReviewKind
     parseAmendmentDraft
     parseAmendmentStatus
+    ledgerEvents
     dispatch =
     let atomRows = buildParsedAtomReviewRows sequencedParsedPhis sigmaContext candidateDecisions sigmaBasisItemDecisions
 
@@ -711,7 +1099,10 @@ let renderParsedAtomReviewTable
         div {
             attr.``class`` "tags are-medium mb-3"
             forEach parsedAtomReviewKindLabels <| fun (atomKind, label) ->
-                let count = getSigmaEntriesForParsedAtomKind atomKind sigmaContext |> List.length
+                let count =
+                    atomRows
+                    |> List.filter (fun row -> row.AtomKind = atomKind)
+                    |> List.length
 
                 button {
                     attr.``class`` (parsedAtomReviewButtonClass selectedParsedAtomReviewKind atomKind)
@@ -791,9 +1182,11 @@ let renderParsedAtomReviewTable
                             renderParsedAtomReviewRow
                                 row
                                 parseAmendmentDraft
+                                parseAmendmentStatus
                                 candidateDecisions
                                 sigmaBasisItemDecisions
                                 sequencedParsedPhis
+                                ledgerEvents
                                 dispatch
                     }
             }
@@ -1633,6 +2026,125 @@ let renderT5DecisionHistoryPanel (candidateDecisions: CandidateDecision list) =
             }
     }
 
+let getAllCandidateBasisItems candidateDeltas sequencedParsedPhis =
+    candidateDeltas
+    |> List.collect (fun candidate -> buildSigmaBasisItemReviews candidate sequencedParsedPhis)
+    |> List.distinctBy (fun basisItem -> basisItem.Key)
+
+let countBasisItemsWithDecision decision candidateDeltas sigmaBasisItemDecisions sequencedParsedPhis =
+    getAllCandidateBasisItems candidateDeltas sequencedParsedPhis
+    |> List.filter (fun basisItem -> getSigmaBasisItemDecisionValue basisItem.Key sigmaBasisItemDecisions = decision)
+    |> List.length
+
+let renderModelFittingSummaryCounts
+    atomRows
+    candidateDeltas
+    (candidateDecisions: CandidateDecision list)
+    sigmaBasisItemDecisions
+    sequencedParsedPhis =
+    let candidateCount = List.length candidateDeltas
+    let pendingCount = countCandidateGroupStatuses GroupPending candidateDeltas candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
+    let acceptedCount = countCandidateGroupStatuses GroupAccepted candidateDeltas candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
+    let rejectedCount = countCandidateGroupStatuses GroupRejected candidateDeltas candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
+    let heldCount = countCandidateGroupStatuses GroupHeld candidateDeltas candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
+    let mixedCount = countCandidateGroupStatuses GroupMixed candidateDeltas candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
+    let partiallyGovernedCount =
+        countCandidateGroupStatuses GroupPartiallyGoverned candidateDeltas candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
+    let basisItemCount = getAllCandidateBasisItems candidateDeltas sequencedParsedPhis |> List.length
+
+    div {
+        attr.``class`` "tags are-medium mb-4"
+        renderCandidateDecisionCount "Parsed atoms" (List.length atomRows)
+        renderCandidateDecisionCount "Candidate groups" candidateCount
+        renderCandidateDecisionCount "Group pending" pendingCount
+        renderCandidateDecisionCount "Group accepted" acceptedCount
+        renderCandidateDecisionCount "Group rejected" rejectedCount
+        renderCandidateDecisionCount "Group held" heldCount
+        renderCandidateDecisionCount "Mixed" mixedCount
+        renderCandidateDecisionCount "Partially governed" partiallyGovernedCount
+        renderCandidateDecisionCount "Basis items" basisItemCount
+        renderCandidateDecisionCount "Basis pending" (countBasisItemsWithDecision Pending candidateDeltas sigmaBasisItemDecisions sequencedParsedPhis)
+        renderCandidateDecisionCount "Basis accepted" (countBasisItemsWithDecision Accepted candidateDeltas sigmaBasisItemDecisions sequencedParsedPhis)
+        renderCandidateDecisionCount "Basis rejected" (countBasisItemsWithDecision Rejected candidateDeltas sigmaBasisItemDecisions sequencedParsedPhis)
+        renderCandidateDecisionCount "Basis held" (countBasisItemsWithDecision Held candidateDeltas sigmaBasisItemDecisions sequencedParsedPhis)
+    }
+
+let renderCollapsedIntermediateSummaries
+    sequencedParsedPhis
+    sigmaContext
+    lastReplayAction =
+    details {
+        attr.``class`` "model-fitting-summary-details"
+
+        summary {
+            attr.``class`` "model-fitting-panel-summary"
+            text "Intermediate summaries"
+        }
+
+        div {
+            attr.``class`` "model-fitting-panel-body"
+            renderCurrentSigmaSummaryTable sigmaContext
+            renderMissingContextSummaryTable sequencedParsedPhis
+            renderArchitecturalPressureSummaryTable sigmaContext
+            renderTopReinforcedAtomsTable sigmaContext
+            renderT4CandidateSummaryTable sigmaContext
+            renderLatestDeltaSummaryTable lastReplayAction
+        }
+    }
+
+let renderModelFittingWorkspace
+    sequencedParsedPhis
+    sigmaContext
+    lastReplayAction
+    (candidateDecisions: CandidateDecision list)
+    sigmaBasisItemDecisions
+    ledgerEvents
+    selectedParsedAtomReviewKind
+    parseAmendmentDraft
+    parseAmendmentStatus
+    dispatch =
+    let atomRows = buildParsedAtomReviewRows sequencedParsedPhis sigmaContext candidateDecisions sigmaBasisItemDecisions
+    let candidateDeltas = formulateCandidateDeltas sigmaContext
+
+    div {
+        attr.``class`` "box model-fitting-workspace"
+
+        h2 {
+            attr.``class`` "title is-5"
+            text "Model Fitting"
+        }
+
+        p {
+            attr.``class`` "is-size-7 has-text-grey mb-4"
+            text "Parsed atom review, amendment, candidate governance, and basis-item governance are handled from the atom cards below."
+        }
+
+        renderModelFittingSummaryCounts
+            atomRows
+            candidateDeltas
+            candidateDecisions
+            sigmaBasisItemDecisions
+            sequencedParsedPhis
+
+        renderRecentParseAmendmentResetEvents ledgerEvents
+
+        renderParsedAtomReviewTable
+            sequencedParsedPhis
+            sigmaContext
+            candidateDecisions
+            sigmaBasisItemDecisions
+            selectedParsedAtomReviewKind
+            parseAmendmentDraft
+            parseAmendmentStatus
+            ledgerEvents
+            dispatch
+
+        renderCollapsedIntermediateSummaries
+            sequencedParsedPhis
+            sigmaContext
+            lastReplayAction
+    }
+
 let renderOperationalSummaryTablesPanel
     sequencedParsedPhis
     sigmaContext
@@ -1662,6 +2174,7 @@ let renderOperationalSummaryTablesPanel
             selectedParsedAtomReviewKind
             parseAmendmentDraft
             parseAmendmentStatus
+            ledgerEvents
             dispatch
 
         renderMissingContextSummaryTable sequencedParsedPhis

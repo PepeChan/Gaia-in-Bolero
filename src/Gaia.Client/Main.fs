@@ -957,7 +957,7 @@ let homePage model dispatch =
 
                         renderCurrentSigmaSnapshotPanel includedSequencedParsedPhis model.staleParsedPhiIds currentSigmaContext
 
-                        renderOperationalSummaryTablesPanel
+                        renderModelFittingWorkspace
                             includedSequencedParsedPhis
                             currentSigmaContext
                             model.lastReplayAction
@@ -968,8 +968,6 @@ let homePage model dispatch =
                             model.parseAmendmentDraft
                             model.parseAmendmentStatus
                             dispatch
-
-                        renderCognitionReviewPanel model includedSequencedParsedPhis currentSigmaContext dispatch
 
                         renderParsedPhiLedgerPanel model.parsedPhis model.staleParsedPhiIds model.excludedPhiIds dispatch
                     }
