@@ -125,10 +125,11 @@ let renderSigmaSnapshotMetric label count =
         text (label + ": " + string count)
     }
 
-let renderSigmaSnapshotCounts parsedPhiCount sigmaContext =
+let renderSigmaSnapshotCounts parsedPhiCount staleParsedPhiCount sigmaContext =
     div {
         attr.``class`` "tags are-medium mb-4"
         renderSigmaSnapshotMetric "Included parsed Φ" parsedPhiCount
+        renderSigmaSnapshotMetric "Stale parsed Φ" staleParsedPhiCount
         renderSigmaSnapshotMetric "Functions" (List.length sigmaContext.Functions)
         renderSigmaSnapshotMetric "Modes" (List.length sigmaContext.Modes)
         renderSigmaSnapshotMetric "Interfaces" (List.length sigmaContext.Interfaces)
@@ -136,7 +137,7 @@ let renderSigmaSnapshotCounts parsedPhiCount sigmaContext =
         renderSigmaSnapshotMetric "Hosts" (List.length sigmaContext.Hosts)
     }
 
-let renderParsedPhiLedgerPanel parsedPhis excludedPhiIds dispatch =
+let renderParsedPhiLedgerPanel parsedPhis staleParsedPhiIds excludedPhiIds dispatch =
     let sequencedParsedPhis = getSequencedParsedPhis parsedPhis
 
     let excludedPhiCount =
@@ -146,6 +147,7 @@ let renderParsedPhiLedgerPanel parsedPhis excludedPhiIds dispatch =
 
     let totalParsedPhiCount = List.length sequencedParsedPhis
     let includedPhiCount = totalParsedPhiCount - excludedPhiCount
+    let staleParsedPhiCount = getStaleParsedPhiCount staleParsedPhiIds parsedPhis
 
     div {
         attr.``class`` "box"
@@ -165,6 +167,7 @@ let renderParsedPhiLedgerPanel parsedPhis excludedPhiIds dispatch =
             renderSigmaSnapshotMetric "Total parsed Φ" totalParsedPhiCount
             renderSigmaSnapshotMetric "Included Φ" includedPhiCount
             renderSigmaSnapshotMetric "Excluded Φ" excludedPhiCount
+            renderSigmaSnapshotMetric "Stale Φ" staleParsedPhiCount
         }
 
         match sequencedParsedPhis with
@@ -193,6 +196,7 @@ let renderParsedPhiLedgerPanel parsedPhis excludedPhiIds dispatch =
                     tbody {
                         forEach phis <| fun (parseSequenceNumber, parse) ->
                             let isExcluded = isPhiExcluded excludedPhiIds parse.PhiId
+                            let isStale = isPhiParseStale staleParsedPhiIds parse.PhiId
 
                             tr {
                                 td { text (string parseSequenceNumber) }
@@ -201,17 +205,25 @@ let renderParsedPhiLedgerPanel parsedPhis excludedPhiIds dispatch =
                                 }
                                 td { text parse.Statement }
                                 td {
-                                    span {
-                                        attr.``class`` (
-                                            if isExcluded then
-                                                "tag is-warning"
-                                            else
-                                                "tag is-success is-light")
-                                        text (
-                                            if isExcluded then
-                                                "Excluded"
-                                            else
-                                                "Included")
+                                    div {
+                                        attr.``class`` "tags mb-0"
+                                        span {
+                                            attr.``class`` (
+                                                if isExcluded then
+                                                    "tag is-warning"
+                                                else
+                                                    "tag is-success is-light")
+                                            text (
+                                                if isExcluded then
+                                                    "Excluded"
+                                                else
+                                                    "Included")
+                                        }
+                                        if isStale then
+                                            span {
+                                                attr.``class`` "tag is-warning is-light"
+                                                text "Stale parse"
+                                            }
                                     }
                                 }
                                 td {
@@ -433,8 +445,12 @@ let renderExposureChain (parse: PhiParse) =
         }
     }
 
-let renderRelevantSigmaContextPanel sequencedParsedPhis selectedPhiParse selectedPhiResolution =
+let renderRelevantSigmaContextPanel sequencedParsedPhis staleParsedPhiIds selectedPhiParse selectedPhiResolution =
     let sigmaContext = buildSigmaContext sequencedParsedPhis
+    let staleParsedPhiCount =
+        sequencedParsedPhis
+        |> List.map snd
+        |> getStaleParsedPhiCount staleParsedPhiIds
 
     div {
         attr.``class`` "box"
@@ -444,7 +460,7 @@ let renderRelevantSigmaContextPanel sequencedParsedPhis selectedPhiParse selecte
             text "Current Σ Snapshot"
         }
 
-        renderSigmaSnapshotCounts (List.length sequencedParsedPhis) sigmaContext
+        renderSigmaSnapshotCounts (List.length sequencedParsedPhis) staleParsedPhiCount sigmaContext
 
         h2 {
             attr.``class`` "title is-5"

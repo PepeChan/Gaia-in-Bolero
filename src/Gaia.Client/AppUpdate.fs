@@ -33,17 +33,18 @@ let isValidParsedExposureAtomKind value =
     parsedExposureAtomKinds
     |> List.exists (fun atomKind -> String.Equals(atomKind, value, StringComparison.Ordinal))
 
-let appendParseAmendmentExposureNote newKind (parse: PhiParse) =
-    let notes = if isNull parse.ExposureNotes then "" else parse.ExposureNotes.Trim()
-    let amendmentNote = " ParseAmendment: " + newKind + "=ParseAmendment."
-
-    { parse with ExposureNotes = notes + amendmentNote }
-
 let formatAffectedParseAmendmentGroups oldKind newKind =
     [ oldKind; newKind ]
     |> List.filter (fun value -> not (String.IsNullOrWhiteSpace(value)))
     |> List.distinct
     |> String.concat ", "
+
+let atomTextEquals left right =
+    String.Equals(cleanFormValue left, cleanFormValue right, StringComparison.OrdinalIgnoreCase)
+
+let atomListContains atom atoms =
+    atoms
+    |> List.exists (fun existing -> atomTextEquals existing atom)
 
 let tryValidateParseAmendment (draft: ParseAmendmentDraft) (model: Model) =
     let proposedKind = cleanFormValue draft.ProposedAtomKind
@@ -59,20 +60,22 @@ let tryValidateParseAmendment (draft: ParseAmendmentDraft) (model: Model) =
         | None ->
             Result.Error "The source Phi parse is no longer available."
         | Some parse ->
-            let currentOriginalText = getExposureAtomValue draft.OriginalAtomKind parse
+            let currentOriginalAtoms =
+                getExposureAtomValue draft.OriginalAtomKind parse
+                |> splitExposureAtomValues
 
-            if cleanFormValue currentOriginalText <> cleanFormValue draft.OriginalAtomText then
+            if not (atomListContains draft.OriginalAtomText currentOriginalAtoms) then
                 Result.Error "This parsed atom has changed since the amendment draft was opened. Start the amendment again from the current row."
             else
-                let currentTargetText = getExposureAtomValue proposedKind parse
+                let currentTargetAtoms =
+                    getExposureAtomValue proposedKind parse
+                    |> splitExposureAtomValues
 
-                if proposedKind <> draft.OriginalAtomKind && not (String.IsNullOrWhiteSpace(currentTargetText)) then
+                if proposedKind <> draft.OriginalAtomKind && atomListContains proposedText currentTargetAtoms then
                     Result.Error
                         ("The target "
                          + proposedKind
-                         + " slot already contains '"
-                         + currentTargetText
-                         + "'. Amend that atom directly before moving this one.")
+                         + " slot already contains that atom. Amend that atom directly before moving this one.")
                 else
                     Result.Ok
                         { draft with
@@ -81,15 +84,7 @@ let tryValidateParseAmendment (draft: ParseAmendmentDraft) (model: Model) =
                             Reason = reason }
 
 let applyParseAmendment (draft: ParseAmendmentDraft) (parse: PhiParse) =
-    if draft.ProposedAtomKind = draft.OriginalAtomKind then
-        parse
-        |> updateExposureAtomValue draft.ProposedAtomKind draft.ProposedAtomText
-        |> appendParseAmendmentExposureNote draft.ProposedAtomKind
-    else
-        parse
-        |> updateExposureAtomValue draft.OriginalAtomKind ""
-        |> updateExposureAtomValue draft.ProposedAtomKind draft.ProposedAtomText
-        |> appendParseAmendmentExposureNote draft.ProposedAtomKind
+    applyParseAmendmentToPhiParse draft parse
 
 let formatParseAmendmentLedgerDetail (draft: ParseAmendmentDraft) =
     [
@@ -103,6 +98,35 @@ let formatParseAmendmentLedgerDetail (draft: ParseAmendmentDraft) =
         "Affected candidate groups require review: " + formatAffectedParseAmendmentGroups draft.OriginalAtomKind draft.ProposedAtomKind
     ]
     |> String.concat " | "
+
+let formatParseAmendmentDecisionResetLedgerDetail (draft: ParseAmendmentDraft) (resetImpact: ParseAmendmentBasisDecisionResetImpact) =
+    [
+        "Source Phi ID: " + draft.SourcePhiId
+        "Original kind: " + draft.OriginalAtomKind
+        "Original text: " + draft.OriginalAtomText
+        "New kind: " + draft.ProposedAtomKind
+        "New text: " + draft.ProposedAtomText
+        "Candidate ID: " + resetImpact.CandidateId
+        "Candidate type: " + resetImpact.CandidateType
+        "Candidate target: " + resetImpact.CandidateTarget
+        "Basis item key: " + resetImpact.BasisItemKey
+        "Previous decision: " + formatSigmaBasisItemDecisionValue resetImpact.PreviousDecision
+        "Reason: Parse amendment changed or moved the interpreted atom that this basis-item decision governed."
+        "Amendment reason: " + (if String.IsNullOrWhiteSpace(draft.Reason) then "(none supplied)" else draft.Reason)
+    ]
+    |> String.concat " | "
+
+let appendParseAmendmentDecisionResetLedgerEvents draft resetImpacts model =
+    resetImpacts
+    |> List.fold
+        (fun workingModel resetImpact ->
+            workingModel
+            |> appendLedgerEvent
+                sigmaBasisItemDecisionResetLedgerKind
+                resetImpact.BasisItemKey
+                "Sigma basis-item decision reset"
+                (formatParseAmendmentDecisionResetLedgerDetail draft resetImpact))
+        model
 
 let normalizeProjectFileNamePart (value: string) =
     let source =
@@ -188,6 +212,27 @@ let openProjectFileCmd jsRuntime =
                 ProjectFileOpened content)
         (fun ex -> ProjectFileOpenFailed ex.Message)
 
+let private isPhiTargetKind (targetKind: string) =
+    String.Equals(cleanFormValue targetKind, "Phi", StringComparison.OrdinalIgnoreCase)
+
+let private hasParsedPhi phiId (model: Model) =
+    model.parsedPhis
+    |> List.exists (fun parse -> parse.PhiId = phiId)
+
+let private markPhiParseStaleIfParsed phiId statusMessage (model: Model) =
+    if hasParsedPhi phiId model then
+        let staleParsedPhiIds =
+            if model.staleParsedPhiIds |> List.contains phiId then
+                model.staleParsedPhiIds
+            else
+                model.staleParsedPhiIds @ [ phiId ]
+
+        { model with
+            staleParsedPhiIds = staleParsedPhiIds
+            phiBatchParseStatus = Some statusMessage }
+    else
+        model
+
 let addContextEntryToPhi phiId (model: Model) =
     let value = model.phiContextEntryDraftValue.Trim()
 
@@ -201,18 +246,11 @@ let addContextEntryToPhi phiId (model: Model) =
             { model with
                 existingPhiContextTargetId = phiId
                 phiContextEntries = model.phiContextEntries @ [ entry ]
-                phiContextEntryDraftValue = "" }
+                phiContextEntryDraftValue = ""
+                phiBatchParseStatus = model.phiBatchParseStatus }
+            |> markPhiParseStaleIfParsed phiId ("Parse marked stale for " + phiId + ". Recompute parse to apply new Phi context.")
 
-        let refreshedModel =
-            if model.parsedPhis |> List.exists (fun parse -> parse.PhiId = phiId) then
-                model.ingestedPhis
-                |> List.tryFind (fun phi -> phi.PhiId = phiId)
-                |> Option.map (fun phi -> parsePhiIntoModel phi contextModel |> fst)
-                |> Option.defaultValue contextModel
-            else
-                contextModel
-
-        refreshedModel
+        contextModel
         |> appendPhiContextEntryLedgerEvent entry
 
 let private containsDraftMarker (marker: string) (value: string) =
@@ -442,12 +480,27 @@ let update (jsRuntime: IJSRuntime) message model =
                     + " | "
                     + targetLabel
 
-                { model with
-                    evidenceRecords = model.evidenceRecords @ [ evidenceRecord ]
-                    evidenceTitle = ""
-                    evidenceNotes = ""
-                    evidenceContentRef = ""
-                    evidenceStatus = Some ("Evidence reference captured: " + evidenceId) }
+                let evidenceModel =
+                    { model with
+                        evidenceRecords = model.evidenceRecords @ [ evidenceRecord ]
+                        evidenceTitle = ""
+                        evidenceNotes = ""
+                        evidenceContentRef = ""
+                        evidenceStatus = Some ("Evidence reference captured: " + evidenceId) }
+
+                let contextAwareEvidenceModel =
+                    if isPhiTargetKind evidenceRecord.TargetKind then
+                        let staleStatus =
+                            "Parse marked stale for "
+                            + evidenceRecord.TargetId
+                            + ". Recompute parse to apply new Phi-targeted 1sec Snip."
+
+                        evidenceModel
+                        |> markPhiParseStaleIfParsed evidenceRecord.TargetId staleStatus
+                    else
+                        evidenceModel
+
+                contextAwareEvidenceModel
                 |> appendLedgerEvent "EvidenceReferenceCreated" evidenceId "Evidence reference created" detail
                 |> fun updatedModel -> updatedModel, Cmd.none
     | SetRealizationObjectKindDraft value ->
@@ -600,7 +653,24 @@ let update (jsRuntime: IJSRuntime) message model =
     | ParseIngestedPhi phiId ->
         match model.ingestedPhis |> List.tryFind (fun phi -> phi.PhiId = phiId) with
         | Some phi ->
-            if model.parsedPhis |> List.exists (fun parse -> parse.PhiId = phiId) then
+            let hasExistingParse =
+                model.parsedPhis
+                |> List.exists (fun parse -> parse.PhiId = phiId)
+
+            let isStale =
+                isPhiParseStale model.staleParsedPhiIds phiId
+
+            if hasExistingParse && isStale then
+                let parsedModel, parse = parsePhiIntoModel phi model
+
+                parsedModel
+                |> appendLedgerEvent
+                    "PhiParseRecomputed"
+                    parse.PhiId
+                    "Phi parse recomputed"
+                    ("Recomputed from original Phi and current Phi context entries. Statement: " + parse.Statement)
+                |> fun updatedModel -> updatedModel, Cmd.none
+            elif hasExistingParse then
                 { model with phiBatchParseStatus = None }
                 |> appendLedgerEvent
                     "PhiParseIgnoredAlreadyParsed"
@@ -681,12 +751,17 @@ let update (jsRuntime: IJSRuntime) message model =
         | None ->
             { model with parseAmendmentStatus = Some "The selected parsed Phi is no longer available." }, Cmd.none
         | Some parse ->
-            let currentAtomText = getExposureAtomValue atomKind parse
+            let currentAtomAtoms =
+                getExposureAtomValue atomKind parse
+                |> splitExposureAtomValues
+
             let originalAtomText =
-                if String.IsNullOrWhiteSpace(currentAtomText) then
+                if atomListContains atomText currentAtomAtoms then
                     atomText
+                elif List.length currentAtomAtoms = 1 then
+                    currentAtomAtoms |> List.head
                 else
-                    currentAtomText
+                    atomText
 
             { model with
                 parseAmendmentDraft =
@@ -702,7 +777,8 @@ let update (jsRuntime: IJSRuntime) message model =
                             Reason = ""
                             PreviewRequested = false
                         }
-                parseAmendmentStatus = None },
+                parseAmendmentStatus = None
+                selectedParsedAtomReviewKind = Some atomKind },
             Cmd.none
 
     | SetParseAmendmentProposedKind value ->
@@ -770,6 +846,11 @@ let update (jsRuntime: IJSRuntime) message model =
             | Result.Error message ->
                 { model with parseAmendmentStatus = Some message }, Cmd.none
             | Result.Ok validatedDraft ->
+                let impactPreview =
+                    model.parsedPhis
+                    |> getIncludedSequencedParsedPhis model.excludedPhiIds
+                    |> buildParseAmendmentImpactPreview validatedDraft model.candidateDecisions model.sigmaBasisItemDecisions
+
                 let amendedParse =
                     model.parsedPhis
                     |> List.tryFind (fun parse -> parse.PhiId = validatedDraft.SourcePhiId)
@@ -801,8 +882,19 @@ let update (jsRuntime: IJSRuntime) message model =
                         | _ ->
                             model.selectedPhiResolution
 
+                    let sigmaBasisItemDecisions =
+                        model.sigmaBasisItemDecisions
+                        |> removeParseAmendmentResetDecisions impactPreview
+
+                    let resetSummary =
+                        match List.length impactPreview.ResetImpacts with
+                        | 0 -> "No basis-item decisions were reset."
+                        | 1 -> "Reset 1 basis-item decision to pending."
+                        | count -> "Reset " + string count + " basis-item decisions to pending."
+
                     { model with
                         parsedPhis = parsedPhis
+                        sigmaBasisItemDecisions = sigmaBasisItemDecisions
                         selectedPhiParse = selectedPhiParse
                         selectedPhiResolution = selectedPhiResolution
                         parseAmendmentDraft = None
@@ -812,19 +904,33 @@ let update (jsRuntime: IJSRuntime) message model =
                                  + validatedDraft.SourcePhiId
                                  + ". Review affected T4/T5 candidate groups: "
                                  + formatAffectedParseAmendmentGroups validatedDraft.OriginalAtomKind validatedDraft.ProposedAtomKind
-                                 + ".")
+                                 + ". "
+                                 + resetSummary)
                         phiBatchParseStatus = None }
                     |> appendLedgerEvent
                         "ParseAmendmentConfirmed"
                         validatedDraft.SourcePhiId
                         "Parse amendment confirmed"
                         (formatParseAmendmentLedgerDetail validatedDraft)
+                    |> appendParseAmendmentDecisionResetLedgerEvents validatedDraft impactPreview.ResetImpacts
                     |> fun updatedModel -> updatedModel, Cmd.none
 
     | CancelParseAmendment ->
         { model with
             parseAmendmentDraft = None
             parseAmendmentStatus = Some "Parse amendment cancelled." },
+        Cmd.none
+
+    | SelectParsedAtomReviewKind atomKind ->
+        if isValidParsedExposureAtomKind atomKind then
+            { model with selectedParsedAtomReviewKind = Some atomKind }, Cmd.none
+        else
+            model, Cmd.none
+
+    | ClearParsedAtomReviewKind ->
+        { model with
+            selectedParsedAtomReviewKind = None
+            parseAmendmentDraft = None },
         Cmd.none
 
     | SetCognitionReviewTargetFilter value ->

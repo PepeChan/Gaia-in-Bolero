@@ -185,6 +185,7 @@ let parsedExposureAtomKinds =
         "Interface"
         "State"
         "Host"
+        "Constraint"
     ]
 
 let t6RealizationInquirySource = "T6 Realization Inquiry"
@@ -193,6 +194,7 @@ let derivedInquiryContextKind = "DerivedInquiry"
 let t6InquiryTargetContextKind = "T6InquiryTarget"
 let t6InquiryGapKeyContextKind = "T6InquiryGapKey"
 let t6InquiryQuestionContextKind = "T6InquiryQuestion"
+let sigmaBasisItemDecisionResetLedgerKind = "SigmaBasisItemDecisionReset"
 
 type LedgerEvent =
     {
@@ -397,6 +399,7 @@ type ProjectSnapshot =
         PhiIntakes: PhiIntake list
         PhiContextEntries: PhiContextEntry list
         ParsedPhis: PhiParse list
+        StaleParsedPhiIds: string list
         ExcludedPhiIds: string list
         CandidateDecisions: CandidateDecision list
         LedgerEvents: LedgerEvent list

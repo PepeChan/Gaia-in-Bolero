@@ -750,6 +750,12 @@ let homePage model dispatch =
                                                 |> List.filter (fun entry -> entry.PhiId = phi.PhiId)
 
                                             let isInlineContextOpen = model.inlinePhiContextTargetId = Some phi.PhiId
+                                            let hasParsedPhi =
+                                                model.parsedPhis
+                                                |> List.exists (fun parse -> parse.PhiId = phi.PhiId)
+
+                                            let isStaleParsedPhi =
+                                                isPhiParseStale model.staleParsedPhiIds phi.PhiId
 
                                             match contextEntries with
                                             | [] -> empty()
@@ -760,6 +766,22 @@ let homePage model dispatch =
                                                         span {
                                                             attr.``class`` "tag is-info is-light"
                                                             text (entry.Kind + ": " + entry.Value)
+                                                        }
+                                                }
+
+                                            if hasParsedPhi || isStaleParsedPhi then
+                                                div {
+                                                    attr.``class`` "tags mb-2"
+                                                    if hasParsedPhi then
+                                                        span {
+                                                            attr.``class`` "tag is-success is-light"
+                                                            text "Parsed"
+                                                        }
+
+                                                    if isStaleParsedPhi then
+                                                        span {
+                                                            attr.``class`` "tag is-warning"
+                                                            text "Parse stale"
                                                         }
                                                 }
 
@@ -778,10 +800,18 @@ let homePage model dispatch =
                                                 }
 
                                                 button {
-                                                    attr.``class`` "button is-small is-link is-light"
+                                                    attr.``class`` (
+                                                        if isStaleParsedPhi then
+                                                            "button is-small is-warning"
+                                                        else
+                                                            "button is-small is-link is-light")
                                                     attr.``type`` "button"
                                                     on.click (fun _ -> dispatch (ParseIngestedPhi phi.PhiId))
-                                                    text "Parse Φ"
+                                                    text (
+                                                        if isStaleParsedPhi then
+                                                            "Recompute parse"
+                                                        else
+                                                            "Parse Φ")
                                                 }
                                             }
 
@@ -845,7 +875,7 @@ let homePage model dispatch =
                                 }
 
                             if not (List.isEmpty model.ingestedPhis) then
-                                hr {}
+                                hr { attr.``class`` "my-4" }
 
                                 h3 {
                                     attr.``class`` "title is-6"
@@ -925,7 +955,7 @@ let homePage model dispatch =
                     div {
                         attr.``class`` "column is-8"
 
-                        renderCurrentSigmaSnapshotPanel includedSequencedParsedPhis currentSigmaContext
+                        renderCurrentSigmaSnapshotPanel includedSequencedParsedPhis model.staleParsedPhiIds currentSigmaContext
 
                         renderOperationalSummaryTablesPanel
                             includedSequencedParsedPhis
@@ -933,13 +963,15 @@ let homePage model dispatch =
                             model.lastReplayAction
                             model.candidateDecisions
                             model.sigmaBasisItemDecisions
+                            model.LedgerEvents
+                            model.selectedParsedAtomReviewKind
                             model.parseAmendmentDraft
                             model.parseAmendmentStatus
                             dispatch
 
                         renderCognitionReviewPanel model includedSequencedParsedPhis currentSigmaContext dispatch
 
-                        renderParsedPhiLedgerPanel model.parsedPhis model.excludedPhiIds dispatch
+                        renderParsedPhiLedgerPanel model.parsedPhis model.staleParsedPhiIds model.excludedPhiIds dispatch
                     }
                 }
                 }
@@ -1001,13 +1033,14 @@ let homePage model dispatch =
 
                 renderDeltaSigmaAnalysisPanel model.lastReplayAction
 
-                renderRelevantSigmaContextPanel includedSequencedParsedPhis model.selectedPhiParse model.selectedPhiResolution
+                renderRelevantSigmaContextPanel includedSequencedParsedPhis model.staleParsedPhiIds model.selectedPhiParse model.selectedPhiResolution
 
                 renderCandidateDeltaSigmaPanel
                     currentSigmaContext
                     model.candidateDecisions
                     model.sigmaBasisItemDecisions
                     includedSequencedParsedPhis
+                    model.LedgerEvents
                     dispatch
 
                 renderT5DecisionHistoryPanel model.candidateDecisions

@@ -22,6 +22,15 @@ let isPhiExcluded excludedPhiIds phiId =
     excludedPhiIds
     |> List.contains phiId
 
+let isPhiParseStale staleParsedPhiIds phiId =
+    staleParsedPhiIds
+    |> List.contains phiId
+
+let getStaleParsedPhiCount staleParsedPhiIds (parsedPhis: PhiParse list) =
+    parsedPhis
+    |> List.filter (fun parse -> isPhiParseStale staleParsedPhiIds parse.PhiId)
+    |> List.length
+
 let getSequencedParsedPhis (parsedPhis: PhiParse list) =
     parsedPhis
     |> List.mapi (fun index parse -> index + 1, parse)
@@ -39,6 +48,103 @@ let splitTags (value: string) =
         |> Array.map (fun tag -> tag.Trim())
         |> Array.filter (fun tag -> tag <> "")
         |> Array.toList
+
+let splitExposureAtomValues (value: string) =
+    if String.IsNullOrWhiteSpace(value) then
+        []
+    else
+        value.Split([| ';'; '\n'; '\r' |], StringSplitOptions.RemoveEmptyEntries)
+        |> Array.map (fun atom -> atom.Trim())
+        |> Array.filter (fun atom -> atom <> "")
+        |> Array.fold
+            (fun atoms atom ->
+                if atoms |> List.exists (fun existing -> String.Equals(existing, atom, StringComparison.OrdinalIgnoreCase)) then
+                    atoms
+                else
+                    atoms @ [ atom ])
+            []
+
+let joinExposureAtomValues (values: string list) =
+    values
+    |> List.map (fun value -> if isNull value then "" else value.Trim())
+    |> List.filter (fun value -> value <> "")
+    |> List.fold
+        (fun atoms atom ->
+            if atoms |> List.exists (fun existing -> String.Equals(existing, atom, StringComparison.OrdinalIgnoreCase)) then
+                atoms
+            else
+                atoms @ [ atom ])
+        []
+    |> String.concat "; "
+
+let private generatedConstraintAtomMarker = "GeneratedConstraintAtoms="
+
+let private getGeneratedConstraintAtoms (parse: PhiParse) =
+    let notes = if isNull parse.ExposureNotes then "" else parse.ExposureNotes
+    let markerIndex = notes.LastIndexOf(generatedConstraintAtomMarker, StringComparison.OrdinalIgnoreCase)
+
+    if markerIndex < 0 then
+        []
+    else
+        let remaining = notes.Substring(markerIndex + generatedConstraintAtomMarker.Length)
+        let stopIndex = remaining.IndexOf(".")
+
+        let atomText =
+            if stopIndex < 0 then
+                remaining
+            else
+                remaining.Substring(0, stopIndex)
+
+        atomText.Split([| "||" |], StringSplitOptions.RemoveEmptyEntries)
+        |> Array.toList
+        |> joinExposureAtomValues
+        |> splitExposureAtomValues
+
+let private formatGeneratedConstraintAtomMarker (value: string) =
+    let atoms =
+        value
+        |> splitExposureAtomValues
+        |> joinExposureAtomValues
+        |> splitExposureAtomValues
+
+    match atoms with
+    | [] -> ""
+    | values -> generatedConstraintAtomMarker + String.concat " || " values + "."
+
+let private removeGeneratedConstraintAtomMarker (notes: string) =
+    let safeNotes = if isNull notes then "" else notes
+    let markerIndex = safeNotes.LastIndexOf(generatedConstraintAtomMarker, StringComparison.OrdinalIgnoreCase)
+
+    if markerIndex < 0 then
+        safeNotes.Trim()
+    else
+        let beforeMarker = safeNotes.Substring(0, markerIndex).TrimEnd()
+        let remaining = safeNotes.Substring(markerIndex + generatedConstraintAtomMarker.Length)
+        let stopIndex = remaining.IndexOf(".")
+
+        let afterMarker =
+            if stopIndex < 0 then
+                ""
+            else
+                remaining.Substring(stopIndex + 1).TrimStart()
+
+        (beforeMarker + " " + afterMarker).Trim()
+
+let private updateGeneratedConstraintAtomValue value (parse: PhiParse) =
+    let markerText = formatGeneratedConstraintAtomMarker value
+    let notesWithoutMarker = removeGeneratedConstraintAtomMarker parse.ExposureNotes
+
+    let exposureNotes =
+        if String.IsNullOrWhiteSpace(markerText) then
+            notesWithoutMarker
+        elif String.IsNullOrWhiteSpace(notesWithoutMarker) then
+            markerText
+        else
+            notesWithoutMarker + " " + markerText
+
+    { parse with
+        ExposureNotes = exposureNotes
+        DeltaConstrain = parse.DeltaConstrain || not (String.IsNullOrWhiteSpace(markerText)) }
 
 let private normalizeMarkerText (value: string) =
     if String.IsNullOrWhiteSpace(value) then
@@ -303,6 +409,10 @@ let getExposureAtomValue atomKind (parse: PhiParse) =
     | "Interface" -> parse.Exposure.Interface
     | "State" -> parse.Exposure.State
     | "Host" -> parse.Exposure.HostCandidate
+    | "Constraint" ->
+        parse
+        |> getGeneratedConstraintAtoms
+        |> joinExposureAtomValues
     | _ -> ""
 
 let updateExposureAtomValue atomKind value (parse: PhiParse) =
@@ -321,7 +431,58 @@ let updateExposureAtomValue atomKind value (parse: PhiParse) =
         | _ ->
             parse.Exposure
 
-    { parse with Exposure = exposure }
+    match atomKind with
+    | "Constraint" -> updateGeneratedConstraintAtomValue value parse
+    | _ -> { parse with Exposure = exposure }
+
+let private atomTextEquals (left: string) (right: string) =
+    let leftText = if isNull left then "" else left.Trim()
+    let rightText = if isNull right then "" else right.Trim()
+
+    String.Equals(leftText, rightText, StringComparison.OrdinalIgnoreCase)
+
+let private replaceAtomInList originalAtom proposedAtom atoms =
+    atoms
+    |> List.map (fun atom ->
+        if atomTextEquals atom originalAtom then
+            proposedAtom
+        else
+            atom)
+
+let private removeAtomFromList atom atoms =
+    atoms
+    |> List.filter (fun existing -> not (atomTextEquals existing atom))
+
+let private appendAtomToList atom atoms =
+    if atoms |> List.exists (fun existing -> atomTextEquals existing atom) then
+        atoms
+    else
+        atoms @ [ atom ]
+
+let appendParseAmendmentExposureNote newKind (parse: PhiParse) =
+    let notes = if isNull parse.ExposureNotes then "" else parse.ExposureNotes.Trim()
+    let amendmentNote = " ParseAmendment: " + newKind + "=ParseAmendment."
+
+    { parse with ExposureNotes = notes + amendmentNote }
+
+let applyParseAmendmentToPhiParse (draft: ParseAmendmentDraft) (parse: PhiParse) =
+    let originalAtoms =
+        getExposureAtomValue draft.OriginalAtomKind parse
+        |> splitExposureAtomValues
+
+    if draft.ProposedAtomKind = draft.OriginalAtomKind then
+        parse
+        |> updateExposureAtomValue draft.ProposedAtomKind (originalAtoms |> replaceAtomInList draft.OriginalAtomText draft.ProposedAtomText |> joinExposureAtomValues)
+        |> appendParseAmendmentExposureNote draft.ProposedAtomKind
+    else
+        let targetAtoms =
+            getExposureAtomValue draft.ProposedAtomKind parse
+            |> splitExposureAtomValues
+
+        parse
+        |> updateExposureAtomValue draft.OriginalAtomKind (originalAtoms |> removeAtomFromList draft.OriginalAtomText |> joinExposureAtomValues)
+        |> updateExposureAtomValue draft.ProposedAtomKind (targetAtoms |> appendAtomToList draft.ProposedAtomText |> joinExposureAtomValues)
+        |> appendParseAmendmentExposureNote draft.ProposedAtomKind
 
 let private combineProvenance values =
     let distinct =
@@ -348,7 +509,7 @@ let private isDerivedSigmaEntry (entry: SigmaContextEntry) =
     not (String.IsNullOrWhiteSpace(entry.Provenance))
     && entry.Provenance.IndexOf("DerivedInquiry", StringComparison.OrdinalIgnoreCase) >= 0
 
-let private chooseIndependentSupportEntries entries =
+let private chooseIndependentSupportEntries (entries: SigmaContextEntry list) =
     let nonDerivedEntries =
         entries
         |> List.filter (fun entry -> not (isDerivedSigmaEntry entry))
@@ -358,15 +519,29 @@ let private chooseIndependentSupportEntries entries =
     else
         nonDerivedEntries
 
-let buildSigmaContextEntries atomKind (getValue: PhiParse -> string) (sequencedParsedPhis: (int * PhiParse) list) =
-    sequencedParsedPhis
-    |> List.choose (fun (parseSequenceNumber, parse) ->
-        let value = getValue parse
+let private groupSigmaContextEntries (entries: SigmaContextEntry list) =
+    entries
+    |> List.groupBy (fun entry -> entry.Value)
+    |> List.map (fun (_, groupedEntries) ->
+        let supportEntries = chooseIndependentSupportEntries groupedEntries
+        let firstEntry = supportEntries |> List.head
 
-        if value = "" then
-            None
-        else
-            Some
+        let supportingPhiIds =
+            supportEntries
+            |> List.collect (fun entry -> entry.SupportingPhiIds)
+            |> List.distinct
+
+        { firstEntry with
+            SupportCount = List.length supportingPhiIds
+            SupportingPhiIds = supportingPhiIds
+            Provenance = supportEntries |> List.map (fun entry -> entry.Provenance) |> combineProvenance })
+
+let buildSigmaContextEntries atomKind (getValue: PhiParse -> string) (sequencedParsedPhis: (int * PhiParse) list) : SigmaContextEntry list =
+    sequencedParsedPhis
+    |> List.collect (fun (parseSequenceNumber, parse) ->
+        getValue parse
+        |> splitExposureAtomValues
+        |> List.map (fun value ->
                 {
                     Value = value
                     SourcePhiId = parse.PhiId
@@ -375,21 +550,23 @@ let buildSigmaContextEntries atomKind (getValue: PhiParse -> string) (sequencedP
                     SupportCount = 1
                     SupportingPhiIds = [ parse.PhiId ]
                     Provenance = addDerivedInquiryProvenance (getExposureProvenance atomKind parse) (isDerivedInquiryParse parse)
-                })
-    |> List.groupBy (fun entry -> entry.Value)
-    |> List.map (fun (_, entries) ->
-        let supportEntries = chooseIndependentSupportEntries entries
-        let firstEntry = supportEntries |> List.head
+                }))
+    |> groupSigmaContextEntries
 
-        let supportingPhiIds =
-            supportEntries
-            |> List.map (fun entry -> entry.SourcePhiId)
-            |> List.distinct
-
-        { firstEntry with
-            SupportCount = List.length supportingPhiIds
-            SupportingPhiIds = supportingPhiIds
-            Provenance = supportEntries |> List.map (fun entry -> entry.Provenance) |> combineProvenance })
+let private buildGeneratedConstraintRawEntries (sequencedParsedPhis: (int * PhiParse) list) : SigmaContextEntry list =
+    sequencedParsedPhis
+    |> List.collect (fun (parseSequenceNumber, parse) ->
+        getGeneratedConstraintAtoms parse
+        |> List.map (fun value ->
+            {
+                Value = value
+                SourcePhiId = parse.PhiId
+                SourcePhiStatement = parse.Statement
+                ParseSequenceNumber = parseSequenceNumber
+                SupportCount = 1
+                SupportingPhiIds = [ parse.PhiId ]
+                Provenance = addDerivedInquiryProvenance "Generated" (isDerivedInquiryParse parse)
+            }))
 
 let buildSigmaContext (sequencedParsedPhis: (int * PhiParse) list) =
     {
@@ -398,10 +575,10 @@ let buildSigmaContext (sequencedParsedPhis: (int * PhiParse) list) =
         Interfaces = buildSigmaContextEntries "Interface" (fun parse -> parse.Exposure.Interface) sequencedParsedPhis
         States = buildSigmaContextEntries "State" (fun parse -> parse.Exposure.State) sequencedParsedPhis
         Hosts = buildSigmaContextEntries "Host" (fun parse -> parse.Exposure.HostCandidate) sequencedParsedPhis
-        Constraints = []
+        Constraints = buildGeneratedConstraintRawEntries sequencedParsedPhis |> groupSigmaContextEntries
     }
 
-let buildConstraintContextEntries (contextEntries: PhiContextEntry list) (sequencedParsedPhis: (int * PhiParse) list) =
+let private buildConstraintContextRawEntries (contextEntries: PhiContextEntry list) (sequencedParsedPhis: (int * PhiParse) list) : SigmaContextEntry list =
     let includedPhiIds =
         sequencedParsedPhis
         |> List.map (fun (_, parse) -> parse.PhiId)
@@ -432,16 +609,13 @@ let buildConstraintContextEntries (contextEntries: PhiContextEntry list) (sequen
                     SupportingPhiIds = [ entry.PhiId ]
                     Provenance = provenance
                 }))
-    |> List.groupBy (fun entry -> entry.Value)
-    |> List.map (fun (_, entries) ->
-        let supportEntries = chooseIndependentSupportEntries entries
-        let firstEntry = supportEntries |> List.head
-        let supportingPhiIds = supportEntries |> List.map (fun entry -> entry.SourcePhiId) |> List.distinct
 
-        { firstEntry with
-            SupportCount = List.length supportingPhiIds
-            SupportingPhiIds = supportingPhiIds
-            Provenance = supportEntries |> List.map (fun entry -> entry.Provenance) |> combineProvenance })
+let buildConstraintContextEntries (contextEntries: PhiContextEntry list) (sequencedParsedPhis: (int * PhiParse) list) : SigmaContextEntry list =
+    [
+        yield! buildGeneratedConstraintRawEntries sequencedParsedPhis
+        yield! buildConstraintContextRawEntries contextEntries sequencedParsedPhis
+    ]
+    |> groupSigmaContextEntries
 
 let buildSigmaContextWithContextEntries (contextEntries: PhiContextEntry list) (sequencedParsedPhis: (int * PhiParse) list) =
     let sigmaContext = buildSigmaContext sequencedParsedPhis
@@ -546,19 +720,13 @@ let emptyDeltaSigmaAtomGroups =
     }
 
 let getPhiAtomGroups (parse: PhiParse) =
-    let asAtom value =
-        if value = "" then
-            []
-        else
-            [ value ]
-
     {
-        FunctionAtoms = asAtom parse.Exposure.Function
-        ModeAtoms = asAtom parse.Exposure.Mode
-        InterfaceAtoms = asAtom parse.Exposure.Interface
-        StateAtoms = asAtom parse.Exposure.State
-        HostAtoms = asAtom parse.Exposure.HostCandidate
-        ConstraintAtoms = []
+        FunctionAtoms = splitExposureAtomValues parse.Exposure.Function
+        ModeAtoms = splitExposureAtomValues parse.Exposure.Mode
+        InterfaceAtoms = splitExposureAtomValues parse.Exposure.Interface
+        StateAtoms = splitExposureAtomValues parse.Exposure.State
+        HostAtoms = splitExposureAtomValues parse.Exposure.HostCandidate
+        ConstraintAtoms = getGeneratedConstraintAtoms parse
     }
 
 let getAddedAtomValues (beforeEntries: SigmaContextEntry list) (afterEntries: SigmaContextEntry list) =
@@ -603,7 +771,7 @@ let buildAlreadyKnownAtomGroups sourcePhiId (beforeSigma: SigmaContext) (parse: 
         InterfaceAtoms = getAlreadyKnownAtomValues sourcePhiId beforeSigma.Interfaces parseAtoms.InterfaceAtoms
         StateAtoms = getAlreadyKnownAtomValues sourcePhiId beforeSigma.States parseAtoms.StateAtoms
         HostAtoms = getAlreadyKnownAtomValues sourcePhiId beforeSigma.Hosts parseAtoms.HostAtoms
-        ConstraintAtoms = []
+        ConstraintAtoms = getAlreadyKnownAtomValues sourcePhiId beforeSigma.Constraints parseAtoms.ConstraintAtoms
     }
 
 let hasDeltaSigmaAtomChanges atomGroups =
@@ -791,7 +959,7 @@ let formulateCandidateDeltas (sigmaContext: SigmaContext) =
                         AddConstraint
                         "Constraint"
                         "Add exposed Constraint atoms as candidate Σ structure."
-                        "Constraint-relevant context entries were attached to parsed Phi."
+                        "Constraint-relevant atoms were generated by parsing or attached as Phi Context."
                         (formatSigmaBasisGroup "Constraint" sigmaContext.Constraints)
                         (summarizeEntryProvenance sigmaContext.Constraints)
 
@@ -1217,6 +1385,228 @@ let buildCandidateGroupGovernance
 
     { governance with ConflictExplanation = describeCandidateGroupClassConflict governance }
 
+type ParseAmendmentBasisDecisionResetImpact =
+    {
+        CandidateId: string
+        CandidateType: string
+        CandidateTarget: string
+        BasisItemKey: string
+        AtomKind: string
+        AtomValue: string
+        SourcePhiId: string
+        PreviousDecision: CandidateDecisionValue
+    }
+
+type ParseAmendmentCandidateGroupImpact =
+    {
+        CandidateId: string
+        CandidateType: string
+        CandidateTarget: string
+        BeforeStatus: CandidateGroupStatus option
+        AfterStatus: CandidateGroupStatus option
+        BeforeBasisItemKey: string option
+        AfterBasisItemKey: string option
+    }
+
+type ParseAmendmentImpactPreview =
+    {
+        OldAtomKind: string
+        OldAtomValue: string
+        NewAtomKind: string
+        NewAtomValue: string
+        SourcePhiId: string
+        SourcePhiStatement: string
+        CandidateGroupImpacts: ParseAmendmentCandidateGroupImpact list
+        ResetImpacts: ParseAmendmentBasisDecisionResetImpact list
+    }
+
+let private amendSequencedParsedPhis (draft: ParseAmendmentDraft) (sequencedParsedPhis: (int * PhiParse) list) =
+    sequencedParsedPhis
+    |> List.map (fun (sequenceNumber, parse: PhiParse) ->
+        if parse.PhiId = draft.SourcePhiId then
+            sequenceNumber, applyParseAmendmentToPhiParse draft parse
+        else
+            sequenceNumber, parse)
+
+let private findCandidateById (candidateId: string) (candidates: CandidateDelta list) =
+    candidates
+    |> List.tryFind (fun candidate -> candidate.CandidateId = candidateId)
+
+let private findBasisItemsForAmendedAtom
+    (atomKind: string)
+    (atomValue: string)
+    (sourcePhiId: string)
+    (candidate: CandidateDelta)
+    (sequencedParsedPhis: (int * PhiParse) list) =
+    buildSigmaBasisItemReviews candidate sequencedParsedPhis
+    |> List.filter (fun basisItem ->
+        basisItem.Kind = atomKind
+        && atomTextEquals basisItem.AtomValue atomValue
+        && (basisItem.SupportingPhiIds |> List.contains sourcePhiId))
+
+let private buildCandidateBasisMatches
+    (atomKind: string)
+    (atomValue: string)
+    (sourcePhiId: string)
+    (candidates: CandidateDelta list)
+    (sequencedParsedPhis: (int * PhiParse) list) =
+    candidates
+    |> List.collect (fun candidate ->
+        findBasisItemsForAmendedAtom atomKind atomValue sourcePhiId candidate sequencedParsedPhis
+        |> List.map (fun basisItem -> candidate, basisItem))
+
+let private candidateStatus
+    (candidateDecisions: CandidateDecision list)
+    (sigmaBasisItemDecisions: Map<string, CandidateDecisionValue>)
+    (sequencedParsedPhis: (int * PhiParse) list)
+    (candidate: CandidateDelta) =
+    buildCandidateGroupGovernance candidate candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
+    |> fun governance -> governance.Status
+
+let private removeResetBasisItemDecisions
+    (resetImpacts: ParseAmendmentBasisDecisionResetImpact list)
+    (sigmaBasisItemDecisions: Map<string, CandidateDecisionValue>) =
+    resetImpacts
+    |> List.fold (fun decisions resetImpact -> decisions |> Map.remove resetImpact.BasisItemKey) sigmaBasisItemDecisions
+
+let buildParseAmendmentImpactPreview
+    (draft: ParseAmendmentDraft)
+    (candidateDecisions: CandidateDecision list)
+    (sigmaBasisItemDecisions: Map<string, CandidateDecisionValue>)
+    (sequencedParsedPhis: (int * PhiParse) list) =
+    let beforeSigma = buildSigmaContext sequencedParsedPhis
+    let beforeCandidates = formulateCandidateDeltas beforeSigma
+    let afterSequencedParsedPhis = amendSequencedParsedPhis draft sequencedParsedPhis
+    let afterSigma = buildSigmaContext afterSequencedParsedPhis
+    let afterCandidates = formulateCandidateDeltas afterSigma
+
+    let oldMatches =
+        buildCandidateBasisMatches
+            draft.OriginalAtomKind
+            draft.OriginalAtomText
+            draft.SourcePhiId
+            beforeCandidates
+            sequencedParsedPhis
+
+    let newMatches =
+        buildCandidateBasisMatches
+            draft.ProposedAtomKind
+            draft.ProposedAtomText
+            draft.SourcePhiId
+            afterCandidates
+            afterSequencedParsedPhis
+
+    let resetImpacts =
+        oldMatches
+        |> List.choose (fun (candidate, basisItem) ->
+            let previousDecision = getSigmaBasisItemDecisionValue basisItem.Key sigmaBasisItemDecisions
+
+            if previousDecision = Pending then
+                None
+            else
+                Some
+                    {
+                        CandidateId = candidate.CandidateId
+                        CandidateType = formatCandidateDeltaKind candidate.Kind
+                        CandidateTarget = candidate.Target
+                        BasisItemKey = basisItem.Key
+                        AtomKind = basisItem.Kind
+                        AtomValue = basisItem.AtomValue
+                        SourcePhiId = draft.SourcePhiId
+                        PreviousDecision = previousDecision
+                    })
+        |> List.distinctBy (fun resetImpact -> resetImpact.BasisItemKey)
+
+    let afterDecisionMap =
+        sigmaBasisItemDecisions
+        |> removeResetBasisItemDecisions resetImpacts
+
+    let affectedCandidateIds =
+        [
+            yield! oldMatches |> List.map (fun (candidate, _) -> candidate.CandidateId)
+            yield! newMatches |> List.map (fun (candidate, _) -> candidate.CandidateId)
+        ]
+        |> List.distinct
+
+    let candidateGroupImpacts =
+        affectedCandidateIds
+        |> List.choose (fun candidateId ->
+            let beforeCandidate = findCandidateById candidateId beforeCandidates
+            let afterCandidate = findCandidateById candidateId afterCandidates
+            let displayCandidate =
+                match beforeCandidate with
+                | Some _ -> beforeCandidate
+                | None -> afterCandidate
+
+            displayCandidate
+            |> Option.map (fun candidate ->
+                let beforeBasisItemKey =
+                    oldMatches
+                    |> List.tryFind (fun (matchedCandidate, _) -> matchedCandidate.CandidateId = candidateId)
+                    |> Option.map (fun (_, basisItem) -> basisItem.Key)
+
+                let afterBasisItemKey =
+                    newMatches
+                    |> List.tryFind (fun (matchedCandidate, _) -> matchedCandidate.CandidateId = candidateId)
+                    |> Option.map (fun (_, basisItem) -> basisItem.Key)
+
+                {
+                    CandidateId = candidate.CandidateId
+                    CandidateType = formatCandidateDeltaKind candidate.Kind
+                    CandidateTarget = candidate.Target
+                    BeforeStatus =
+                        beforeCandidate
+                        |> Option.map (candidateStatus candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis)
+                    AfterStatus =
+                        afterCandidate
+                        |> Option.map (candidateStatus candidateDecisions afterDecisionMap afterSequencedParsedPhis)
+                    BeforeBasisItemKey = beforeBasisItemKey
+                    AfterBasisItemKey = afterBasisItemKey
+                }))
+
+    {
+        OldAtomKind = draft.OriginalAtomKind
+        OldAtomValue = draft.OriginalAtomText
+        NewAtomKind = draft.ProposedAtomKind
+        NewAtomValue = draft.ProposedAtomText
+        SourcePhiId = draft.SourcePhiId
+        SourcePhiStatement = draft.SourcePhiStatement
+        CandidateGroupImpacts = candidateGroupImpacts
+        ResetImpacts = resetImpacts
+    }
+
+let removeParseAmendmentResetDecisions
+    (impact: ParseAmendmentImpactPreview)
+    (sigmaBasisItemDecisions: Map<string, CandidateDecisionValue>) =
+    sigmaBasisItemDecisions
+    |> removeResetBasisItemDecisions impact.ResetImpacts
+
+let tryGetCandidateIdFromSigmaBasisItemKey (basisItemKey: string) =
+    let separatorIndex = basisItemKey.IndexOf("::", StringComparison.Ordinal)
+
+    if separatorIndex <= 0 then
+        None
+    else
+        Some (basisItemKey.Substring(0, separatorIndex))
+
+let getParseAmendmentResetLedgerEvents (ledgerEvents: LedgerEvent list) =
+    ledgerEvents
+    |> List.filter (fun ledgerEvent -> ledgerEvent.EventKind = sigmaBasisItemDecisionResetLedgerKind)
+
+let getParseAmendmentResetEventsForCandidate (candidateId: string) (ledgerEvents: LedgerEvent list) =
+    ledgerEvents
+    |> getParseAmendmentResetLedgerEvents
+    |> List.filter (fun ledgerEvent ->
+        match tryGetCandidateIdFromSigmaBasisItemKey ledgerEvent.TargetId with
+        | Some resetCandidateId -> resetCandidateId = candidateId
+        | None -> false)
+
+let tryFindLatestParseAmendmentResetEventForBasisItem (basisItemKey: string) (ledgerEvents: LedgerEvent list) =
+    ledgerEvents
+    |> getParseAmendmentResetLedgerEvents
+    |> List.filter (fun ledgerEvent -> ledgerEvent.TargetId = basisItemKey)
+    |> List.tryLast
+
 let isCandidateGroupUnresolvedOrConflicted governance =
     match governance.Status with
     | GroupPending
@@ -1329,6 +1719,9 @@ let parsePhiIntoModel (phi: PhiIntake) (model: Model) =
         selectedPhiParse = Some parse
         selectedPhiResolution = Some resolution
         parsedPhis = parsedPhis
+        staleParsedPhiIds =
+            model.staleParsedPhiIds
+            |> List.filter (fun stalePhiId -> stalePhiId <> phi.PhiId)
         lastReplayAction = Some lastReplayAction
         phiBatchParseStatus = None },
     parse

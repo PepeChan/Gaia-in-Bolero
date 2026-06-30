@@ -112,6 +112,35 @@ let renderCandidateDecisionMetadata (candidateDecision: CandidateDecision option
             }
         }
 
+let renderCandidateAmendmentResetNotice (candidate: CandidateDelta) ledgerEvents =
+    let resetEvents =
+        ledgerEvents
+        |> getParseAmendmentResetEventsForCandidate candidate.CandidateId
+        |> List.rev
+        |> List.truncate 3
+
+    match resetEvents with
+    | [] -> empty()
+    | events ->
+        div {
+            attr.``class`` "notification is-warning is-light is-size-7 mb-2"
+            p {
+                attr.``class`` "has-text-weight-semibold mb-1"
+                text "Basis decision reset by parse amendment"
+            }
+            forEach events <| fun ledgerEvent ->
+                div {
+                    p {
+                        attr.``class`` "mb-1"
+                        code { text ledgerEvent.TargetId }
+                    }
+                    p {
+                        attr.``class`` "mb-2"
+                        text ledgerEvent.Detail
+                    }
+                }
+        }
+
 let renderCandidateClassDecisionTag candidateDecision =
     match candidateDecision with
     | None ->
@@ -130,6 +159,7 @@ let renderCandidateDeltaCard
     (candidateDecisions: CandidateDecision list)
     sigmaBasisItemDecisions
     sequencedParsedPhis
+    ledgerEvents
     dispatch =
     let candidateDecision = tryFindCandidateDecision candidate.CandidateId candidateDecisions
     let decisionValue = getCandidateDecisionValue candidate.CandidateId candidateDecisions
@@ -240,6 +270,8 @@ let renderCandidateDeltaCard
                             text conflict
                         }
 
+                    renderCandidateAmendmentResetNotice candidate ledgerEvents
+
                     p {
                         strong { text "Candidate class decision: " }
                         renderCandidateClassDecisionTag candidateDecision
@@ -256,7 +288,7 @@ let renderCandidateDeltaCard
         }
     }
 
-let renderCandidateDeltaSigmaPanel sigmaContext (candidateDecisions: CandidateDecision list) sigmaBasisItemDecisions sequencedParsedPhis dispatch =
+let renderCandidateDeltaSigmaPanel sigmaContext (candidateDecisions: CandidateDecision list) sigmaBasisItemDecisions sequencedParsedPhis ledgerEvents dispatch =
     let candidateDeltas = formulateCandidateDeltas sigmaContext
 
     div {
@@ -273,6 +305,6 @@ let renderCandidateDeltaSigmaPanel sigmaContext (candidateDecisions: CandidateDe
         }
 
         forEach candidateDeltas <| fun candidateDelta ->
-            renderCandidateDeltaCard candidateDelta candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis dispatch
+            renderCandidateDeltaCard candidateDelta candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis ledgerEvents dispatch
     }
 
