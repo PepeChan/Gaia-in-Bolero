@@ -1431,6 +1431,32 @@ let renderReviewCandidateCard
         }
     }
 
+let private tryExtractLedgerDetailField fieldName (detail: string) =
+    if String.IsNullOrWhiteSpace(detail) then
+        None
+    else
+        let prefix = fieldName + ": "
+
+        detail.Split([| " | " |], StringSplitOptions.None)
+        |> Array.tryPick (fun part ->
+            if part.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) then
+                Some (part.Substring(prefix.Length).Trim())
+            else
+                None)
+
+let private formatParseAmendmentResetSummary (ledgerEvent: LedgerEvent) =
+    let atomKind =
+        ledgerEvent.Detail
+        |> tryExtractLedgerDetailField "Original kind"
+        |> Option.defaultValue "Basis item"
+
+    let atomValue =
+        ledgerEvent.Detail
+        |> tryExtractLedgerDetailField "Original text"
+        |> Option.defaultValue ledgerEvent.TargetId
+
+    atomKind + " decision reopened: \"" + atomValue + "\""
+
 let renderRecentParseAmendmentResetEvents ledgerEvents =
     let resetEvents =
         ledgerEvents
@@ -1450,12 +1476,13 @@ let renderRecentParseAmendmentResetEvents ledgerEvents =
             forEach events <| fun ledgerEvent ->
                 div {
                     p {
-                        attr.``class`` "is-size-7 mb-1"
-                        code { text ledgerEvent.TargetId }
+                        attr.``class`` "is-size-7 has-text-weight-semibold mb-1"
+                        text (formatParseAmendmentResetSummary ledgerEvent)
                     }
                     p {
-                        attr.``class`` "is-size-7 mb-2"
-                        text ledgerEvent.Detail
+                        attr.``class`` "is-size-7 has-text-grey mb-2"
+                        text "Basis key: "
+                        code { text ledgerEvent.TargetId }
                     }
                 }
         }
