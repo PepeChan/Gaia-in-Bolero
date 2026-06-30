@@ -77,6 +77,75 @@ let joinExposureAtomValues (values: string list) =
         []
     |> String.concat "; "
 
+let private generatedConstraintAtomMarker = "GeneratedConstraintAtoms="
+
+let private getGeneratedConstraintAtoms (parse: PhiParse) =
+    let notes = if isNull parse.ExposureNotes then "" else parse.ExposureNotes
+    let markerIndex = notes.LastIndexOf(generatedConstraintAtomMarker, StringComparison.OrdinalIgnoreCase)
+
+    if markerIndex < 0 then
+        []
+    else
+        let remaining = notes.Substring(markerIndex + generatedConstraintAtomMarker.Length)
+        let stopIndex = remaining.IndexOf(".")
+
+        let atomText =
+            if stopIndex < 0 then
+                remaining
+            else
+                remaining.Substring(0, stopIndex)
+
+        atomText.Split([| "||" |], StringSplitOptions.RemoveEmptyEntries)
+        |> Array.toList
+        |> joinExposureAtomValues
+        |> splitExposureAtomValues
+
+let private formatGeneratedConstraintAtomMarker (value: string) =
+    let atoms =
+        value
+        |> splitExposureAtomValues
+        |> joinExposureAtomValues
+        |> splitExposureAtomValues
+
+    match atoms with
+    | [] -> ""
+    | values -> generatedConstraintAtomMarker + String.concat " || " values + "."
+
+let private removeGeneratedConstraintAtomMarker (notes: string) =
+    let safeNotes = if isNull notes then "" else notes
+    let markerIndex = safeNotes.LastIndexOf(generatedConstraintAtomMarker, StringComparison.OrdinalIgnoreCase)
+
+    if markerIndex < 0 then
+        safeNotes.Trim()
+    else
+        let beforeMarker = safeNotes.Substring(0, markerIndex).TrimEnd()
+        let remaining = safeNotes.Substring(markerIndex + generatedConstraintAtomMarker.Length)
+        let stopIndex = remaining.IndexOf(".")
+
+        let afterMarker =
+            if stopIndex < 0 then
+                ""
+            else
+                remaining.Substring(stopIndex + 1).TrimStart()
+
+        (beforeMarker + " " + afterMarker).Trim()
+
+let private updateGeneratedConstraintAtomValue value (parse: PhiParse) =
+    let markerText = formatGeneratedConstraintAtomMarker value
+    let notesWithoutMarker = removeGeneratedConstraintAtomMarker parse.ExposureNotes
+
+    let exposureNotes =
+        if String.IsNullOrWhiteSpace(markerText) then
+            notesWithoutMarker
+        elif String.IsNullOrWhiteSpace(notesWithoutMarker) then
+            markerText
+        else
+            notesWithoutMarker + " " + markerText
+
+    { parse with
+        ExposureNotes = exposureNotes
+        DeltaConstrain = parse.DeltaConstrain || not (String.IsNullOrWhiteSpace(markerText)) }
+
 let private normalizeMarkerText (value: string) =
     if String.IsNullOrWhiteSpace(value) then
         ""
@@ -340,6 +409,10 @@ let getExposureAtomValue atomKind (parse: PhiParse) =
     | "Interface" -> parse.Exposure.Interface
     | "State" -> parse.Exposure.State
     | "Host" -> parse.Exposure.HostCandidate
+    | "Constraint" ->
+        parse
+        |> getGeneratedConstraintAtoms
+        |> joinExposureAtomValues
     | _ -> ""
 
 let updateExposureAtomValue atomKind value (parse: PhiParse) =
@@ -358,7 +431,9 @@ let updateExposureAtomValue atomKind value (parse: PhiParse) =
         | _ ->
             parse.Exposure
 
-    { parse with Exposure = exposure }
+    match atomKind with
+    | "Constraint" -> updateGeneratedConstraintAtomValue value parse
+    | _ -> { parse with Exposure = exposure }
 
 let private atomTextEquals (left: string) (right: string) =
     let leftText = if isNull left then "" else left.Trim()
@@ -477,29 +552,6 @@ let buildSigmaContextEntries atomKind (getValue: PhiParse -> string) (sequencedP
                     Provenance = addDerivedInquiryProvenance (getExposureProvenance atomKind parse) (isDerivedInquiryParse parse)
                 }))
     |> groupSigmaContextEntries
-
-let private generatedConstraintAtomMarker = "GeneratedConstraintAtoms="
-
-let private getGeneratedConstraintAtoms (parse: PhiParse) =
-    let notes = if isNull parse.ExposureNotes then "" else parse.ExposureNotes
-    let markerIndex = notes.LastIndexOf(generatedConstraintAtomMarker, StringComparison.OrdinalIgnoreCase)
-
-    if markerIndex < 0 then
-        []
-    else
-        let remaining = notes.Substring(markerIndex + generatedConstraintAtomMarker.Length)
-        let stopIndex = remaining.IndexOf(".")
-
-        let atomText =
-            if stopIndex < 0 then
-                remaining
-            else
-                remaining.Substring(0, stopIndex)
-
-        atomText.Split([| "||" |], StringSplitOptions.RemoveEmptyEntries)
-        |> Array.toList
-        |> joinExposureAtomValues
-        |> splitExposureAtomValues
 
 let private buildGeneratedConstraintRawEntries (sequencedParsedPhis: (int * PhiParse) list) : SigmaContextEntry list =
     sequencedParsedPhis

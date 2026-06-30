@@ -466,6 +466,7 @@ let parsedAtomReviewKindLabels =
         "Interface", "Interfaces"
         "State", "States"
         "Host", "Hosts"
+        "Constraint", "Constraints"
     ]
 
 let getParsedAtomReviewKindLabel atomKind =
@@ -481,6 +482,7 @@ let getSigmaEntriesForParsedAtomKind atomKind sigmaContext =
     | "Interface" -> sigmaContext.Interfaces
     | "State" -> sigmaContext.States
     | "Host" -> sigmaContext.Hosts
+    | "Constraint" -> sigmaContext.Constraints
     | _ -> []
 
 let parsedAtomReviewButtonClass selectedKind atomKind =

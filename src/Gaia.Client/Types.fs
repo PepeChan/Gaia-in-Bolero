@@ -185,6 +185,7 @@ let parsedExposureAtomKinds =
         "Interface"
         "State"
         "Host"
+        "Constraint"
     ]
 
 let t6RealizationInquirySource = "T6 Realization Inquiry"
