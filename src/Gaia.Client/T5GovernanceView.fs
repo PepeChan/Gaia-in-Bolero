@@ -280,6 +280,24 @@ let renderOptionalCandidateGroupStatus = function
     | None -> text "Not present"
     | Some status -> renderCandidateGroupStatusTag status
 
+let formatParsedAtomKindLabel = function
+    | "Function" -> "Capability"
+    | "Mode" -> "Use mode"
+    | "Interface" -> "Interaction point"
+    | "State" -> "Condition"
+    | "Host" -> "System element"
+    | "Constraint" -> "Rule / limit"
+    | atomKind -> atomKind
+
+let formatParsedAtomKindPluralLabel = function
+    | "Function" -> "Capabilities"
+    | "Mode" -> "Use modes"
+    | "Interface" -> "Interaction points"
+    | "State" -> "Conditions"
+    | "Host" -> "System elements"
+    | "Constraint" -> "Rules / limits"
+    | atomKind -> atomKind
+
 let renderParseAmendmentPreview (draft: ParseAmendmentDraft) (impact: ParseAmendmentImpactPreview option) =
     div {
         attr.``class`` "notification is-warning is-light py-2"
@@ -290,12 +308,12 @@ let renderParseAmendmentPreview (draft: ParseAmendmentDraft) (impact: ParseAmend
         p {
             attr.``class`` "mb-1"
             strong { text "Old atom: " }
-            text (draft.OriginalAtomKind + " = " + draft.OriginalAtomText)
+            text (formatParsedAtomKindLabel draft.OriginalAtomKind + " = " + draft.OriginalAtomText)
         }
         p {
             attr.``class`` "mb-1"
             strong { text "New atom: " }
-            text (draft.ProposedAtomKind + " = " + draft.ProposedAtomText)
+            text (formatParsedAtomKindLabel draft.ProposedAtomKind + " = " + draft.ProposedAtomText)
         }
         p {
             attr.``class`` "mb-2"
@@ -421,7 +439,7 @@ let renderParseAmendmentPanel (draft: ParseAmendmentDraft option) status dispatc
                             attr.``class`` "heading mb-1"
                             text "Original kind"
                         }
-                        p { text amendment.OriginalAtomKind }
+                        p { text (formatParsedAtomKindLabel amendment.OriginalAtomKind) }
                     }
 
                     div {
@@ -461,7 +479,7 @@ let renderParseAmendmentPanel (draft: ParseAmendmentDraft option) status dispatc
                                 forEach parsedExposureAtomKinds <| fun atomKind ->
                                     option {
                                         attr.value atomKind
-                                        text atomKind
+                                        text (formatParsedAtomKindLabel atomKind)
                                     }
                             }
                         }
@@ -524,14 +542,8 @@ let renderParseAmendmentPanel (draft: ParseAmendmentDraft option) status dispatc
     }
 
 let parsedAtomReviewKindLabels =
-    [
-        "Function", "Functions"
-        "Mode", "Modes"
-        "Interface", "Interfaces"
-        "State", "States"
-        "Host", "Hosts"
-        "Constraint", "Constraints"
-    ]
+    parsedExposureAtomKinds
+    |> List.map (fun atomKind -> atomKind, formatParsedAtomKindPluralLabel atomKind)
 
 let getParsedAtomReviewKindLabel atomKind =
     parsedAtomReviewKindLabels
@@ -579,7 +591,7 @@ let renderParseAmendmentInlineEditor amendment candidateDecisions sigmaBasisItem
                     attr.``class`` "heading mb-1"
                     text "Original kind"
                 }
-                p { text amendment.OriginalAtomKind }
+                p { text (formatParsedAtomKindLabel amendment.OriginalAtomKind) }
             }
 
             div {
@@ -622,7 +634,7 @@ let renderParseAmendmentInlineEditor amendment candidateDecisions sigmaBasisItem
                         forEach parsedExposureAtomKinds <| fun atomKind ->
                             option {
                                 attr.value atomKind
-                                text atomKind
+                                text (formatParsedAtomKindLabel atomKind)
                             }
                     }
                 }
@@ -854,7 +866,7 @@ let renderParsedAtomBasisGovernance row ledgerEvents dispatch =
                                 }
                                 p {
                                     attr.``class`` "sigma-basis-atom mb-1"
-                                    text (basisItem.Kind + " = " + basisItem.AtomValue)
+                                    text (formatParsedAtomKindLabel basisItem.Kind + " = " + basisItem.AtomValue)
                                 }
                                 renderParsedAtomPhiChips basisItem.SupportingPhiIds
                             }
@@ -982,11 +994,11 @@ let renderParsedAtomReviewRow row amendmentDraft parseAmendmentStatus candidateD
                     attr.``class`` "column is-5"
                     p {
                         attr.``class`` "heading mb-1"
-                        text "Current atom"
+                        text "Current item"
                     }
                     p {
                         attr.``class`` "sigma-basis-atom mb-0"
-                        strong { text (row.AtomKind + ": ") }
+                        strong { text (formatParsedAtomKindLabel row.AtomKind + ": ") }
                         text row.AtomText
                     }
                 }
@@ -1023,7 +1035,7 @@ let renderParsedAtomReviewRow row amendmentDraft parseAmendmentStatus candidateD
                     attr.``class`` "column is-6"
                     p {
                         attr.``class`` "heading mb-1"
-                        text "Candidate / governance status"
+                        text "Candidate status"
                     }
                     renderAtomCandidateStatusTags row.CandidateLinks
                 }
@@ -1044,7 +1056,7 @@ let renderParsedAtomReviewRow row amendmentDraft parseAmendmentStatus candidateD
 
                 summary {
                     attr.``class`` "model-fitting-panel-summary"
-                    text "Edit / Govern"
+                    text "Work on this item"
                 }
 
                 div {
