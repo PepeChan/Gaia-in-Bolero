@@ -276,6 +276,7 @@ let projectSnapshotToJson (snapshot: ProjectSnapshot) =
     json["PhiIntakes"] <- jsonArrayFrom snapshot.PhiIntakes phiIntakeToJson
     json["PhiContextEntries"] <- jsonArrayFrom snapshot.PhiContextEntries phiContextEntryToJson
     json["ParsedPhis"] <- jsonArrayFrom snapshot.ParsedPhis phiParseToJson
+    json["StaleParsedPhiIds"] <- jsonStringArray snapshot.StaleParsedPhiIds
     json["ExcludedPhiIds"] <- jsonStringArray snapshot.ExcludedPhiIds
     json["CandidateDecisions"] <- jsonArrayFrom snapshot.CandidateDecisions candidateDecisionToJson
     json["LedgerEvents"] <- jsonArrayFrom snapshot.LedgerEvents ledgerEventToJson
@@ -392,6 +393,26 @@ let readStringList context propertyName (json: JsonObject) =
             with _ ->
                 failProjectJson (itemContext + " must be a string."))
     |> Seq.toList
+
+let readOptionalStringList context propertyName (json: JsonObject) =
+    match tryReadProperty propertyName json with
+    | None ->
+        []
+    | Some node ->
+        let array = node |> asArray (context + "." + propertyName)
+
+        array
+        |> Seq.mapi (fun index node ->
+            let itemContext = context + "." + propertyName + "[" + string index + "]"
+
+            if isNull node then
+                failProjectJson (itemContext + " must be a string.")
+            else
+                try
+                    node.GetValue<string>()
+                with _ ->
+                    failProjectJson (itemContext + " must be a string."))
+        |> Seq.toList
 
 let readObjectList context propertyName readItem (json: JsonObject) =
     let array = readProperty context propertyName json |> asArray (context + "." + propertyName)
@@ -643,6 +664,7 @@ let tryDeserializeProjectSnapshot json =
                 PhiIntakes = readObjectList "ProjectSnapshot" "PhiIntakes" readPhiIntake root
                 PhiContextEntries = readOptionalObjectList "ProjectSnapshot" "PhiContextEntries" readPhiContextEntry root
                 ParsedPhis = readObjectList "ProjectSnapshot" "ParsedPhis" readPhiParse root
+                StaleParsedPhiIds = readOptionalStringList "ProjectSnapshot" "StaleParsedPhiIds" root
                 ExcludedPhiIds = readStringList "ProjectSnapshot" "ExcludedPhiIds" root
                 CandidateDecisions = readObjectList "ProjectSnapshot" "CandidateDecisions" readCandidateDecision root
                 LedgerEvents = readObjectList "ProjectSnapshot" "LedgerEvents" readLedgerEvent root

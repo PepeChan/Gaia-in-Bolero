@@ -223,6 +223,27 @@ let openProjectFileCmd jsRuntime =
                 ProjectFileOpened content)
         (fun ex -> ProjectFileOpenFailed ex.Message)
 
+let private isPhiTargetKind (targetKind: string) =
+    String.Equals(cleanFormValue targetKind, "Phi", StringComparison.OrdinalIgnoreCase)
+
+let private hasParsedPhi phiId (model: Model) =
+    model.parsedPhis
+    |> List.exists (fun parse -> parse.PhiId = phiId)
+
+let private markPhiParseStaleIfParsed phiId statusMessage (model: Model) =
+    if hasParsedPhi phiId model then
+        let staleParsedPhiIds =
+            if model.staleParsedPhiIds |> List.contains phiId then
+                model.staleParsedPhiIds
+            else
+                model.staleParsedPhiIds @ [ phiId ]
+
+        { model with
+            staleParsedPhiIds = staleParsedPhiIds
+            phiBatchParseStatus = Some statusMessage }
+    else
+        model
+
 let addContextEntryToPhi phiId (model: Model) =
     let value = model.phiContextEntryDraftValue.Trim()
 
@@ -236,18 +257,11 @@ let addContextEntryToPhi phiId (model: Model) =
             { model with
                 existingPhiContextTargetId = phiId
                 phiContextEntries = model.phiContextEntries @ [ entry ]
-                phiContextEntryDraftValue = "" }
+                phiContextEntryDraftValue = ""
+                phiBatchParseStatus = model.phiBatchParseStatus }
+            |> markPhiParseStaleIfParsed phiId ("Parse marked stale for " + phiId + ". Recompute parse to apply new Phi context.")
 
-        let refreshedModel =
-            if model.parsedPhis |> List.exists (fun parse -> parse.PhiId = phiId) then
-                model.ingestedPhis
-                |> List.tryFind (fun phi -> phi.PhiId = phiId)
-                |> Option.map (fun phi -> parsePhiIntoModel phi contextModel |> fst)
-                |> Option.defaultValue contextModel
-            else
-                contextModel
-
-        refreshedModel
+        contextModel
         |> appendPhiContextEntryLedgerEvent entry
 
 let private containsDraftMarker (marker: string) (value: string) =
@@ -477,12 +491,27 @@ let update (jsRuntime: IJSRuntime) message model =
                     + " | "
                     + targetLabel
 
-                { model with
-                    evidenceRecords = model.evidenceRecords @ [ evidenceRecord ]
-                    evidenceTitle = ""
-                    evidenceNotes = ""
-                    evidenceContentRef = ""
-                    evidenceStatus = Some ("Evidence reference captured: " + evidenceId) }
+                let evidenceModel =
+                    { model with
+                        evidenceRecords = model.evidenceRecords @ [ evidenceRecord ]
+                        evidenceTitle = ""
+                        evidenceNotes = ""
+                        evidenceContentRef = ""
+                        evidenceStatus = Some ("Evidence reference captured: " + evidenceId) }
+
+                let contextAwareEvidenceModel =
+                    if isPhiTargetKind evidenceRecord.TargetKind then
+                        let staleStatus =
+                            "Parse marked stale for "
+                            + evidenceRecord.TargetId
+                            + ". Recompute parse to apply new Phi-targeted 1sec Snip."
+
+                        evidenceModel
+                        |> markPhiParseStaleIfParsed evidenceRecord.TargetId staleStatus
+                    else
+                        evidenceModel
+
+                contextAwareEvidenceModel
                 |> appendLedgerEvent "EvidenceReferenceCreated" evidenceId "Evidence reference created" detail
                 |> fun updatedModel -> updatedModel, Cmd.none
     | SetRealizationObjectKindDraft value ->
@@ -635,7 +664,24 @@ let update (jsRuntime: IJSRuntime) message model =
     | ParseIngestedPhi phiId ->
         match model.ingestedPhis |> List.tryFind (fun phi -> phi.PhiId = phiId) with
         | Some phi ->
-            if model.parsedPhis |> List.exists (fun parse -> parse.PhiId = phiId) then
+            let hasExistingParse =
+                model.parsedPhis
+                |> List.exists (fun parse -> parse.PhiId = phiId)
+
+            let isStale =
+                isPhiParseStale model.staleParsedPhiIds phiId
+
+            if hasExistingParse && isStale then
+                let parsedModel, parse = parsePhiIntoModel phi model
+
+                parsedModel
+                |> appendLedgerEvent
+                    "PhiParseRecomputed"
+                    parse.PhiId
+                    "Phi parse recomputed"
+                    ("Recomputed from original Phi and current Phi context entries. Statement: " + parse.Statement)
+                |> fun updatedModel -> updatedModel, Cmd.none
+            elif hasExistingParse then
                 { model with phiBatchParseStatus = None }
                 |> appendLedgerEvent
                     "PhiParseIgnoredAlreadyParsed"

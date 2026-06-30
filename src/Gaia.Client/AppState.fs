@@ -43,6 +43,7 @@ type Model =
         ingestedPhis: PhiIntake list
         phiContextEntries: PhiContextEntry list
         parsedPhis: PhiParse list
+        staleParsedPhiIds: string list
         excludedPhiIds: string list
         selectedPhiId: string option
         selectedPhiParse: PhiParse option
@@ -221,6 +222,7 @@ let buildProjectSnapshot (model: Model) =
         PhiIntakes = model.ingestedPhis
         PhiContextEntries = model.phiContextEntries
         ParsedPhis = model.parsedPhis
+        StaleParsedPhiIds = model.staleParsedPhiIds
         ExcludedPhiIds = model.excludedPhiIds
         CandidateDecisions = model.candidateDecisions
         LedgerEvents = model.LedgerEvents
@@ -239,6 +241,7 @@ let restoreProjectSnapshot (snapshot: ProjectSnapshot) (model: Model) =
             ingestedPhis = snapshot.PhiIntakes
             phiContextEntries = snapshot.PhiContextEntries
             parsedPhis = snapshot.ParsedPhis
+            staleParsedPhiIds = snapshot.StaleParsedPhiIds
             excludedPhiIds = snapshot.ExcludedPhiIds
             selectedPhiId = None
             selectedPhiParse = None
@@ -347,6 +350,7 @@ let initModel =
         ingestedPhis = []
         phiContextEntries = []
         parsedPhis = []
+        staleParsedPhiIds = []
         excludedPhiIds = []
         selectedPhiId = None
         selectedPhiParse = None
@@ -416,6 +420,7 @@ let clearProjectModel (model: Model) =
             ingestedPhis = []
             phiContextEntries = []
             parsedPhis = []
+            staleParsedPhiIds = []
             excludedPhiIds = []
             selectedPhiId = None
             selectedPhiParse = None
@@ -487,6 +492,7 @@ let buildSphynxSampleSnapshot () =
         PhiIntakes = DemoData.demoPhiIntakes
         PhiContextEntries = [ coverGlassContextEntry ]
         ParsedPhis = []
+        StaleParsedPhiIds = []
         ExcludedPhiIds = []
         CandidateDecisions = []
         LedgerEvents = sampleLedgerEvents

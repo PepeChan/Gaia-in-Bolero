@@ -397,6 +397,7 @@ type ProjectSnapshot =
         PhiIntakes: PhiIntake list
         PhiContextEntries: PhiContextEntry list
         ParsedPhis: PhiParse list
+        StaleParsedPhiIds: string list
         ExcludedPhiIds: string list
         CandidateDecisions: CandidateDecision list
         LedgerEvents: LedgerEvent list

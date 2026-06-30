@@ -7,7 +7,12 @@ open Gaia.Client.Types
 open Gaia.Client.Workflow
 open Gaia.Client.T2ParsingView
 
-let renderCurrentSigmaSnapshotPanel sequencedParsedPhis sigmaContext =
+let renderCurrentSigmaSnapshotPanel sequencedParsedPhis staleParsedPhiIds sigmaContext =
+    let staleParsedPhiCount =
+        sequencedParsedPhis
+        |> List.map snd
+        |> getStaleParsedPhiCount staleParsedPhiIds
+
     div {
         attr.``class`` "box"
 
@@ -16,7 +21,7 @@ let renderCurrentSigmaSnapshotPanel sequencedParsedPhis sigmaContext =
             text "Current Σ Snapshot"
         }
 
-        renderSigmaSnapshotCounts (List.length sequencedParsedPhis) sigmaContext
+        renderSigmaSnapshotCounts (List.length sequencedParsedPhis) staleParsedPhiCount sigmaContext
     }
 
 let getReinforcedAtomCount (entries: SigmaContextEntry list) =

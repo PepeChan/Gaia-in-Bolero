@@ -22,6 +22,15 @@ let isPhiExcluded excludedPhiIds phiId =
     excludedPhiIds
     |> List.contains phiId
 
+let isPhiParseStale staleParsedPhiIds phiId =
+    staleParsedPhiIds
+    |> List.contains phiId
+
+let getStaleParsedPhiCount staleParsedPhiIds (parsedPhis: PhiParse list) =
+    parsedPhis
+    |> List.filter (fun parse -> isPhiParseStale staleParsedPhiIds parse.PhiId)
+    |> List.length
+
 let getSequencedParsedPhis (parsedPhis: PhiParse list) =
     parsedPhis
     |> List.mapi (fun index parse -> index + 1, parse)
@@ -1387,6 +1396,9 @@ let parsePhiIntoModel (phi: PhiIntake) (model: Model) =
         selectedPhiParse = Some parse
         selectedPhiResolution = Some resolution
         parsedPhis = parsedPhis
+        staleParsedPhiIds =
+            model.staleParsedPhiIds
+            |> List.filter (fun stalePhiId -> stalePhiId <> phi.PhiId)
         lastReplayAction = Some lastReplayAction
         phiBatchParseStatus = None },
     parse
