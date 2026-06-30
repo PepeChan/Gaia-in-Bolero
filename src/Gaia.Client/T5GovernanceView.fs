@@ -1991,53 +1991,6 @@ let renderLatestDeltaSummaryTable lastReplayAction =
             }
     }
 
-let renderT5DecisionHistoryPanel (candidateDecisions: CandidateDecision list) =
-    div {
-        attr.``class`` "box"
-
-        h2 {
-            attr.``class`` "title is-5"
-            text "T5 — Decision History"
-        }
-
-        match candidateDecisions with
-        | [] ->
-            p {
-                attr.``class`` "has-text-grey"
-                text "No T5 decisions recorded yet."
-            }
-        | decisions ->
-            div {
-                attr.``class`` "table-container"
-                table {
-                    attr.``class`` "table is-fullwidth is-striped is-narrow"
-
-                    thead {
-                        tr {
-                            th { text "CandidateId" }
-                            th { text "Candidate type" }
-                            th { text "Target" }
-                            th { text "Decision" }
-                            th { text "Timestamp" }
-                            th { text "Rationale" }
-                        }
-                    }
-
-                    tbody {
-                        forEach decisions <| fun decision ->
-                            tr {
-                                td { code { text decision.CandidateId } }
-                                td { text decision.CandidateType }
-                                td { text decision.Target }
-                                td { renderCandidateDecisionTag decision.Decision }
-                                td { text (formatCandidateDecisionTimestamp decision.Timestamp) }
-                                td { text decision.Rationale }
-                            }
-                    }
-                }
-            }
-    }
-
 let getAllCandidateBasisItems candidateDeltas sequencedParsedPhis =
     candidateDeltas
     |> List.collect (fun candidate -> buildSigmaBasisItemReviews candidate sequencedParsedPhis)

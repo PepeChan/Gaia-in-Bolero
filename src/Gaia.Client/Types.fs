@@ -10,8 +10,6 @@ type Page =
 
 type TopNavigationTab =
     | GaiaProbeTab
-    | DetailsTab
-    | DemoToolsTab
     | DesignRealizationTab
     | FactsReconstructionTab
     | EvidenceTab
