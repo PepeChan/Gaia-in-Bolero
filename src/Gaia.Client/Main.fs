@@ -963,6 +963,7 @@ let homePage model dispatch =
                             model.lastReplayAction
                             model.candidateDecisions
                             model.sigmaBasisItemDecisions
+                            model.LedgerEvents
                             model.selectedParsedAtomReviewKind
                             model.parseAmendmentDraft
                             model.parseAmendmentStatus
@@ -1039,6 +1040,7 @@ let homePage model dispatch =
                     model.candidateDecisions
                     model.sigmaBasisItemDecisions
                     includedSequencedParsedPhis
+                    model.LedgerEvents
                     dispatch
 
                 renderT5DecisionHistoryPanel model.candidateDecisions

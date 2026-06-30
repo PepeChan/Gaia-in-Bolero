@@ -193,6 +193,7 @@ let derivedInquiryContextKind = "DerivedInquiry"
 let t6InquiryTargetContextKind = "T6InquiryTarget"
 let t6InquiryGapKeyContextKind = "T6InquiryGapKey"
 let t6InquiryQuestionContextKind = "T6InquiryQuestion"
+let sigmaBasisItemDecisionResetLedgerKind = "SigmaBasisItemDecisionReset"
 
 type LedgerEvent =
     {

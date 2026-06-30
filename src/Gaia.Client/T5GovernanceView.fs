@@ -33,7 +33,7 @@ let renderCandidateDecisionTag decisionValue =
         text (formatCandidateDecisionValue decisionValue)
     }
 
-let renderT5GovernanceSummaryTable sigmaContext (candidateDecisions: CandidateDecision list) sigmaBasisItemDecisions sequencedParsedPhis dispatch =
+let renderT5GovernanceSummaryTable sigmaContext (candidateDecisions: CandidateDecision list) sigmaBasisItemDecisions sequencedParsedPhis ledgerEvents dispatch =
     let candidateDeltas = formulateCandidateDeltas sigmaContext
     let pendingCount = countCandidateGroupStatuses GroupPending candidateDeltas candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
     let acceptedCount = countCandidateGroupStatuses GroupAccepted candidateDeltas candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
@@ -104,6 +104,16 @@ let renderT5GovernanceSummaryTable sigmaContext (candidateDecisions: CandidateDe
                                     p {
                                         attr.``class`` "is-size-7 has-text-warning-dark mb-0"
                                         text conflict
+                                    }
+                                let resetCount =
+                                    ledgerEvents
+                                    |> getParseAmendmentResetEventsForCandidate candidate.CandidateId
+                                    |> List.length
+
+                                if resetCount > 0 then
+                                    p {
+                                        attr.``class`` "is-size-7 has-text-warning-dark mb-0"
+                                        text ("Parse amendment reset basis decisions for this group: " + string resetCount)
                                     }
                             }
                             td { renderCandidateGovernanceActions candidate decisionValue dispatch }
@@ -202,23 +212,113 @@ let buildParsedAtomReviewRows
                         |> Option.defaultValue "No current candidate group"
                 })))
 
-let renderParseAmendmentPreview (draft: ParseAmendmentDraft) =
+let renderOptionalCandidateGroupStatus = function
+    | None -> text "Not present"
+    | Some status -> renderCandidateGroupStatusTag status
+
+let renderParseAmendmentPreview (draft: ParseAmendmentDraft) (impact: ParseAmendmentImpactPreview option) =
     div {
         attr.``class`` "notification is-warning is-light py-2"
         p {
             attr.``class`` "mb-1"
-            strong { text "Preview impact: " }
-            text (draft.OriginalAtomKind + " count -1; " + draft.ProposedAtomKind + " count +1.")
+            strong { text "Preview impact" }
         }
         p {
             attr.``class`` "mb-1"
-            strong { text "Affected candidate groups: " }
-            text (formatAffectedParseAmendmentGroups draft.OriginalAtomKind draft.ProposedAtomKind)
+            strong { text "Old atom: " }
+            text (draft.OriginalAtomKind + " = " + draft.OriginalAtomText)
         }
         p {
-            attr.``class`` "mb-0"
-            text "Downstream T4/T5 decisions may require review. T6 stale propagation is not performed in this slice."
+            attr.``class`` "mb-1"
+            strong { text "New atom: " }
+            text (draft.ProposedAtomKind + " = " + draft.ProposedAtomText)
         }
+        p {
+            attr.``class`` "mb-2"
+            strong { text "Source Phi: " }
+            code { text draft.SourcePhiId }
+        }
+
+        match impact with
+        | None ->
+            p {
+                attr.``class`` "mb-0"
+                text "Candidate group before/after status is available from the inline selected-kind review panel. T6 stale propagation is not performed in this slice."
+            }
+        | Some preview ->
+            match preview.CandidateGroupImpacts with
+            | [] ->
+                p {
+                    attr.``class`` "mb-2"
+                    text "No affected candidate group could be computed for this amendment."
+                }
+            | impacts ->
+                div {
+                    attr.``class`` "table-container mb-2"
+                    table {
+                        attr.``class`` "table is-fullwidth is-narrow"
+                        thead {
+                            tr {
+                                th { text "Candidate group" }
+                                th { text "Before" }
+                                th { text "After" }
+                                th { text "Basis before" }
+                                th { text "Basis after" }
+                            }
+                        }
+                        tbody {
+                            forEach impacts <| fun candidateImpact ->
+                                tr {
+                                    td {
+                                        p {
+                                            attr.``class`` "mb-1"
+                                            text (candidateImpact.CandidateType + " / " + candidateImpact.CandidateTarget)
+                                        }
+                                        code { text candidateImpact.CandidateId }
+                                    }
+                                    td { renderOptionalCandidateGroupStatus candidateImpact.BeforeStatus }
+                                    td { renderOptionalCandidateGroupStatus candidateImpact.AfterStatus }
+                                    td {
+                                        match candidateImpact.BeforeBasisItemKey with
+                                        | None -> text "None"
+                                        | Some key -> code { text key }
+                                    }
+                                    td {
+                                        match candidateImpact.AfterBasisItemKey with
+                                        | None -> text "None"
+                                        | Some key -> code { text key }
+                                    }
+                                }
+                        }
+                    }
+                }
+
+            match preview.ResetImpacts with
+            | [] ->
+                p {
+                    attr.``class`` "mb-2"
+                    text "No existing T4/T5 basis-item decisions are attached to the amended atom, so no basis decisions will be reset."
+                }
+            | resets ->
+                div {
+                    attr.``class`` "mb-2"
+                    p {
+                        attr.``class`` "has-text-weight-semibold mb-1"
+                        text "Basis-item decisions to reopen"
+                    }
+                    forEach resets <| fun resetImpact ->
+                        p {
+                            attr.``class`` "mb-1"
+                            renderCandidateDecisionTag resetImpact.PreviousDecision
+                            text (" -> Pending for ")
+                            code { text resetImpact.BasisItemKey }
+                        }
+                }
+
+            p {
+                attr.``class`` "mb-0"
+                text "T6 stale propagation is intentionally deferred."
+            }
     }
 
 let renderParseAmendmentPanel (draft: ParseAmendmentDraft option) status dispatch =
@@ -330,7 +430,7 @@ let renderParseAmendmentPanel (draft: ParseAmendmentDraft option) status dispatc
                 }
 
                 if amendment.PreviewRequested then
-                    renderParseAmendmentPreview amendment
+                    renderParseAmendmentPreview amendment None
 
                 div {
                     attr.``class`` "buttons are-small mb-0"
@@ -394,7 +494,13 @@ let isParseAmendmentDraftForRow (row: ParsedAtomReviewRow) (draft: ParseAmendmen
     && draft.OriginalAtomKind = row.AtomKind
     && draft.OriginalAtomText = row.AtomText
 
-let renderParseAmendmentInlineEditor (amendment: ParseAmendmentDraft) dispatch =
+let renderParseAmendmentInlineEditor amendment candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis dispatch =
+    let impactPreview =
+        if amendment.PreviewRequested then
+            Some (buildParseAmendmentImpactPreview amendment candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis)
+        else
+            None
+
     div {
         attr.``class`` "sigma-basis-detail-block"
 
@@ -483,7 +589,7 @@ let renderParseAmendmentInlineEditor (amendment: ParseAmendmentDraft) dispatch =
         }
 
         if amendment.PreviewRequested then
-            renderParseAmendmentPreview amendment
+            renderParseAmendmentPreview amendment impactPreview
 
         div {
             attr.``class`` "buttons are-small mb-0"
@@ -511,7 +617,7 @@ let renderParseAmendmentInlineEditor (amendment: ParseAmendmentDraft) dispatch =
         }
     }
 
-let renderParsedAtomReviewRow (row: ParsedAtomReviewRow) amendmentDraft dispatch =
+let renderParsedAtomReviewRow row amendmentDraft candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis dispatch =
     div {
         attr.``class`` "sigma-basis-item"
 
@@ -577,7 +683,7 @@ let renderParsedAtomReviewRow (row: ParsedAtomReviewRow) amendmentDraft dispatch
 
         match amendmentDraft with
         | Some amendment when isParseAmendmentDraftForRow row amendment ->
-            renderParseAmendmentInlineEditor amendment dispatch
+            renderParseAmendmentInlineEditor amendment candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis dispatch
         | _ -> empty()
     }
 
@@ -680,7 +786,13 @@ let renderParsedAtomReviewTable
                     div {
                         attr.``class`` "sigma-basis-list"
                         forEach rows <| fun row ->
-                            renderParsedAtomReviewRow row parseAmendmentDraft dispatch
+                            renderParsedAtomReviewRow
+                                row
+                                parseAmendmentDraft
+                                candidateDecisions
+                                sigmaBasisItemDecisions
+                                sequencedParsedPhis
+                                dispatch
                     }
             }
     }
@@ -881,8 +993,9 @@ let renderSigmaBasisItemBulkActions basisItemKeys dispatch =
         }
     }
 
-let renderSigmaBasisItemReview (basisItem: SigmaBasisItemReview) (sigmaBasisItemDecisions: Map<string, CandidateDecisionValue>) dispatch =
+let renderSigmaBasisItemReview (basisItem: SigmaBasisItemReview) (sigmaBasisItemDecisions: Map<string, CandidateDecisionValue>) ledgerEvents dispatch =
     let decisionValue = getSigmaBasisItemDecisionValue basisItem.Key sigmaBasisItemDecisions
+    let resetEvent = tryFindLatestParseAmendmentResetEventForBasisItem basisItem.Key ledgerEvents
 
     div {
         attr.``class`` "sigma-basis-item"
@@ -921,6 +1034,21 @@ let renderSigmaBasisItemReview (basisItem: SigmaBasisItemReview) (sigmaBasisItem
                 renderSigmaBasisItemActions basisItem.Key decisionValue dispatch
             }
         }
+
+        match resetEvent with
+        | None -> empty()
+        | Some ledgerEvent ->
+            div {
+                attr.``class`` "notification is-warning is-light is-size-7 py-2 mb-2"
+                p {
+                    attr.``class`` "has-text-weight-semibold mb-1"
+                    text "Decision reset by parsed atom amendment"
+                }
+                p {
+                    attr.``class`` "mb-0"
+                    text ledgerEvent.Detail
+                }
+            }
 
         div {
             attr.``class`` "sigma-basis-detail-block"
@@ -1115,6 +1243,7 @@ let renderReviewCandidateCard
     (candidateDecisions: CandidateDecision list)
     (sigmaBasisItemDecisions: Map<string, CandidateDecisionValue>)
     sequencedParsedPhis
+    ledgerEvents
     dispatch =
     let decisionValue = getCandidateDecisionValue candidate.CandidateId candidateDecisions
     let candidateDecision = tryFindCandidateDecision candidate.CandidateId candidateDecisions
@@ -1234,6 +1363,8 @@ let renderReviewCandidateCard
                                 text conflict
                             }
 
+                        renderCandidateAmendmentResetNotice candidate ledgerEvents
+
                         p {
                             attr.``class`` "mb-2"
                             strong { text "Candidate class decision: " }
@@ -1292,11 +1423,40 @@ let renderReviewCandidateCard
                     div {
                         attr.``class`` "sigma-basis-list"
                         forEach items <| fun basisItem ->
-                            renderSigmaBasisItemReview basisItem sigmaBasisItemDecisions dispatch
+                            renderSigmaBasisItemReview basisItem sigmaBasisItemDecisions ledgerEvents dispatch
                     }
             }
         }
     }
+
+let renderRecentParseAmendmentResetEvents ledgerEvents =
+    let resetEvents =
+        ledgerEvents
+        |> getParseAmendmentResetLedgerEvents
+        |> List.rev
+        |> List.truncate 5
+
+    match resetEvents with
+    | [] -> empty()
+    | events ->
+        div {
+            attr.``class`` "notification is-warning is-light cognition-review-helper"
+            p {
+                attr.``class`` "has-text-weight-semibold mb-2"
+                text "Basis decisions reopened by parse amendment"
+            }
+            forEach events <| fun ledgerEvent ->
+                div {
+                    p {
+                        attr.``class`` "is-size-7 mb-1"
+                        code { text ledgerEvent.TargetId }
+                    }
+                    p {
+                        attr.``class`` "is-size-7 mb-2"
+                        text ledgerEvent.Detail
+                    }
+                }
+        }
 
 let renderCognitionReviewPanel (model: Model) sequencedParsedPhis sigmaContext dispatch =
     let reviewCandidates = getFilteredReviewCandidates model sigmaContext sequencedParsedPhis
@@ -1313,6 +1473,8 @@ let renderCognitionReviewPanel (model: Model) sequencedParsedPhis sigmaContext d
             attr.``class`` "is-size-7 has-text-grey mb-4"
             text "Candidate-class decisions persist. Basis-derived group status is the human-facing governance state."
         }
+
+        renderRecentParseAmendmentResetEvents model.LedgerEvents
 
         div {
             attr.``class`` "columns is-variable is-4"
@@ -1351,6 +1513,7 @@ let renderCognitionReviewPanel (model: Model) sequencedParsedPhis sigmaContext d
                     model.candidateDecisions
                     model.sigmaBasisItemDecisions
                     sequencedParsedPhis
+                    model.LedgerEvents
                     dispatch
     }
 
@@ -1447,6 +1610,7 @@ let renderOperationalSummaryTablesPanel
     lastReplayAction
     (candidateDecisions: CandidateDecision list)
     sigmaBasisItemDecisions
+    ledgerEvents
     selectedParsedAtomReviewKind
     parseAmendmentDraft
     parseAmendmentStatus
@@ -1479,7 +1643,7 @@ let renderOperationalSummaryTablesPanel
 
         renderT4CandidateSummaryTable sigmaContext
 
-        renderT5GovernanceSummaryTable sigmaContext candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis dispatch
+        renderT5GovernanceSummaryTable sigmaContext candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis ledgerEvents dispatch
 
         renderLatestDeltaSummaryTable lastReplayAction
     }

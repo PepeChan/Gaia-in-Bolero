@@ -360,6 +360,55 @@ let updateExposureAtomValue atomKind value (parse: PhiParse) =
 
     { parse with Exposure = exposure }
 
+let private atomTextEquals (left: string) (right: string) =
+    let leftText = if isNull left then "" else left.Trim()
+    let rightText = if isNull right then "" else right.Trim()
+
+    String.Equals(leftText, rightText, StringComparison.OrdinalIgnoreCase)
+
+let private replaceAtomInList originalAtom proposedAtom atoms =
+    atoms
+    |> List.map (fun atom ->
+        if atomTextEquals atom originalAtom then
+            proposedAtom
+        else
+            atom)
+
+let private removeAtomFromList atom atoms =
+    atoms
+    |> List.filter (fun existing -> not (atomTextEquals existing atom))
+
+let private appendAtomToList atom atoms =
+    if atoms |> List.exists (fun existing -> atomTextEquals existing atom) then
+        atoms
+    else
+        atoms @ [ atom ]
+
+let appendParseAmendmentExposureNote newKind (parse: PhiParse) =
+    let notes = if isNull parse.ExposureNotes then "" else parse.ExposureNotes.Trim()
+    let amendmentNote = " ParseAmendment: " + newKind + "=ParseAmendment."
+
+    { parse with ExposureNotes = notes + amendmentNote }
+
+let applyParseAmendmentToPhiParse (draft: ParseAmendmentDraft) (parse: PhiParse) =
+    let originalAtoms =
+        getExposureAtomValue draft.OriginalAtomKind parse
+        |> splitExposureAtomValues
+
+    if draft.ProposedAtomKind = draft.OriginalAtomKind then
+        parse
+        |> updateExposureAtomValue draft.ProposedAtomKind (originalAtoms |> replaceAtomInList draft.OriginalAtomText draft.ProposedAtomText |> joinExposureAtomValues)
+        |> appendParseAmendmentExposureNote draft.ProposedAtomKind
+    else
+        let targetAtoms =
+            getExposureAtomValue draft.ProposedAtomKind parse
+            |> splitExposureAtomValues
+
+        parse
+        |> updateExposureAtomValue draft.OriginalAtomKind (originalAtoms |> removeAtomFromList draft.OriginalAtomText |> joinExposureAtomValues)
+        |> updateExposureAtomValue draft.ProposedAtomKind (targetAtoms |> appendAtomToList draft.ProposedAtomText |> joinExposureAtomValues)
+        |> appendParseAmendmentExposureNote draft.ProposedAtomKind
+
 let private combineProvenance values =
     let distinct =
         values
@@ -1283,6 +1332,228 @@ let buildCandidateGroupGovernance
         }
 
     { governance with ConflictExplanation = describeCandidateGroupClassConflict governance }
+
+type ParseAmendmentBasisDecisionResetImpact =
+    {
+        CandidateId: string
+        CandidateType: string
+        CandidateTarget: string
+        BasisItemKey: string
+        AtomKind: string
+        AtomValue: string
+        SourcePhiId: string
+        PreviousDecision: CandidateDecisionValue
+    }
+
+type ParseAmendmentCandidateGroupImpact =
+    {
+        CandidateId: string
+        CandidateType: string
+        CandidateTarget: string
+        BeforeStatus: CandidateGroupStatus option
+        AfterStatus: CandidateGroupStatus option
+        BeforeBasisItemKey: string option
+        AfterBasisItemKey: string option
+    }
+
+type ParseAmendmentImpactPreview =
+    {
+        OldAtomKind: string
+        OldAtomValue: string
+        NewAtomKind: string
+        NewAtomValue: string
+        SourcePhiId: string
+        SourcePhiStatement: string
+        CandidateGroupImpacts: ParseAmendmentCandidateGroupImpact list
+        ResetImpacts: ParseAmendmentBasisDecisionResetImpact list
+    }
+
+let private amendSequencedParsedPhis (draft: ParseAmendmentDraft) (sequencedParsedPhis: (int * PhiParse) list) =
+    sequencedParsedPhis
+    |> List.map (fun (sequenceNumber, parse: PhiParse) ->
+        if parse.PhiId = draft.SourcePhiId then
+            sequenceNumber, applyParseAmendmentToPhiParse draft parse
+        else
+            sequenceNumber, parse)
+
+let private findCandidateById (candidateId: string) (candidates: CandidateDelta list) =
+    candidates
+    |> List.tryFind (fun candidate -> candidate.CandidateId = candidateId)
+
+let private findBasisItemsForAmendedAtom
+    (atomKind: string)
+    (atomValue: string)
+    (sourcePhiId: string)
+    (candidate: CandidateDelta)
+    (sequencedParsedPhis: (int * PhiParse) list) =
+    buildSigmaBasisItemReviews candidate sequencedParsedPhis
+    |> List.filter (fun basisItem ->
+        basisItem.Kind = atomKind
+        && atomTextEquals basisItem.AtomValue atomValue
+        && (basisItem.SupportingPhiIds |> List.contains sourcePhiId))
+
+let private buildCandidateBasisMatches
+    (atomKind: string)
+    (atomValue: string)
+    (sourcePhiId: string)
+    (candidates: CandidateDelta list)
+    (sequencedParsedPhis: (int * PhiParse) list) =
+    candidates
+    |> List.collect (fun candidate ->
+        findBasisItemsForAmendedAtom atomKind atomValue sourcePhiId candidate sequencedParsedPhis
+        |> List.map (fun basisItem -> candidate, basisItem))
+
+let private candidateStatus
+    (candidateDecisions: CandidateDecision list)
+    (sigmaBasisItemDecisions: Map<string, CandidateDecisionValue>)
+    (sequencedParsedPhis: (int * PhiParse) list)
+    (candidate: CandidateDelta) =
+    buildCandidateGroupGovernance candidate candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
+    |> fun governance -> governance.Status
+
+let private removeResetBasisItemDecisions
+    (resetImpacts: ParseAmendmentBasisDecisionResetImpact list)
+    (sigmaBasisItemDecisions: Map<string, CandidateDecisionValue>) =
+    resetImpacts
+    |> List.fold (fun decisions resetImpact -> decisions |> Map.remove resetImpact.BasisItemKey) sigmaBasisItemDecisions
+
+let buildParseAmendmentImpactPreview
+    (draft: ParseAmendmentDraft)
+    (candidateDecisions: CandidateDecision list)
+    (sigmaBasisItemDecisions: Map<string, CandidateDecisionValue>)
+    (sequencedParsedPhis: (int * PhiParse) list) =
+    let beforeSigma = buildSigmaContext sequencedParsedPhis
+    let beforeCandidates = formulateCandidateDeltas beforeSigma
+    let afterSequencedParsedPhis = amendSequencedParsedPhis draft sequencedParsedPhis
+    let afterSigma = buildSigmaContext afterSequencedParsedPhis
+    let afterCandidates = formulateCandidateDeltas afterSigma
+
+    let oldMatches =
+        buildCandidateBasisMatches
+            draft.OriginalAtomKind
+            draft.OriginalAtomText
+            draft.SourcePhiId
+            beforeCandidates
+            sequencedParsedPhis
+
+    let newMatches =
+        buildCandidateBasisMatches
+            draft.ProposedAtomKind
+            draft.ProposedAtomText
+            draft.SourcePhiId
+            afterCandidates
+            afterSequencedParsedPhis
+
+    let resetImpacts =
+        oldMatches
+        |> List.choose (fun (candidate, basisItem) ->
+            let previousDecision = getSigmaBasisItemDecisionValue basisItem.Key sigmaBasisItemDecisions
+
+            if previousDecision = Pending then
+                None
+            else
+                Some
+                    {
+                        CandidateId = candidate.CandidateId
+                        CandidateType = formatCandidateDeltaKind candidate.Kind
+                        CandidateTarget = candidate.Target
+                        BasisItemKey = basisItem.Key
+                        AtomKind = basisItem.Kind
+                        AtomValue = basisItem.AtomValue
+                        SourcePhiId = draft.SourcePhiId
+                        PreviousDecision = previousDecision
+                    })
+        |> List.distinctBy (fun resetImpact -> resetImpact.BasisItemKey)
+
+    let afterDecisionMap =
+        sigmaBasisItemDecisions
+        |> removeResetBasisItemDecisions resetImpacts
+
+    let affectedCandidateIds =
+        [
+            yield! oldMatches |> List.map (fun (candidate, _) -> candidate.CandidateId)
+            yield! newMatches |> List.map (fun (candidate, _) -> candidate.CandidateId)
+        ]
+        |> List.distinct
+
+    let candidateGroupImpacts =
+        affectedCandidateIds
+        |> List.choose (fun candidateId ->
+            let beforeCandidate = findCandidateById candidateId beforeCandidates
+            let afterCandidate = findCandidateById candidateId afterCandidates
+            let displayCandidate =
+                match beforeCandidate with
+                | Some _ -> beforeCandidate
+                | None -> afterCandidate
+
+            displayCandidate
+            |> Option.map (fun candidate ->
+                let beforeBasisItemKey =
+                    oldMatches
+                    |> List.tryFind (fun (matchedCandidate, _) -> matchedCandidate.CandidateId = candidateId)
+                    |> Option.map (fun (_, basisItem) -> basisItem.Key)
+
+                let afterBasisItemKey =
+                    newMatches
+                    |> List.tryFind (fun (matchedCandidate, _) -> matchedCandidate.CandidateId = candidateId)
+                    |> Option.map (fun (_, basisItem) -> basisItem.Key)
+
+                {
+                    CandidateId = candidate.CandidateId
+                    CandidateType = formatCandidateDeltaKind candidate.Kind
+                    CandidateTarget = candidate.Target
+                    BeforeStatus =
+                        beforeCandidate
+                        |> Option.map (candidateStatus candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis)
+                    AfterStatus =
+                        afterCandidate
+                        |> Option.map (candidateStatus candidateDecisions afterDecisionMap afterSequencedParsedPhis)
+                    BeforeBasisItemKey = beforeBasisItemKey
+                    AfterBasisItemKey = afterBasisItemKey
+                }))
+
+    {
+        OldAtomKind = draft.OriginalAtomKind
+        OldAtomValue = draft.OriginalAtomText
+        NewAtomKind = draft.ProposedAtomKind
+        NewAtomValue = draft.ProposedAtomText
+        SourcePhiId = draft.SourcePhiId
+        SourcePhiStatement = draft.SourcePhiStatement
+        CandidateGroupImpacts = candidateGroupImpacts
+        ResetImpacts = resetImpacts
+    }
+
+let removeParseAmendmentResetDecisions
+    (impact: ParseAmendmentImpactPreview)
+    (sigmaBasisItemDecisions: Map<string, CandidateDecisionValue>) =
+    sigmaBasisItemDecisions
+    |> removeResetBasisItemDecisions impact.ResetImpacts
+
+let tryGetCandidateIdFromSigmaBasisItemKey (basisItemKey: string) =
+    let separatorIndex = basisItemKey.IndexOf("::", StringComparison.Ordinal)
+
+    if separatorIndex <= 0 then
+        None
+    else
+        Some (basisItemKey.Substring(0, separatorIndex))
+
+let getParseAmendmentResetLedgerEvents (ledgerEvents: LedgerEvent list) =
+    ledgerEvents
+    |> List.filter (fun ledgerEvent -> ledgerEvent.EventKind = sigmaBasisItemDecisionResetLedgerKind)
+
+let getParseAmendmentResetEventsForCandidate (candidateId: string) (ledgerEvents: LedgerEvent list) =
+    ledgerEvents
+    |> getParseAmendmentResetLedgerEvents
+    |> List.filter (fun ledgerEvent ->
+        match tryGetCandidateIdFromSigmaBasisItemKey ledgerEvent.TargetId with
+        | Some resetCandidateId -> resetCandidateId = candidateId
+        | None -> false)
+
+let tryFindLatestParseAmendmentResetEventForBasisItem (basisItemKey: string) (ledgerEvents: LedgerEvent list) =
+    ledgerEvents
+    |> getParseAmendmentResetLedgerEvents
+    |> List.filter (fun ledgerEvent -> ledgerEvent.TargetId = basisItemKey)
+    |> List.tryLast
 
 let isCandidateGroupUnresolvedOrConflicted governance =
     match governance.Status with

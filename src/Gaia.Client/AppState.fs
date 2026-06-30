@@ -184,6 +184,8 @@ let buildSigmaBasisItemDecisionsFromLedger ledgerEvents =
                 decisions |> Map.add ledgerEvent.TargetId Rejected
             | "SigmaBasisItemHeld" ->
                 decisions |> Map.add ledgerEvent.TargetId Held
+            | eventKind when eventKind = sigmaBasisItemDecisionResetLedgerKind ->
+                decisions |> Map.remove ledgerEvent.TargetId
             | _ ->
                 decisions)
         Map.empty<string, CandidateDecisionValue>
