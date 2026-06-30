@@ -90,6 +90,7 @@ type DeltaSigmaAnalysis =
 
 type CandidateDeltaKind =
     | AddUnknownRevealMissingHost
+    | AddFunction
     | AddInterface
     | AddState
     | AddMode
@@ -186,6 +187,24 @@ let parsedExposureAtomKinds =
         "Constraint"
     ]
 
+let formatModelFittingAtomKindLabel = function
+    | "Function" -> "Capability"
+    | "Mode" -> "Use mode"
+    | "Interface" -> "Interaction point"
+    | "State" -> "Condition"
+    | "Host" -> "System element"
+    | "Constraint" -> "Rule / limit"
+    | atomKind -> atomKind
+
+let formatModelFittingAtomKindPluralLabel = function
+    | "Function" -> "Capabilities"
+    | "Mode" -> "Use modes"
+    | "Interface" -> "Interaction points"
+    | "State" -> "Conditions"
+    | "Host" -> "System elements"
+    | "Constraint" -> "Rules / limits"
+    | atomKind -> atomKind
+
 let t6RealizationInquirySource = "T6 Realization Inquiry"
 let derivedInquiryTag = "derived-inquiry"
 let derivedInquiryContextKind = "DerivedInquiry"
@@ -194,6 +213,7 @@ let t6InquiryGapKeyContextKind = "T6InquiryGapKey"
 let t6InquiryQuestionContextKind = "T6InquiryQuestion"
 let sigmaBasisItemDecisionResetLedgerKind = "SigmaBasisItemDecisionReset"
 let t6RealizationReviewNeededLedgerKind = "T6RealizationReviewNeeded"
+let parsedAtomRetiredLedgerKind = "ParsedAtomRetired"
 
 type LedgerEvent =
     {

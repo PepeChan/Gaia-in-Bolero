@@ -128,6 +128,49 @@ let appendParseAmendmentDecisionResetLedgerEvents draft resetImpacts model =
                 (formatParseAmendmentDecisionResetLedgerDetail draft resetImpact))
         model
 
+let formatParsedAtomRetirementLedgerDetail sourcePhiId atomKind atomText provenance basisResetCount candidateResetCount =
+    [
+        "Source Phi ID: " + sourcePhiId
+        "Atom kind: " + atomKind
+        "Atom label: " + formatModelFittingAtomKindLabel atomKind
+        "Atom text: " + atomText
+        "Provenance: " + provenance
+        "Basis decision resets: " + string basisResetCount
+        "Candidate decision resets: " + string candidateResetCount
+        "Reason: Parsed atom retired from active Model Fitting; original Phi remains unchanged."
+    ]
+    |> String.concat " | "
+
+let formatParsedAtomRetirementDecisionResetLedgerDetail
+    sourcePhiId
+    atomKind
+    atomText
+    (resetImpact: ParseAmendmentBasisDecisionResetImpact) =
+    [
+        "Source Phi ID: " + sourcePhiId
+        "Retired kind: " + atomKind
+        "Retired text: " + atomText
+        "Candidate ID: " + resetImpact.CandidateId
+        "Candidate type: " + resetImpact.CandidateType
+        "Candidate target: " + resetImpact.CandidateTarget
+        "Basis item key: " + resetImpact.BasisItemKey
+        "Previous decision: " + formatSigmaBasisItemDecisionValue resetImpact.PreviousDecision
+        "Reason: Parsed atom retirement removed this interpreted atom from active Model Fitting."
+    ]
+    |> String.concat " | "
+
+let appendParsedAtomRetirementDecisionResetLedgerEvents sourcePhiId atomKind atomText resetImpacts model =
+    resetImpacts
+    |> List.fold
+        (fun workingModel resetImpact ->
+            workingModel
+            |> appendLedgerEvent
+                sigmaBasisItemDecisionResetLedgerKind
+                resetImpact.BasisItemKey
+                "Sigma basis-item decision reset"
+                (formatParsedAtomRetirementDecisionResetLedgerDetail sourcePhiId atomKind atomText resetImpact))
+        model
+
 let normalizeProjectFileNamePart (value: string) =
     let source =
         if String.IsNullOrWhiteSpace(value) then
@@ -503,6 +546,139 @@ let update (jsRuntime: IJSRuntime) message model =
                 contextAwareEvidenceModel
                 |> appendLedgerEvent "EvidenceReferenceCreated" evidenceId "Evidence reference created" detail
                 |> fun updatedModel -> updatedModel, Cmd.none
+    | CreateEvidenceForParsedAtom (atomKind, atomText, sourcePhiId) ->
+        let cleanedAtomKind = cleanFormValue atomKind
+        let cleanedAtomText = cleanFormValue atomText
+        let cleanedSourcePhiId = cleanFormValue sourcePhiId
+
+        if not (isValidParsedExposureAtomKind cleanedAtomKind) || String.IsNullOrWhiteSpace(cleanedAtomText) then
+            { model with evidenceStatus = Some "Select a valid Model Fitting item before adding note / evidence." }, Cmd.none
+        else
+            let evidenceId = createEvidenceId model.evidenceRecords
+            let atomLabel = formatModelFittingAtomKindLabel cleanedAtomKind
+            let title =
+                match cleanFormValue model.evidenceTitle with
+                | "" -> "Note for " + atomLabel
+                | value -> value
+
+            let captureKind =
+                match cleanFormValue model.evidenceCaptureKind with
+                | "" -> defaultEvidenceCaptureKind
+                | value -> value
+
+            let targetLabel =
+                cleanedAtomText
+                + (if String.IsNullOrWhiteSpace(cleanedSourcePhiId) then
+                       ""
+                   else
+                       " (source " + cleanedSourcePhiId + ")")
+
+            let evidenceRecord =
+                {
+                    EvidenceId = evidenceId
+                    TimestampUtc = getUtcTimestampString ()
+                    Actor = "Demo user"
+                    CaptureKind = captureKind
+                    TargetKind = cleanedAtomKind
+                    TargetId = cleanedAtomText
+                    TargetLabel = targetLabel
+                    Title = title
+                    Notes = model.evidenceNotes
+                    ContentRef = model.evidenceContentRef
+                }
+
+            let detail =
+                captureKind
+                + " | "
+                + title
+                + " | "
+                + cleanedAtomKind
+                + " | "
+                + targetLabel
+
+            { model with
+                evidenceRecords = model.evidenceRecords @ [ evidenceRecord ]
+                evidenceTargetKind = cleanedAtomKind
+                evidenceTargetId = cleanedAtomText
+                evidenceTitle = ""
+                evidenceNotes = ""
+                evidenceContentRef = ""
+                evidenceStatus = Some ("Evidence reference captured: " + evidenceId) }
+            |> appendLedgerEvent "EvidenceReferenceCreated" evidenceId "Evidence reference created" detail
+            |> fun updatedModel -> updatedModel, Cmd.none
+    | CreatePhiFromParsedAtom (atomKind, atomText, sourcePhiId) ->
+        let cleanedAtomKind = cleanFormValue atomKind
+        let cleanedAtomText = cleanFormValue atomText
+        let cleanedSourcePhiId = cleanFormValue sourcePhiId
+
+        if not (isValidParsedExposureAtomKind cleanedAtomKind) || String.IsNullOrWhiteSpace(cleanedAtomText) then
+            { model with phiDraftStatus = Some "Select a valid Model Fitting item before creating Phi." }, Cmd.none
+        else
+            let timestamp = DateTime.UtcNow
+            let phiId =
+                "PHI-"
+                + timestamp.ToString("yyyyMMdd-HHmmss")
+                + "-MF"
+                + sprintf "%03d" (List.length model.ingestedPhis + 1)
+
+            let atomLabel = formatModelFittingAtomKindLabel cleanedAtomKind
+
+            let sourceStatement =
+                model.parsedPhis
+                |> List.tryFind (fun parse -> parse.PhiId = cleanedSourcePhiId)
+                |> Option.map (fun parse -> parse.Statement)
+                |> Option.defaultValue ""
+
+            let generatedStatement =
+                "Model fitting "
+                + atomLabel.ToLowerInvariant()
+                + ": "
+                + cleanedAtomText
+                + "."
+
+            let context =
+                [
+                    "Created from Model Fitting item."
+                    if not (String.IsNullOrWhiteSpace(cleanedSourcePhiId)) then
+                        "Source Phi: " + cleanedSourcePhiId + "."
+                    if not (String.IsNullOrWhiteSpace(sourceStatement)) then
+                        "Source statement: " + sourceStatement
+                ]
+                |> String.concat " "
+
+            let intake =
+                {
+                    PhiId = phiId
+                    Date = timestamp.ToString("yyyy-MM-dd")
+                    InputClass = Some "Model Fitting"
+                    Actor = Some "Demo user"
+                    Mission = None
+                    OperationalContext = None
+                    Source = "Model Fitting"
+                    Context = context
+                    Confidence = "Medium"
+                    Status = "Ingested"
+                    RawStatement = generatedStatement
+                    Trigger = context
+                    Claim = cleanedAtomText
+                    About = atomLabel
+                    Condition = ""
+                    Assumption = ""
+                    TypeText =
+                        "model-fitting-derived; "
+                        + cleanedAtomKind
+                        + "; source-phi="
+                        + cleanedSourcePhiId
+                    Impact = ""
+                    UnresolvedSignal = ""
+                }
+
+            { model with
+                ingestedPhis = intake :: model.ingestedPhis
+                phiDraftStatus = Some ("Phi created from Model Fitting item: " + intake.PhiId)
+                phiBatchParseStatus = None }
+            |> appendLedgerEvent "PhiIngested" intake.PhiId "Phi ingested" intake.RawStatement
+            |> fun updatedModel -> updatedModel, Cmd.none
     | SetRealizationObjectKindDraft value ->
         { model with realizationObjectKindDraft = value }, Cmd.none
     | SetRealizationObjectIdDraft value ->
@@ -849,6 +1025,7 @@ let update (jsRuntime: IJSRuntime) message model =
                 let impactPreview =
                     model.parsedPhis
                     |> getIncludedSequencedParsedPhis model.excludedPhiIds
+                    |> applyParsedAtomRetirementsToSequencedPhis model.LedgerEvents
                     |> buildParseAmendmentImpactPreview validatedDraft model.candidateDecisions model.sigmaBasisItemDecisions
 
                 let amendedParse =
@@ -921,6 +1098,125 @@ let update (jsRuntime: IJSRuntime) message model =
             parseAmendmentDraft = None
             parseAmendmentStatus = Some "Parse amendment cancelled." },
         Cmd.none
+
+    | RetireParsedAtom (sourcePhiId, atomKind, atomText, provenance) ->
+        let cleanedSourcePhiId = cleanFormValue sourcePhiId
+        let cleanedAtomKind = cleanFormValue atomKind
+        let cleanedAtomText = cleanFormValue atomText
+        let atomKey = createParsedAtomReviewKey cleanedSourcePhiId cleanedAtomKind cleanedAtomText
+
+        if String.IsNullOrWhiteSpace(cleanedSourcePhiId)
+           || String.IsNullOrWhiteSpace(cleanedAtomKind)
+           || String.IsNullOrWhiteSpace(cleanedAtomText) then
+            { model with parseAmendmentStatus = Some "Select a parsed atom to retire." }, Cmd.none
+        elif not (isValidParsedExposureAtomKind cleanedAtomKind) then
+            { model with parseAmendmentStatus = Some "Select a valid parsed atom kind." }, Cmd.none
+        elif isParsedAtomRetired model.LedgerEvents cleanedSourcePhiId cleanedAtomKind cleanedAtomText then
+            { model with parseAmendmentStatus = Some "This interpretation is already retired from active Model Fitting." }, Cmd.none
+        else
+            match model.parsedPhis |> List.tryFind (fun parse -> parse.PhiId = cleanedSourcePhiId) with
+            | None ->
+                { model with parseAmendmentStatus = Some "The source Phi parse is no longer available." }, Cmd.none
+            | Some parse ->
+                let currentAtoms =
+                    getExposureAtomValue cleanedAtomKind parse
+                    |> splitExposureAtomValues
+
+                if not (atomListContains cleanedAtomText currentAtoms) then
+                    { model with parseAmendmentStatus = Some "This parsed atom has changed since the card was opened." }, Cmd.none
+                else
+                    let activeSequencedParsedPhis =
+                        model.parsedPhis
+                        |> getIncludedSequencedParsedPhis model.excludedPhiIds
+                        |> applyParsedAtomRetirementsToSequencedPhis model.LedgerEvents
+
+                    let candidateDeltas =
+                        activeSequencedParsedPhis
+                        |> buildSigmaContextWithContextEntries model.phiContextEntries
+                        |> formulateCandidateDeltas
+
+                    let resetImpacts =
+                        buildParsedAtomRetirementResetImpacts
+                            cleanedAtomKind
+                            cleanedAtomText
+                            cleanedSourcePhiId
+                            candidateDeltas
+                            model.sigmaBasisItemDecisions
+                            activeSequencedParsedPhis
+
+                    let affectedCandidateIds =
+                        getParsedAtomRetirementAffectedCandidateIds
+                            cleanedAtomKind
+                            cleanedAtomText
+                            cleanedSourcePhiId
+                            candidateDeltas
+                            activeSequencedParsedPhis
+
+                    let sigmaBasisItemDecisions =
+                        resetImpacts
+                        |> List.fold
+                            (fun decisions resetImpact -> decisions |> Map.remove resetImpact.BasisItemKey)
+                            model.sigmaBasisItemDecisions
+
+                    let candidateDecisionResetCount =
+                        model.candidateDecisions
+                        |> List.filter (fun decision -> affectedCandidateIds |> List.contains decision.CandidateId)
+                        |> List.length
+
+                    let candidateDecisions =
+                        model.candidateDecisions
+                        |> List.filter (fun decision -> not (affectedCandidateIds |> List.contains decision.CandidateId))
+
+                    let parseAmendmentDraft =
+                        match model.parseAmendmentDraft with
+                        | Some draft
+                            when draft.SourcePhiId = cleanedSourcePhiId
+                                 && draft.OriginalAtomKind = cleanedAtomKind
+                                 && atomTextEquals draft.OriginalAtomText cleanedAtomText ->
+                            None
+                        | draft -> draft
+
+                    let resetSummary =
+                        match List.length resetImpacts with
+                        | 0 -> "No basis-item decisions were reset."
+                        | 1 -> "Reset 1 basis-item decision to pending."
+                        | count -> "Reset " + string count + " basis-item decisions to pending."
+
+                    let candidateResetSummary =
+                        match candidateDecisionResetCount with
+                        | 0 -> "No candidate group decisions were reset."
+                        | 1 -> "Reset 1 candidate group decision to pending."
+                        | count -> "Reset " + string count + " candidate group decisions to pending."
+
+                    { model with
+                        candidateDecisions = candidateDecisions
+                        sigmaBasisItemDecisions = sigmaBasisItemDecisions
+                        parseAmendmentDraft = parseAmendmentDraft
+                        parseAmendmentStatus =
+                            Some
+                                ("Retired interpretation from active Model Fitting for "
+                                 + cleanedSourcePhiId
+                                 + ". "
+                                 + resetSummary
+                                 + " "
+                                 + candidateResetSummary) }
+                    |> appendLedgerEvent
+                        parsedAtomRetiredLedgerKind
+                        atomKey
+                        "Parsed atom retired"
+                        (formatParsedAtomRetirementLedgerDetail
+                            cleanedSourcePhiId
+                            cleanedAtomKind
+                            cleanedAtomText
+                            provenance
+                            (List.length resetImpacts)
+                            candidateDecisionResetCount)
+                    |> appendParsedAtomRetirementDecisionResetLedgerEvents
+                        cleanedSourcePhiId
+                        cleanedAtomKind
+                        cleanedAtomText
+                        resetImpacts
+                    |> fun updatedModel -> updatedModel, Cmd.none
 
     | SelectParsedAtomReviewKind atomKind ->
         if isValidParsedExposureAtomKind atomKind then

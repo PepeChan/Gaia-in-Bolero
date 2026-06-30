@@ -459,6 +459,67 @@ let private appendAtomToList atom atoms =
     else
         atoms @ [ atom ]
 
+let normalizeParsedAtomReviewKeyPart (value: string) =
+    if String.IsNullOrWhiteSpace(value) then
+        "none"
+    else
+        value.Trim().ToLowerInvariant().Split([| ' '; '\t'; '\r'; '\n' |], StringSplitOptions.RemoveEmptyEntries)
+        |> String.concat " "
+
+let createParsedAtomReviewKey sourcePhiId atomKind atomText =
+    normalizeParsedAtomReviewKeyPart sourcePhiId
+    + "::"
+    + normalizeParsedAtomReviewKeyPart atomKind
+    + "::"
+    + normalizeParsedAtomReviewKeyPart atomText
+
+let getRetiredParsedAtomKeys (ledgerEvents: LedgerEvent list) =
+    ledgerEvents
+    |> List.filter (fun ledgerEvent -> ledgerEvent.EventKind = parsedAtomRetiredLedgerKind)
+    |> List.map (fun ledgerEvent -> ledgerEvent.TargetId)
+    |> Set.ofList
+
+let isParsedAtomRetired ledgerEvents sourcePhiId atomKind atomText =
+    ledgerEvents
+    |> getRetiredParsedAtomKeys
+    |> Set.contains (createParsedAtomReviewKey sourcePhiId atomKind atomText)
+
+let removeExposureAtomValue atomKind atomText parse =
+    let remainingAtoms =
+        getExposureAtomValue atomKind parse
+        |> splitExposureAtomValues
+        |> removeAtomFromList atomText
+
+    parse
+    |> updateExposureAtomValue atomKind (joinExposureAtomValues remainingAtoms)
+
+let applyParsedAtomRetirementsToSequencedPhis ledgerEvents sequencedParsedPhis =
+    let retiredKeys = getRetiredParsedAtomKeys ledgerEvents
+
+    if Set.isEmpty retiredKeys then
+        sequencedParsedPhis
+    else
+        sequencedParsedPhis
+        |> List.map (fun (sequenceNumber, parse: PhiParse) ->
+            let filteredParse =
+                parsedExposureAtomKinds
+                |> List.fold
+                    (fun workingParse atomKind ->
+                        getExposureAtomValue atomKind workingParse
+                        |> splitExposureAtomValues
+                        |> List.fold
+                            (fun currentParse atomText ->
+                                let atomKey = createParsedAtomReviewKey parse.PhiId atomKind atomText
+
+                                if Set.contains atomKey retiredKeys then
+                                    removeExposureAtomValue atomKind atomText currentParse
+                                else
+                                    currentParse)
+                            workingParse)
+                    parse
+
+            sequenceNumber, filteredParse)
+
 let appendParseAmendmentExposureNote newKind (parse: PhiParse) =
     let notes = if isNull parse.ExposureNotes then "" else parse.ExposureNotes.Trim()
     let amendmentNote = " ParseAmendment: " + newKind + "=ParseAmendment."
@@ -626,6 +687,7 @@ let buildSigmaContextWithContextEntries (contextEntries: PhiContextEntry list) (
 let getCurrentSigmaContext (model: Model) =
     model.parsedPhis
     |> getIncludedSequencedParsedPhis model.excludedPhiIds
+    |> applyParsedAtomRetirementsToSequencedPhis model.LedgerEvents
     |> buildSigmaContextWithContextEntries model.phiContextEntries
 
 let formatPhiEvidenceTarget (phi: PhiIntake) =
@@ -637,7 +699,7 @@ let formatPhiEvidenceTarget (phi: PhiIntake) =
 let formatSigmaEvidenceTarget atomKind (entry: SigmaContextEntry) =
     entry.Value
     + " ("
-    + atomKind
+    + formatModelFittingAtomKindLabel atomKind
     + "; support "
     + string entry.SupportCount
     + "; Phi "
@@ -833,6 +895,7 @@ let buildReplayDeltaSigmaAnalysis phiId wasExcluded beforeSigma afterSigma (pars
 
 let candidateDeltaKindKey = function
     | AddUnknownRevealMissingHost -> "AddUnknownRevealMissingHost"
+    | AddFunction -> "AddFunction"
     | AddInterface -> "AddInterface"
     | AddState -> "AddState"
     | AddMode -> "AddMode"
@@ -842,13 +905,14 @@ let candidateDeltaKindKey = function
     | NoStructuralChange -> "NoStructuralChange"
 
 let formatCandidateDeltaKind = function
-    | AddUnknownRevealMissingHost -> "ADD UNKNOWN / REVEAL MISSING HOST"
-    | AddInterface -> "ADD INTERFACE"
-    | AddState -> "ADD STATE"
-    | AddMode -> "ADD MODE"
-    | AddHost -> "ADD HOST"
-    | AddConstraint -> "ADD CONSTRAINT"
-    | ReinforcedSigmaAtom -> "REINFORCED SIGMA ATOM"
+    | AddUnknownRevealMissingHost -> "ADD UNKNOWN / REVEAL MISSING SYSTEM ELEMENT"
+    | AddFunction -> "ADD CAPABILITY"
+    | AddInterface -> "ADD INTERACTION POINT"
+    | AddState -> "ADD CONDITION"
+    | AddMode -> "ADD USE MODE"
+    | AddHost -> "ADD SYSTEM ELEMENT"
+    | AddConstraint -> "ADD RULE / LIMIT"
+    | ReinforcedSigmaAtom -> "REINFORCED SIGMA ITEM"
     | NoStructuralChange -> "NO STRUCTURAL CHANGE"
 
 let createCandidateId kind target =
@@ -923,6 +987,16 @@ let formulateCandidateDeltas (sigmaContext: SigmaContext) =
                         (formatSigmaBasisGroup "Interface" sigmaContext.Interfaces)
                         (summarizeEntryProvenance sigmaContext.Interfaces)
 
+            if not (List.isEmpty sigmaContext.Functions) then
+                yield
+                    createCandidateDelta
+                        AddFunction
+                        "Function"
+                        "Add exposed Capability atoms as candidate Σ structure."
+                        "Capability-relevant atoms were exposed by parsed Phi."
+                        (formatSigmaBasisGroup "Function" sigmaContext.Functions)
+                        (summarizeEntryProvenance sigmaContext.Functions)
+
             if not (List.isEmpty sigmaContext.States) then
                 yield
                     createCandidateDelta
@@ -984,9 +1058,8 @@ let formulateCandidateDeltas (sigmaContext: SigmaContext) =
         candidates
 
 let getCurrentCandidateDeltas (model: Model) =
-    model.parsedPhis
-    |> getIncludedSequencedParsedPhis model.excludedPhiIds
-    |> buildSigmaContextWithContextEntries model.phiContextEntries
+    model
+    |> getCurrentSigmaContext
     |> formulateCandidateDeltas
 
 let getCandidateDecisionRationale = function
@@ -1170,9 +1243,10 @@ let getCurrentSigmaBasisItemLedgerContexts (model: Model) =
     let sequencedParsedPhis =
         model.parsedPhis
         |> getIncludedSequencedParsedPhis model.excludedPhiIds
+        |> applyParsedAtomRetirementsToSequencedPhis model.LedgerEvents
 
     sequencedParsedPhis
-    |> buildSigmaContext
+    |> buildSigmaContextWithContextEntries model.phiContextEntries
     |> formulateCandidateDeltas
     |> List.collect (fun candidate ->
         buildSigmaBasisItemReviews candidate sequencedParsedPhis
@@ -1454,6 +1528,38 @@ let private buildCandidateBasisMatches
     |> List.collect (fun candidate ->
         findBasisItemsForAmendedAtom atomKind atomValue sourcePhiId candidate sequencedParsedPhis
         |> List.map (fun basisItem -> candidate, basisItem))
+
+let getParsedAtomRetirementAffectedCandidateIds atomKind atomText sourcePhiId candidateDeltas sequencedParsedPhis =
+    buildCandidateBasisMatches atomKind atomText sourcePhiId candidateDeltas sequencedParsedPhis
+    |> List.map (fun (candidate, _) -> candidate.CandidateId)
+    |> List.distinct
+
+let buildParsedAtomRetirementResetImpacts
+    atomKind
+    atomText
+    sourcePhiId
+    candidateDeltas
+    sigmaBasisItemDecisions
+    sequencedParsedPhis =
+    buildCandidateBasisMatches atomKind atomText sourcePhiId candidateDeltas sequencedParsedPhis
+    |> List.choose (fun (candidate, basisItem) ->
+        let previousDecision = getSigmaBasisItemDecisionValue basisItem.Key sigmaBasisItemDecisions
+
+        if previousDecision = Pending then
+            None
+        else
+            Some
+                {
+                    CandidateId = candidate.CandidateId
+                    CandidateType = formatCandidateDeltaKind candidate.Kind
+                    CandidateTarget = candidate.Target
+                    BasisItemKey = basisItem.Key
+                    AtomKind = basisItem.Kind
+                    AtomValue = basisItem.AtomValue
+                    SourcePhiId = sourcePhiId
+                    PreviousDecision = previousDecision
+                })
+    |> List.distinctBy (fun resetImpact -> resetImpact.BasisItemKey)
 
 let private candidateStatus
     (candidateDecisions: CandidateDecision list)

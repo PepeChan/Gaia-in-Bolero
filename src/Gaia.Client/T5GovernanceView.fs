@@ -11,6 +11,17 @@ open Gaia.Client.T2ParsingView
 open Gaia.Client.T3SummaryView
 open Gaia.Client.T4CandidateView
 
+let formatModelFittingCandidateDeltaKind = function
+    | AddUnknownRevealMissingHost -> "REVEAL MISSING SYSTEM ELEMENT"
+    | AddFunction -> "ADD CAPABILITY"
+    | AddInterface -> "ADD INTERACTION POINT"
+    | AddState -> "ADD CONDITION"
+    | AddMode -> "ADD USE MODE"
+    | AddHost -> "ADD SYSTEM ELEMENT"
+    | AddConstraint -> "ADD RULE / LIMIT"
+    | ReinforcedSigmaAtom -> "REINFORCED ITEM"
+    | NoStructuralChange -> "NO STRUCTURAL CHANGE"
+
 let countCandidateGroupStatuses status candidateDeltas candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis =
     candidateDeltas
     |> List.sumBy (fun candidate ->
@@ -87,7 +98,7 @@ let renderT5GovernanceSummaryTable sigmaContext (candidateDecisions: CandidateDe
                             buildCandidateGroupGovernance candidate candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
 
                         tr {
-                            td { text (formatCandidateDeltaKind candidate.Kind) }
+                            td { text (formatModelFittingCandidateDeltaKind candidate.Kind) }
                             td { text candidate.Target }
                             td { text (string (List.length candidate.RelevantSigmaBasis)) }
                             td { text candidate.Provenance }
@@ -149,6 +160,22 @@ type ParsedAtomReviewRow =
         CandidateLinks: ParsedAtomCandidateLink list
     }
 
+type ParsedAtomNoteSummary =
+    {
+        Kind: string
+        Title: string
+        NotesPreview: string
+        ContentRef: string option
+    }
+
+type CategoryCandidateGroupLink =
+    {
+        Candidate: CandidateDelta
+        GroupGovernance: CandidateGroupGovernance
+        ClassDecision: CandidateDecisionValue
+        BasisItemKeys: string list
+    }
+
 let formatAffectedParseAmendmentGroups oldKind newKind =
     [ oldKind; newKind ]
     |> List.filter (fun value -> not (String.IsNullOrWhiteSpace(value)))
@@ -195,6 +222,89 @@ let private parsedAtomSourceMatches (sourcePhiId: string) (supportingPhiIds: str
     supportingPhiIds
     |> List.exists (fun supportingPhiId -> String.Equals(supportingPhiId, sourcePhiId, StringComparison.OrdinalIgnoreCase))
 
+let private compactPreview maxLength (value: string) =
+    let cleaned = if isNull value then "" else value.Trim()
+
+    if cleaned.Length <= maxLength then
+        cleaned
+    else
+        cleaned.Substring(0, maxLength).TrimEnd() + "..."
+
+let private textContainsAtom (source: string) (atomText: string) =
+    not (String.IsNullOrWhiteSpace(source))
+    && not (String.IsNullOrWhiteSpace(atomText))
+    && source.IndexOf(atomText, StringComparison.OrdinalIgnoreCase) >= 0
+
+let private phiContextKindForAtomKind = function
+    | "Function" -> "FunctionHint"
+    | "Mode" -> "ModeHint"
+    | "Interface" -> "InterfaceHint"
+    | "State" -> "StateHint"
+    | "Host" -> "HostHint"
+    | "Constraint" -> "ConstraintHint"
+    | _ -> ""
+
+let private phiContextEntryMatchesRow (row: ParsedAtomReviewRow) (entry: PhiContextEntry) =
+    let sourceMatches = String.Equals(entry.PhiId, row.SourcePhiId, StringComparison.OrdinalIgnoreCase)
+    let canonicalKind = canonicalPhiContextKind entry.Kind
+    let expectedKind = phiContextKindForAtomKind row.AtomKind
+    let directAtomMatch = canonicalKind = expectedKind && parsedAtomTextEquals entry.Value row.AtomText
+    let noteMentionsAtom =
+        (canonicalKind = "Note" || canonicalKind = "EvidenceRef")
+        && textContainsAtom entry.Value row.AtomText
+
+    sourceMatches && (directAtomMatch || noteMentionsAtom)
+
+let private formatPhiContextNoteKind (entry: PhiContextEntry) =
+    match canonicalPhiContextKind entry.Kind with
+    | "FunctionHint" -> "Capability note"
+    | "ModeHint" -> "Use mode note"
+    | "InterfaceHint" -> "Interaction point note"
+    | "StateHint" -> "Condition note"
+    | "HostHint" -> "System element note"
+    | "ConstraintHint" -> "Rule / limit note"
+    | "EvidenceRef" -> "Evidence reference"
+    | "Note" -> "Note"
+    | kind -> kind
+
+let private evidenceRecordMatchesRow (row: ParsedAtomReviewRow) (record: EvidenceRecord) =
+    (String.Equals(record.TargetKind, row.AtomKind, StringComparison.OrdinalIgnoreCase)
+     && parsedAtomTextEquals record.TargetId row.AtomText)
+    || (String.Equals(record.TargetKind, "Phi", StringComparison.OrdinalIgnoreCase)
+        && String.Equals(record.TargetId, row.SourcePhiId, StringComparison.OrdinalIgnoreCase))
+
+let getParsedAtomNoteSummaries phiContextEntries evidenceRecords row =
+    let contextNotes =
+        phiContextEntries
+        |> List.filter (phiContextEntryMatchesRow row)
+        |> List.map (fun entry ->
+            {
+                Kind = formatPhiContextNoteKind entry
+                Title = if String.IsNullOrWhiteSpace(entry.Provenance) then "Phi context" else entry.Provenance
+                NotesPreview = compactPreview 120 entry.Value
+                ContentRef = Some entry.ContextId
+            })
+
+    let evidenceNotes =
+        evidenceRecords
+        |> List.filter (evidenceRecordMatchesRow row)
+        |> List.map (fun record ->
+            {
+                Kind = record.CaptureKind
+                Title = if String.IsNullOrWhiteSpace(record.Title) then record.TargetLabel else record.Title
+                NotesPreview = compactPreview 120 record.Notes
+                ContentRef =
+                    if String.IsNullOrWhiteSpace(record.ContentRef) then
+                        None
+                    else
+                        Some record.ContentRef
+            })
+
+    [
+        yield! contextNotes
+        yield! evidenceNotes
+    ]
+
 let buildParsedAtomCandidateLinks
     candidateDeltas
     (candidateDecisions: CandidateDecision list)
@@ -224,14 +334,40 @@ let buildParsedAtomCandidateLinks
                 BasisDecision = getSigmaBasisItemDecisionValue basisItem.Key sigmaBasisItemDecisions
             }))
 
-let formatParsedAtomCandidateGovernanceStatus candidateLinks =
+let buildCategoryCandidateGroupLinks
+    atomKind
+    candidateDeltas
+    (candidateDecisions: CandidateDecision list)
+    sigmaBasisItemDecisions
+    sequencedParsedPhis =
+    candidateDeltas
+    |> List.choose (fun candidate ->
+        let matchingBasisItems =
+            buildSigmaBasisItemReviews candidate sequencedParsedPhis
+            |> List.filter (fun basisItem -> basisItem.Kind = atomKind)
+
+        if List.isEmpty matchingBasisItems then
+            None
+        else
+            let groupGovernance =
+                buildCandidateGroupGovernance candidate candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
+
+            Some
+                {
+                    Candidate = candidate
+                    GroupGovernance = groupGovernance
+                    ClassDecision = getCandidateDecisionValue candidate.CandidateId candidateDecisions
+                    BasisItemKeys = matchingBasisItems |> List.map (fun basisItem -> basisItem.Key)
+                })
+
+let formatParsedAtomCandidateGovernanceStatus (candidateLinks: ParsedAtomCandidateLink list) =
     match candidateLinks with
     | [] -> "No current candidate group"
     | links ->
         links
         |> List.distinctBy (fun link -> link.Candidate.CandidateId)
         |> List.map (fun link ->
-            formatCandidateDeltaKind link.Candidate.Kind
+            formatModelFittingCandidateDeltaKind link.Candidate.Kind
             + " / group "
             + formatCandidateGroupStatus link.GroupGovernance.Status
             + "; class "
@@ -280,23 +416,11 @@ let renderOptionalCandidateGroupStatus = function
     | None -> text "Not present"
     | Some status -> renderCandidateGroupStatusTag status
 
-let formatParsedAtomKindLabel = function
-    | "Function" -> "Capability"
-    | "Mode" -> "Use mode"
-    | "Interface" -> "Interaction point"
-    | "State" -> "Condition"
-    | "Host" -> "System element"
-    | "Constraint" -> "Rule / limit"
-    | atomKind -> atomKind
+let formatParsedAtomKindLabel atomKind =
+    formatModelFittingAtomKindLabel atomKind
 
-let formatParsedAtomKindPluralLabel = function
-    | "Function" -> "Capabilities"
-    | "Mode" -> "Use modes"
-    | "Interface" -> "Interaction points"
-    | "State" -> "Conditions"
-    | "Host" -> "System elements"
-    | "Constraint" -> "Rules / limits"
-    | atomKind -> atomKind
+let formatParsedAtomKindPluralLabel atomKind =
+    formatModelFittingAtomKindPluralLabel atomKind
 
 let renderParseAmendmentPreview (draft: ParseAmendmentDraft) (impact: ParseAmendmentImpactPreview option) =
     div {
@@ -325,7 +449,7 @@ let renderParseAmendmentPreview (draft: ParseAmendmentDraft) (impact: ParseAmend
         | None ->
             p {
                 attr.``class`` "mb-0"
-                text "Candidate group before/after status is available from the inline selected-kind review panel. T6 stale propagation is not performed in this slice."
+                text "Candidate group before/after status is available after previewing the amendment."
             }
         | Some preview ->
             match preview.CandidateGroupImpacts with
@@ -379,7 +503,7 @@ let renderParseAmendmentPreview (draft: ParseAmendmentDraft) (impact: ParseAmend
             | [] ->
                 p {
                     attr.``class`` "mb-2"
-                    text "No existing T4/T5 basis-item decisions are attached to the amended atom, so no basis decisions will be reset."
+                    text "No existing supporting basis decisions are attached to the amended item, so no basis decisions will be reset."
                 }
             | resets ->
                 div {
@@ -399,7 +523,7 @@ let renderParseAmendmentPreview (draft: ParseAmendmentDraft) (impact: ParseAmend
 
             p {
                 attr.``class`` "mb-0"
-                text "T6 stale propagation is intentionally deferred."
+                text "Scenario Preview review markers are still handled by the existing amendment flow."
             }
     }
 
@@ -695,12 +819,12 @@ let renderParseAmendmentInlineEditor amendment candidateDecisions sigmaBasisItem
         }
     }
 
-let renderAtomCandidateStatusTags candidateLinks =
+let renderAtomCandidateStatusTags (candidateLinks: ParsedAtomCandidateLink list) =
     match candidateLinks with
     | [] ->
         span {
             attr.``class`` "tag is-light"
-            text "No candidate group"
+            text "No candidate group yet."
         }
     | links ->
         div {
@@ -709,24 +833,24 @@ let renderAtomCandidateStatusTags candidateLinks =
                 concat {
                     span {
                         attr.``class`` "tag is-info is-light model-fitting-status-tag"
-                        text (formatCandidateDeltaKind link.Candidate.Kind)
+                        text (formatModelFittingCandidateDeltaKind link.Candidate.Kind)
                     }
                     renderCandidateGroupStatusTag link.GroupGovernance.Status
                     renderCandidateDecisionTag link.ClassDecision
                 }
         }
 
-let countBasisDecisions decision candidateLinks =
+let countBasisDecisions decision (candidateLinks: ParsedAtomCandidateLink list) =
     candidateLinks
     |> List.filter (fun link -> link.BasisDecision = decision)
     |> List.length
 
-let renderAtomBasisStatusTags candidateLinks =
+let renderAtomBasisStatusTags (candidateLinks: ParsedAtomCandidateLink list) =
     match candidateLinks with
     | [] ->
         span {
             attr.``class`` "tag is-light"
-            text "No basis item"
+            text "No supporting basis yet."
         }
     | links ->
         div {
@@ -753,6 +877,193 @@ let renderAtomBasisStatusTags candidateLinks =
             }
         }
 
+let renderParsedAtomNotes (notes: ParsedAtomNoteSummary list) =
+    div {
+        attr.``class`` "model-fitting-notes mb-3"
+
+        div {
+            attr.``class`` "level is-mobile mb-2"
+
+            div {
+                attr.``class`` "level-left"
+                p {
+                    attr.``class`` "heading mb-0"
+                    text "Notes / evidence"
+                }
+            }
+
+            div {
+                attr.``class`` "level-right"
+                span {
+                    attr.``class`` "tag is-light"
+                    text ("Attached: " + string (List.length notes))
+                }
+            }
+        }
+
+        match notes with
+        | [] ->
+            p {
+                attr.``class`` "is-size-7 has-text-grey mb-0"
+                text "No notes attached yet."
+            }
+        | summaries ->
+            div {
+                attr.``class`` "sigma-basis-list"
+                forEach summaries <| fun note ->
+                    div {
+                        attr.``class`` "model-fitting-note-row"
+
+                        div {
+                            attr.``class`` "tags mb-1"
+                            span {
+                                attr.``class`` "tag is-info is-light"
+                                text note.Kind
+                            }
+                            if not (String.IsNullOrWhiteSpace(note.Title)) then
+                                span {
+                                    attr.``class`` "tag is-light"
+                                    text note.Title
+                                }
+                        }
+
+                        if not (String.IsNullOrWhiteSpace(note.NotesPreview)) then
+                            p {
+                                attr.``class`` "is-size-7 mb-1"
+                                text note.NotesPreview
+                            }
+
+                        match note.ContentRef with
+                        | None -> empty()
+                        | Some contentRef ->
+                            p {
+                                attr.``class`` "is-size-7 has-text-grey mb-0"
+                                strong { text "Reference: " }
+                                text contentRef
+                            }
+                    }
+            }
+    }
+
+let renderParsedAtomEvidenceControl (row: ParsedAtomReviewRow) evidenceCaptureKind evidenceTitle evidenceNotes evidenceContentRef dispatch =
+    div {
+        attr.``class`` "sigma-basis-detail-block"
+
+        p {
+            attr.``class`` "has-text-weight-semibold mb-2"
+            text "Add note / evidence"
+        }
+
+        div {
+            attr.``class`` "columns is-variable is-3 mb-0"
+
+            div {
+                attr.``class`` "column is-4"
+                label {
+                    attr.``class`` "label is-size-7"
+                    text "Capture kind"
+                }
+                div {
+                    attr.``class`` "control"
+                    div {
+                        attr.``class`` "select is-fullwidth is-small"
+                        select {
+                            bind.input.string evidenceCaptureKind (fun value -> dispatch (SetEvidenceCaptureKind value))
+                            forEach evidenceCaptureKinds <| fun captureKind ->
+                                option { text captureKind }
+                        }
+                    }
+                }
+            }
+
+            div {
+                attr.``class`` "column is-8"
+                label {
+                    attr.``class`` "label is-size-7"
+                    text "Title"
+                }
+                div {
+                    attr.``class`` "control"
+                    input {
+                        attr.``class`` "input is-small"
+                        attr.placeholder ("Note for " + formatParsedAtomKindLabel row.AtomKind)
+                        bind.input.string evidenceTitle (fun value -> dispatch (SetEvidenceTitle value))
+                    }
+                }
+            }
+        }
+
+        div {
+            attr.``class`` "field"
+            label {
+                attr.``class`` "label is-size-7"
+                text "Notes"
+            }
+            div {
+                attr.``class`` "control"
+                textarea {
+                    attr.``class`` "textarea is-small"
+                    bind.input.string evidenceNotes (fun value -> dispatch (SetEvidenceNotes value))
+                }
+            }
+        }
+
+        div {
+            attr.``class`` "field"
+            label {
+                attr.``class`` "label is-size-7"
+                text "Content reference"
+            }
+            div {
+                attr.``class`` "control"
+                input {
+                    attr.``class`` "input is-small"
+                    bind.input.string evidenceContentRef (fun value -> dispatch (SetEvidenceContentRef value))
+                }
+            }
+        }
+
+        button {
+            attr.``class`` "button is-small is-info is-light"
+            attr.``type`` "button"
+            on.click (fun _ -> dispatch (CreateEvidenceForParsedAtom (row.AtomKind, row.AtomText, row.SourcePhiId)))
+            text "Add note / evidence"
+        }
+    }
+
+let renderParsedAtomItemActions (row: ParsedAtomReviewRow) dispatch =
+    div {
+        attr.``class`` "sigma-basis-detail-block"
+
+        p {
+            attr.``class`` "has-text-weight-semibold mb-2"
+            text "Item actions"
+        }
+
+        div {
+            attr.``class`` "buttons are-small mb-2"
+
+            button {
+                attr.``class`` "button is-link is-light"
+                attr.``type`` "button"
+                on.click (fun _ -> dispatch (CreatePhiFromParsedAtom (row.AtomKind, row.AtomText, row.SourcePhiId)))
+                text "Create Phi from this item"
+            }
+
+            button {
+                attr.``class`` "button is-danger is-light"
+                attr.``type`` "button"
+                on.click (fun _ -> dispatch (RetireParsedAtom (row.SourcePhiId, row.AtomKind, row.AtomText, row.Provenance)))
+                text "Retire interpretation"
+            }
+        }
+
+        p {
+            attr.``class`` "is-size-7 has-text-grey mb-0"
+            text "Retiring removes this interpretation from active Model Fitting and downstream candidate generation; the source Phi remains unchanged."
+        }
+    }
+
 let renderParsedAtomAmendmentControl row amendmentDraft candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis dispatch =
     match amendmentDraft with
     | Some amendment when isParseAmendmentDraftForRow row amendment ->
@@ -766,7 +1077,7 @@ let renderParsedAtomAmendmentControl row amendmentDraft candidateDecisions sigma
             }
             p {
                 attr.``class`` "is-size-7 has-text-grey mb-3"
-                text "Open an amendment draft for this parsed atom, then preview and confirm the impact from this panel."
+                text "Open an amendment draft for this item, then preview and confirm the impact from this panel."
             }
             button {
                 attr.``class`` "button is-small is-warning is-light"
@@ -843,7 +1154,7 @@ let renderParsedAtomBasisGovernance row ledgerEvents dispatch =
         | [] ->
             p {
                 attr.``class`` "has-text-grey"
-                text "No T4/T5 basis item currently references this parsed atom."
+                text "No supporting basis yet."
             }
         | links ->
             div {
@@ -862,7 +1173,7 @@ let renderParsedAtomBasisGovernance row ledgerEvents dispatch =
                                 attr.``class`` "column is-7"
                                 p {
                                     attr.``class`` "heading mb-1"
-                                    text (formatCandidateDeltaKind link.Candidate.Kind)
+                                    text (formatModelFittingCandidateDeltaKind link.Candidate.Kind)
                                 }
                                 p {
                                     attr.``class`` "sigma-basis-atom mb-1"
@@ -910,7 +1221,7 @@ let renderParsedAtomCandidateGovernance row dispatch =
         | [] ->
             p {
                 attr.``class`` "has-text-grey"
-                text "No candidate group currently applies to this atom."
+                text "No candidate group yet."
             }
         | links ->
             div {
@@ -930,7 +1241,7 @@ let renderParsedAtomCandidateGovernance row dispatch =
                                 }
                                 p {
                                     attr.``class`` "mb-1"
-                                    text (formatCandidateDeltaKind link.Candidate.Kind)
+                                    text (formatModelFittingCandidateDeltaKind link.Candidate.Kind)
                                 }
                                 code { text link.Candidate.CandidateId }
                             }
@@ -966,11 +1277,123 @@ let renderParsedAtomCandidateGovernance row dispatch =
             }
     }
 
-let renderParsedAtomReviewRow row amendmentDraft parseAmendmentStatus candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis ledgerEvents dispatch =
+let renderCategoryCandidateGroupGovernance
+    atomKind
+    candidateDeltas
+    candidateDecisions
+    sigmaBasisItemDecisions
+    sequencedParsedPhis
+    dispatch =
+    let categoryLinks =
+        buildCategoryCandidateGroupLinks
+            atomKind
+            candidateDeltas
+            candidateDecisions
+            sigmaBasisItemDecisions
+            sequencedParsedPhis
+
+    div {
+        attr.``class`` "sigma-basis-detail-block mb-3"
+
+        p {
+            attr.``class`` "has-text-weight-semibold mb-2"
+            text (formatParsedAtomKindPluralLabel atomKind + " category governance")
+        }
+
+        match categoryLinks with
+        | [] ->
+            p {
+                attr.``class`` "has-text-grey mb-0"
+                text "No candidate group yet."
+            }
+        | links ->
+            div {
+                attr.``class`` "sigma-basis-list"
+
+                forEach links <| fun link ->
+                    div {
+                        attr.``class`` "model-fitting-governance-row"
+
+                        div {
+                            attr.``class`` "columns is-variable is-3 is-vcentered mb-2"
+
+                            div {
+                                attr.``class`` "column is-4"
+                                p {
+                                    attr.``class`` "heading mb-1"
+                                    text "Candidate"
+                                }
+                                p {
+                                    attr.``class`` "mb-1"
+                                    text (formatModelFittingCandidateDeltaKind link.Candidate.Kind)
+                                }
+                                code { text link.Candidate.CandidateId }
+                            }
+
+                            div {
+                                attr.``class`` "column is-2"
+                                p {
+                                    attr.``class`` "heading mb-1"
+                                    text "Basis"
+                                }
+                                span {
+                                    attr.``class`` "tag is-light"
+                                    text (string (List.length link.BasisItemKeys))
+                                }
+                            }
+
+                            div {
+                                attr.``class`` "column is-2"
+                                p {
+                                    attr.``class`` "heading mb-1"
+                                    text "Group"
+                                }
+                                renderCandidateGroupStatusTag link.GroupGovernance.Status
+                            }
+
+                            div {
+                                attr.``class`` "column is-4"
+                                renderCandidateGovernanceActions link.Candidate link.ClassDecision dispatch
+                            }
+                        }
+
+                        p {
+                            attr.``class`` "is-size-7 has-text-grey mb-1"
+                            text link.GroupGovernance.Explanation
+                        }
+
+                        match link.GroupGovernance.ConflictExplanation with
+                        | None -> empty()
+                        | Some conflict ->
+                            p {
+                                attr.``class`` "notification is-warning is-light cognition-review-helper is-size-7 mb-0"
+                                text conflict
+                            }
+                    }
+            }
+    }
+
+let renderParsedAtomReviewRow
+    row
+    amendmentDraft
+    parseAmendmentStatus
+    candidateDecisions
+    sigmaBasisItemDecisions
+    sequencedParsedPhis
+    ledgerEvents
+    phiContextEntries
+    evidenceRecords
+    evidenceCaptureKind
+    evidenceTitle
+    evidenceNotes
+    evidenceContentRef
+    dispatch =
     let isActiveAmendment =
         match amendmentDraft with
         | Some amendment -> isParseAmendmentDraftForRow row amendment
         | None -> false
+
+    let noteSummaries = getParsedAtomNoteSummaries phiContextEntries evidenceRecords row
 
     div {
         attr.``class`` "card mb-3 model-fitting-atom-card"
@@ -1050,6 +1473,8 @@ let renderParsedAtomReviewRow row amendmentDraft parseAmendmentStatus candidateD
                 }
             }
 
+            renderParsedAtomNotes noteSummaries
+
             details {
                 attr.``class`` "model-fitting-panel"
                 attr.``open`` isActiveAmendment
@@ -1081,8 +1506,17 @@ let renderParsedAtomReviewRow row amendmentDraft parseAmendmentStatus candidateD
                         sequencedParsedPhis
                         dispatch
 
+                    renderParsedAtomEvidenceControl
+                        row
+                        evidenceCaptureKind
+                        evidenceTitle
+                        evidenceNotes
+                        evidenceContentRef
+                        dispatch
+
                     renderParsedAtomBasisGovernance row ledgerEvents dispatch
                     renderParsedAtomCandidateGovernance row dispatch
+                    renderParsedAtomItemActions row dispatch
                 }
             }
         }
@@ -1097,15 +1531,22 @@ let renderParsedAtomReviewTable
     parseAmendmentDraft
     parseAmendmentStatus
     ledgerEvents
+    phiContextEntries
+    evidenceRecords
+    evidenceCaptureKind
+    evidenceTitle
+    evidenceNotes
+    evidenceContentRef
     dispatch =
     let atomRows = buildParsedAtomReviewRows sequencedParsedPhis sigmaContext candidateDecisions sigmaBasisItemDecisions
+    let candidateDeltas = formulateCandidateDeltas sigmaContext
 
     div {
         attr.``class`` "mb-5"
 
         h3 {
             attr.``class`` "title is-6"
-            text "Review Parsed Atoms"
+            text "Review Model Fitting Items"
         }
 
         div {
@@ -1128,7 +1569,7 @@ let renderParsedAtomReviewTable
         | None ->
             p {
                 attr.``class`` "is-size-7 has-text-grey"
-                text "Select a kind count above to review just those parsed atoms."
+                text "Select a category count above to review those items."
             }
         | Some atomKind ->
             let selectedRows =
@@ -1150,7 +1591,7 @@ let renderParsedAtomReviewTable
                             }
                             p {
                                 attr.``class`` "has-text-grey mb-0"
-                                text "Selected-kind parsed atom review"
+                                text "Selected category review"
                             }
                         }
                     }
@@ -1161,7 +1602,7 @@ let renderParsedAtomReviewTable
                             attr.``class`` "buttons are-small mb-0"
                             span {
                                 attr.``class`` "tag is-light"
-                                text ("Atom rows: " + string (List.length selectedRows))
+                                text ("Items: " + string (List.length selectedRows))
                             }
                             button {
                                 attr.``class`` "button is-small is-light"
@@ -1181,11 +1622,19 @@ let renderParsedAtomReviewTable
                         text message
                     }
 
+                renderCategoryCandidateGroupGovernance
+                    atomKind
+                    candidateDeltas
+                    candidateDecisions
+                    sigmaBasisItemDecisions
+                    sequencedParsedPhis
+                    dispatch
+
                 match selectedRows with
                 | [] ->
                     p {
                         attr.``class`` "has-text-grey"
-                        text ("No " + (getParsedAtomReviewKindLabel atomKind).ToLowerInvariant() + " parsed atoms are currently exposed.")
+                        text ("No " + (getParsedAtomReviewKindLabel atomKind).ToLowerInvariant() + " are currently exposed.")
                     }
                 | rows ->
                     div {
@@ -1199,12 +1648,18 @@ let renderParsedAtomReviewTable
                                 sigmaBasisItemDecisions
                                 sequencedParsedPhis
                                 ledgerEvents
+                                phiContextEntries
+                                evidenceRecords
+                                evidenceCaptureKind
+                                evidenceTitle
+                                evidenceNotes
+                                evidenceContentRef
                                 dispatch
                     }
             }
     }
 
-let cognitionReviewTargetFilters = [ "All"; "Host"; "Interface"; "State"; "Mode"; "Constraint"; "Reinforced Atom" ]
+let cognitionReviewTargetFilters = [ "All"; "Function"; "Host"; "Interface"; "State"; "Mode"; "Constraint"; "Reinforced Atom" ]
 let cognitionReviewDecisionFilters = [ "All"; "Pending"; "Accepted"; "Rejected"; "Held"; "Mixed"; "Partially governed" ]
 
 let getTopMissingContextRows sequencedParsedPhis =
@@ -1232,6 +1687,7 @@ let candidateMatchesTargetFilter filterValue (candidate: CandidateDelta) =
     match filterValue with
     | "All" -> true
     | "Reinforced Atom" -> candidate.Kind = ReinforcedSigmaAtom
+    | "Function"
     | "Host"
     | "Interface"
     | "State"
@@ -1255,7 +1711,7 @@ let candidateMatchesTextFilter searchText (candidate: CandidateDelta) =
         true
     else
         [
-            formatCandidateDeltaKind candidate.Kind
+            formatModelFittingCandidateDeltaKind candidate.Kind
             candidate.Target
             candidate.ProposedTransition
             candidate.Reason
@@ -1283,6 +1739,7 @@ let getFilteredReviewCandidates (model: Model) sigmaContext sequencedParsedPhis 
 let interpretReviewCandidate (candidate: CandidateDelta) =
     match candidate.Kind with
     | AddUnknownRevealMissingHost -> "Functions and states exist, but no host has been identified."
+    | AddFunction -> "This capability appears available for system capability reasoning."
     | AddInterface -> "This interface appears available for boundary reasoning."
     | AddState -> "This state appears available for condition and behavior reasoning."
     | AddMode -> "This mode appears available for operational-context reasoning."
@@ -1675,7 +2132,7 @@ let renderReviewCandidateCard
                     }
                     h4 {
                         attr.``class`` "title is-6 mb-2"
-                        text (formatCandidateDeltaKind candidate.Kind)
+                        text (formatModelFittingCandidateDeltaKind candidate.Kind)
                     }
                     p {
                         attr.``class`` "is-size-7 has-text-grey"
@@ -1851,16 +2308,22 @@ let private tryExtractLedgerDetailField fieldName (detail: string) =
 
 let private formatParseAmendmentResetSummary (ledgerEvent: LedgerEvent) =
     let atomKind =
-        ledgerEvent.Detail
-        |> tryExtractLedgerDetailField "Original kind"
-        |> Option.defaultValue "Basis item"
+        match ledgerEvent.Detail |> tryExtractLedgerDetailField "Original kind" with
+        | Some value -> value
+        | None ->
+            ledgerEvent.Detail
+            |> tryExtractLedgerDetailField "Retired kind"
+            |> Option.defaultValue "Basis item"
 
     let atomValue =
-        ledgerEvent.Detail
-        |> tryExtractLedgerDetailField "Original text"
-        |> Option.defaultValue ledgerEvent.TargetId
+        match ledgerEvent.Detail |> tryExtractLedgerDetailField "Original text" with
+        | Some value -> value
+        | None ->
+            ledgerEvent.Detail
+            |> tryExtractLedgerDetailField "Retired text"
+            |> Option.defaultValue ledgerEvent.TargetId
 
-    atomKind + " decision reopened: \"" + atomValue + "\""
+    formatParsedAtomKindLabel atomKind + " decision reopened: \"" + atomValue + "\""
 
 let renderRecentParseAmendmentResetEvents ledgerEvents =
     let resetEvents =
@@ -1876,7 +2339,7 @@ let renderRecentParseAmendmentResetEvents ledgerEvents =
             attr.``class`` "notification is-warning is-light cognition-review-helper"
             p {
                 attr.``class`` "has-text-weight-semibold mb-2"
-                text "Basis decisions reopened by parse amendment"
+                text "Basis decisions reopened"
             }
             forEach events <| fun ledgerEvent ->
                 div {
@@ -2019,7 +2482,7 @@ let renderModelFittingSummaryCounts
 
     div {
         attr.``class`` "tags are-medium mb-4"
-        renderCandidateDecisionCount "Parsed atoms" (List.length atomRows)
+        renderCandidateDecisionCount "Items" (List.length atomRows)
         renderCandidateDecisionCount "Candidate groups" candidateCount
         renderCandidateDecisionCount "Group pending" pendingCount
         renderCandidateDecisionCount "Group accepted" acceptedCount
@@ -2067,6 +2530,12 @@ let renderModelFittingWorkspace
     selectedParsedAtomReviewKind
     parseAmendmentDraft
     parseAmendmentStatus
+    phiContextEntries
+    evidenceRecords
+    evidenceCaptureKind
+    evidenceTitle
+    evidenceNotes
+    evidenceContentRef
     dispatch =
     let atomRows = buildParsedAtomReviewRows sequencedParsedPhis sigmaContext candidateDecisions sigmaBasisItemDecisions
     let candidateDeltas = formulateCandidateDeltas sigmaContext
@@ -2081,7 +2550,7 @@ let renderModelFittingWorkspace
 
         p {
             attr.``class`` "is-size-7 has-text-grey mb-4"
-            text "Parsed atom review, amendment, candidate governance, and basis-item governance are handled from the atom cards below."
+            text "Review, amendment, candidate governance, basis governance, notes, and retirement are handled from the item cards below."
         }
 
         renderModelFittingSummaryCounts
@@ -2102,6 +2571,12 @@ let renderModelFittingWorkspace
             parseAmendmentDraft
             parseAmendmentStatus
             ledgerEvents
+            phiContextEntries
+            evidenceRecords
+            evidenceCaptureKind
+            evidenceTitle
+            evidenceNotes
+            evidenceContentRef
             dispatch
 
         renderCollapsedIntermediateSummaries
@@ -2120,6 +2595,12 @@ let renderOperationalSummaryTablesPanel
     selectedParsedAtomReviewKind
     parseAmendmentDraft
     parseAmendmentStatus
+    phiContextEntries
+    evidenceRecords
+    evidenceCaptureKind
+    evidenceTitle
+    evidenceNotes
+    evidenceContentRef
     dispatch =
     div {
         attr.``class`` "box"
@@ -2140,6 +2621,12 @@ let renderOperationalSummaryTablesPanel
             parseAmendmentDraft
             parseAmendmentStatus
             ledgerEvents
+            phiContextEntries
+            evidenceRecords
+            evidenceCaptureKind
+            evidenceTitle
+            evidenceNotes
+            evidenceContentRef
             dispatch
 
         renderMissingContextSummaryTable sequencedParsedPhis

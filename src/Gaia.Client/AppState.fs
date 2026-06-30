@@ -538,6 +538,7 @@ type Message =
     | PreviewParseAmendment
     | ConfirmParseAmendment
     | CancelParseAmendment
+    | RetireParsedAtom of string * string * string * string
     | SelectParsedAtomReviewKind of string
     | ClearParsedAtomReviewKind
     | SetCognitionReviewTargetFilter of string
@@ -575,6 +576,8 @@ type Message =
     | SetEvidenceNotes of string
     | SetEvidenceContentRef of string
     | CreateEvidenceRecord
+    | CreateEvidenceForParsedAtom of string * string * string
+    | CreatePhiFromParsedAtom of string * string * string
     | SetRealizationObjectKindDraft of string
     | SetRealizationObjectIdDraft of string
     | SetRealizationObjectNameDraft of string

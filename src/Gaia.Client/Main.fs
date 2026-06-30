@@ -280,7 +280,11 @@ let renderTopNavigation activeTab dispatch =
 
 let homePage model dispatch =
     let includedSequencedParsedPhis = getIncludedSequencedParsedPhis model.excludedPhiIds model.parsedPhis
-    let currentSigmaContext = buildSigmaContextWithContextEntries model.phiContextEntries includedSequencedParsedPhis
+    let modelFittingSequencedParsedPhis =
+        includedSequencedParsedPhis
+        |> applyParsedAtomRetirementsToSequencedPhis model.LedgerEvents
+
+    let currentSigmaContext = buildSigmaContextWithContextEntries model.phiContextEntries modelFittingSequencedParsedPhis
 
     div {
             attr.``class`` "content"
@@ -923,10 +927,10 @@ let homePage model dispatch =
                     div {
                         attr.``class`` "column is-8"
 
-                        renderCurrentSigmaSnapshotPanel includedSequencedParsedPhis model.staleParsedPhiIds currentSigmaContext
+                        renderCurrentSigmaSnapshotPanel modelFittingSequencedParsedPhis model.staleParsedPhiIds currentSigmaContext
 
                         renderModelFittingWorkspace
-                            includedSequencedParsedPhis
+                            modelFittingSequencedParsedPhis
                             currentSigmaContext
                             model.lastReplayAction
                             model.candidateDecisions
@@ -935,6 +939,12 @@ let homePage model dispatch =
                             model.selectedParsedAtomReviewKind
                             model.parseAmendmentDraft
                             model.parseAmendmentStatus
+                            model.phiContextEntries
+                            model.evidenceRecords
+                            model.evidenceCaptureKind
+                            model.evidenceTitle
+                            model.evidenceNotes
+                            model.evidenceContentRef
                             dispatch
 
                         renderParsedPhiLedgerPanel model.parsedPhis model.staleParsedPhiIds model.excludedPhiIds dispatch
