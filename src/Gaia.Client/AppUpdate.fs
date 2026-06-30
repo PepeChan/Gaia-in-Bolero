@@ -913,6 +913,7 @@ let update (jsRuntime: IJSRuntime) message model =
                         "Parse amendment confirmed"
                         (formatParseAmendmentLedgerDetail validatedDraft)
                     |> appendParseAmendmentDecisionResetLedgerEvents validatedDraft impactPreview.ResetImpacts
+                    |> appendT6RealizationReviewNeededLedgerEvents impactPreview
                     |> fun updatedModel -> updatedModel, Cmd.none
 
     | CancelParseAmendment ->

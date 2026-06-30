@@ -52,6 +52,12 @@ let private renderRealizationStatusTag status =
         text status
     }
 
+let private renderT6ReviewStatusTag reviewNeeded =
+    span {
+        attr.``class`` (if reviewNeeded then "tag is-warning is-light" else "tag is-success is-light")
+        text (if reviewNeeded then "Review Needed" else "Confirmed")
+    }
+
 let private readinessBadgeClass readiness =
     match readiness with
     | Missing -> "readiness-badge readiness-missing"
@@ -425,15 +431,92 @@ let private renderT6Summary (model: Model) =
         }
     }
 
-let private renderObjectRow (state: RealizationState) (objectKind: string, objectId: string, objectName: string) =
+let private formatT6ImpactObjectLabel (state: RealizationState) (impact: T6RealizationReviewImpact) =
+    let objectName = getRealizationObjectName impact.AffectedObjectKind impact.AffectedObjectId state
+
+    if String.IsNullOrWhiteSpace(objectName) then
+        impact.AffectedObjectKind + " " + impact.AffectedObjectId
+    else
+        impact.AffectedObjectKind + " " + impact.AffectedObjectId + " - " + objectName
+
+let private formatT6ImpactLinkLabel (impact: T6RealizationReviewImpact) =
+    impact.AffectedLinkKind + ": " + impact.AffectedLinkSourceId + " -> " + impact.AffectedLinkTargetId
+
+let private renderT6ImpactSummary (model: Model) =
+    let state = model.realizationState
+    let impacts = getT6ReviewNeededImpactsFromLedger model.LedgerEvents
+
+    div {
+        attr.``class`` "box"
+
+        h3 {
+            attr.``class`` "title is-5"
+            text "T6 Impact Summary"
+        }
+
+        match impacts with
+        | [] ->
+            p {
+                attr.``class`` "has-text-grey"
+                text "No T6 realization paths currently need review."
+            }
+        | values ->
+            div {
+                attr.``class`` "table-container"
+                table {
+                    attr.``class`` "table is-fullwidth is-striped is-narrow"
+
+                    thead {
+                        tr {
+                            th { text "Status" }
+                            th { text "Affected object" }
+                            th { text "Affected link" }
+                            th { text "Upstream atom" }
+                            th { text "Upstream candidate" }
+                            th { text "Supporting Phi" }
+                            th { text "Reason" }
+                        }
+                    }
+
+                    tbody {
+                        forEach values <| fun impact ->
+                            tr {
+                                td { renderT6ReviewStatusTag true }
+                                td { text (formatT6ImpactObjectLabel state impact) }
+                                td { text (formatT6ImpactLinkLabel impact) }
+                                td { text (impact.UpstreamAtomKind + ": \"" + impact.UpstreamAtomValue + "\"") }
+                                td { text impact.UpstreamCandidate }
+                                td {
+                                    code { text impact.SupportingPhiId }
+
+                                    if not (String.IsNullOrWhiteSpace(impact.SupportingPhiStatement)) then
+                                        div {
+                                            attr.``class`` "is-size-7 has-text-grey mt-1"
+                                            text impact.SupportingPhiStatement
+                                        }
+                                }
+                                td { text impact.Reason }
+                            }
+                    }
+                }
+            }
+    }
+
+let private renderObjectRow
+    (state: RealizationState)
+    (reviewImpacts: T6RealizationReviewImpact list)
+    (objectKind: string, objectId: string, objectName: string)
+    =
     let note = tryFindObjectNote objectKind objectId state
     let readiness = getRealizationObjectReadiness objectKind objectId state
+    let reviewNeeded = t6ReviewNeededImpactsAffectObject objectKind objectId reviewImpacts
 
     tr {
         attr.``class`` (semanticObjectRowClass objectKind)
         td {
             renderObjectReadiness objectKind readiness
         }
+        td { renderT6ReviewStatusTag reviewNeeded }
         td { code { text objectId } }
         td { text objectName }
         td {
@@ -919,8 +1002,10 @@ let private renderNavigationOperatorsSection (model: Model) dispatch =
             }
     }
 
-let private renderObjectsTable (state: RealizationState) =
+let private renderObjectsTable (model: Model) =
+    let state = model.realizationState
     let objectRows = getObjectRows state
+    let reviewImpacts = getT6ReviewNeededImpactsFromLedger model.LedgerEvents
 
     div {
         attr.``class`` "box"
@@ -945,6 +1030,7 @@ let private renderObjectsTable (state: RealizationState) =
                     thead {
                         tr {
                             th { text "Kind" }
+                            th { text "Status" }
                             th { text "Id" }
                             th { text "Name" }
                             th { text "Description" }
@@ -954,7 +1040,7 @@ let private renderObjectsTable (state: RealizationState) =
 
                     tbody {
                         forEach rows <| fun row ->
-                            renderObjectRow state row
+                            renderObjectRow state reviewImpacts row
                     }
                 }
             }
@@ -962,6 +1048,7 @@ let private renderObjectsTable (state: RealizationState) =
 
 let private renderRealizationTraceSection (model: Model) =
     let state = model.realizationState
+    let reviewImpacts = getT6ReviewNeededImpactsFromLedger model.LedgerEvents
     let traces =
         getRealizationSourceHosts model
         |> List.map (fun entry -> getHostRealizationTrace entry.Value state)
@@ -985,6 +1072,12 @@ let private renderRealizationTraceSection (model: Model) =
                     attr.``class`` "ml-2"
                     renderReadinessBadge "" true node.Readiness
                 }
+
+                if t6ReviewNeededImpactsAffectObject node.ObjectKind node.ObjectId reviewImpacts then
+                    span {
+                        attr.``class`` "ml-2"
+                        renderT6ReviewStatusTag true
+                    }
             }
 
             match node.MissingNextKind with
@@ -1013,6 +1106,12 @@ let private renderRealizationTraceSection (model: Model) =
                     attr.``class`` "ml-2"
                     renderReadinessBadge "" true trace.Readiness
                 }
+
+                if t6ReviewNeededImpactsAffectUpstreamAtom realizationSourceKindHost trace.HostValue reviewImpacts then
+                    span {
+                        attr.``class`` "ml-2"
+                        renderT6ReviewStatusTag true
+                    }
             }
 
             match trace.Parts with
@@ -1052,8 +1151,10 @@ let private renderRealizationTraceSection (model: Model) =
             }
     }
 
-let private renderLinksTable (state: RealizationState) =
+let private renderLinksTable (model: Model) =
+    let state = model.realizationState
     let linkRows = getRealizationLinkRows state
+    let reviewImpacts = getT6ReviewNeededImpactsFromLedger model.LedgerEvents
 
     div {
         attr.``class`` "box"
@@ -1078,6 +1179,7 @@ let private renderLinksTable (state: RealizationState) =
                     thead {
                         tr {
                             th { text "Link kind" }
+                            th { text "Status" }
                             th { text "Source" }
                             th { text "Target" }
                         }
@@ -1085,8 +1187,11 @@ let private renderLinksTable (state: RealizationState) =
 
                     tbody {
                         forEach rows <| fun (linkKind, sourceId, targetId) ->
+                            let reviewNeeded = t6ReviewNeededImpactsAffectLink linkKind sourceId targetId reviewImpacts
+
                             tr {
                                 td { text linkKind }
+                                td { renderT6ReviewStatusTag reviewNeeded }
                                 td { text sourceId }
                                 td { text targetId }
                             }
@@ -1152,10 +1257,11 @@ let renderT6RealizationTab (model: Model) dispatch =
                 attr.``class`` "column is-8"
                 renderHostCompletenessTable model
                 renderT6Summary model
+                renderT6ImpactSummary model
                 renderNavigationOperatorsSection model dispatch
                 renderRealizationTraceSection model
-                renderObjectsTable state
-                renderLinksTable state
+                renderObjectsTable model
+                renderLinksTable model
             }
         }
     }
