@@ -65,7 +65,7 @@ let tryValidateParseAmendment (draft: ParseAmendmentDraft) (model: Model) =
                 |> splitExposureAtomValues
 
             if not (atomListContains draft.OriginalAtomText currentOriginalAtoms) then
-                Result.Error "This parsed atom has changed since the amendment draft was opened. Start the amendment again from the current row."
+                Result.Error "This Model Fitting item has changed since the amendment draft was opened. Start the amendment again from the current row."
             else
                 let currentTargetAtoms =
                     getExposureAtomValue proposedKind parse
@@ -131,13 +131,13 @@ let appendParseAmendmentDecisionResetLedgerEvents draft resetImpacts model =
 let formatParsedAtomRetirementLedgerDetail sourcePhiId atomKind atomText provenance basisResetCount candidateResetCount =
     [
         "Source Phi ID: " + sourcePhiId
-        "Atom kind: " + atomKind
-        "Atom label: " + formatModelFittingAtomKindLabel atomKind
-        "Atom text: " + atomText
+        "Source item kind: " + atomKind
+        "Source item label: " + formatModelFittingAtomKindLabel atomKind
+        "Source item text: " + atomText
         "Provenance: " + provenance
         "Basis decision resets: " + string basisResetCount
         "Candidate decision resets: " + string candidateResetCount
-        "Reason: Parsed atom retired from active Model Fitting; original Phi remains unchanged."
+        "Reason: Model Fitting item excluded from the active model; original Phi remains unchanged."
     ]
     |> String.concat " | "
 
@@ -148,14 +148,14 @@ let formatParsedAtomRetirementDecisionResetLedgerDetail
     (resetImpact: ParseAmendmentBasisDecisionResetImpact) =
     [
         "Source Phi ID: " + sourcePhiId
-        "Retired kind: " + atomKind
-        "Retired text: " + atomText
+        "Excluded kind: " + atomKind
+        "Excluded text: " + atomText
         "Candidate ID: " + resetImpact.CandidateId
         "Candidate type: " + resetImpact.CandidateType
         "Candidate target: " + resetImpact.CandidateTarget
         "Basis item key: " + resetImpact.BasisItemKey
         "Previous decision: " + formatSigmaBasisItemDecisionValue resetImpact.PreviousDecision
-        "Reason: Parsed atom retirement removed this interpreted atom from active Model Fitting."
+        "Reason: Model Fitting item exclusion removed this interpretation from active Model Fitting."
     ]
     |> String.concat " | "
 
@@ -457,8 +457,8 @@ let private formatModelFittingDraftLedgerDetail sourcePhiId atomKind atomText pr
     [
         "Source: Model Fitting"
         "Source Phi ID: " + sourcePhiId
-        "Atom kind: " + atomKind
-        "Atom text: " + atomText
+        "Source item kind: " + atomKind
+        "Source item text: " + atomText
         "Provenance: " + provenance
         "Result: editable Inventory Management draft only; no intake, parse, or ingestion was created."
     ]
@@ -474,16 +474,16 @@ let private undoLastWorkbenchAction (model: Model) =
             { model with
                 candidateDecisions = previousCandidateDecisions
                 sigmaBasisItemDecisions = model.sigmaBasisItemDecisions |> restoreBasisDecisionSnapshots previousBasisDecisions
-                parseAmendmentStatus = Some ("Undo restored retired Model Fitting item for " + sourcePhiId + ".")
+                parseAmendmentStatus = Some ("Undo included Model Fitting item again for " + sourcePhiId + ".")
                 lastWorkbenchUndoAction = None
-                workbenchUndoStatus = Some "Undid parsed atom retirement. Ledger history was retained with an undo event." }
+                workbenchUndoStatus = Some "Undid Model Fitting item exclusion. Ledger history was retained with an undo event." }
             |> appendLedgerEvent
                 parsedAtomRetirementUndoneLedgerKind
                 atomKey
-                "Parsed atom retirement undone"
-                ("Source Phi ID: " + sourcePhiId + " | Atom kind: " + atomKind + " | Atom text: " + atomText)
-            |> appendBasisDecisionUndoLedgerEvents "Undo parsed atom retirement" previousBasisDecisions
-            |> appendWorkbenchUndoLedgerEvent atomKey "Workbench undo applied" "Undo restored a retired parsed atom and any reset governance decisions."
+                "Model Fitting item exclusion undone"
+                ("Source Phi ID: " + sourcePhiId + " | Source item kind: " + atomKind + " | Source item text: " + atomText)
+            |> appendBasisDecisionUndoLedgerEvents "Undo Model Fitting item exclusion" previousBasisDecisions
+            |> appendWorkbenchUndoLedgerEvent atomKey "Workbench undo applied" "Undo included an excluded Model Fitting item and any reset governance decisions."
             |> fun updatedModel -> updatedModel, Cmd.none
 
         | UndoParseAmendment (sourcePhiId, previousParse, previousBasisDecisions) ->
@@ -517,7 +517,7 @@ let private undoLastWorkbenchAction (model: Model) =
                 parseAmendmentStatus = Some ("Undo restored the previous parse for " + sourcePhiId + ".")
                 phiBatchParseStatus = None
                 lastWorkbenchUndoAction = None
-                workbenchUndoStatus = Some "Undid parsed atom amendment. Ledger history was retained with an undo event." }
+                workbenchUndoStatus = Some "Undid Model Fitting item amendment. Ledger history was retained with an undo event." }
             |> appendBasisDecisionUndoLedgerEvents "Undo parse amendment" previousBasisDecisions
             |> appendWorkbenchUndoLedgerEvent sourcePhiId "Workbench undo applied" "Undo restored the previous parsed Phi state after an amendment."
             |> fun updatedModel -> updatedModel, Cmd.none
@@ -827,7 +827,7 @@ let update (jsRuntime: IJSRuntime) message model =
                         let staleStatus =
                             "Parse marked stale for "
                             + evidenceRecord.TargetId
-                            + ". Recompute parse to apply new Phi-targeted 1sec Snip."
+                            + ". Recompute parse to apply new Phi-targeted context entry."
 
                         evidenceModel
                         |> markPhiParseStaleIfParsed evidenceRecord.TargetId staleStatus
@@ -1257,7 +1257,7 @@ let update (jsRuntime: IJSRuntime) message model =
     | PreviewParseAmendment ->
         match model.parseAmendmentDraft with
         | None ->
-            { model with parseAmendmentStatus = Some "Select a parsed atom to amend." }, Cmd.none
+            { model with parseAmendmentStatus = Some "Select a Model Fitting item to amend." }, Cmd.none
         | Some draft ->
             match tryValidateParseAmendment draft model with
             | Result.Error message ->
@@ -1271,7 +1271,7 @@ let update (jsRuntime: IJSRuntime) message model =
     | ConfirmParseAmendment ->
         match model.parseAmendmentDraft with
         | None ->
-            { model with parseAmendmentStatus = Some "Select a parsed atom to amend." }, Cmd.none
+            { model with parseAmendmentStatus = Some "Select a Model Fitting item to amend." }, Cmd.none
         | Some draft when not draft.PreviewRequested ->
             match tryValidateParseAmendment draft model with
             | Result.Error message ->
@@ -1383,11 +1383,11 @@ let update (jsRuntime: IJSRuntime) message model =
         if String.IsNullOrWhiteSpace(cleanedSourcePhiId)
            || String.IsNullOrWhiteSpace(cleanedAtomKind)
            || String.IsNullOrWhiteSpace(cleanedAtomText) then
-            { model with parseAmendmentStatus = Some "Select a parsed atom to retire." }, Cmd.none
+            { model with parseAmendmentStatus = Some "Select a Model Fitting item to exclude." }, Cmd.none
         elif not (isValidParsedExposureAtomKind cleanedAtomKind) then
-            { model with parseAmendmentStatus = Some "Select a valid parsed atom kind." }, Cmd.none
+            { model with parseAmendmentStatus = Some "Select a valid Model Fitting item kind." }, Cmd.none
         elif isParsedAtomRetired model.LedgerEvents cleanedSourcePhiId cleanedAtomKind cleanedAtomText then
-            { model with parseAmendmentStatus = Some "This interpretation is already retired from active Model Fitting." }, Cmd.none
+            { model with parseAmendmentStatus = Some "This interpretation is already excluded from active Model Fitting." }, Cmd.none
         else
             match model.parsedPhis |> List.tryFind (fun parse -> parse.PhiId = cleanedSourcePhiId) with
             | None ->
@@ -1398,7 +1398,7 @@ let update (jsRuntime: IJSRuntime) message model =
                     |> splitExposureAtomValues
 
                 if not (atomListContains cleanedAtomText currentAtoms) then
-                    { model with parseAmendmentStatus = Some "This parsed atom has changed since the card was opened." }, Cmd.none
+                    { model with parseAmendmentStatus = Some "This Model Fitting item has changed since the card was opened." }, Cmd.none
                 else
                     let activeSequencedParsedPhis =
                         model.parsedPhis
@@ -1475,7 +1475,7 @@ let update (jsRuntime: IJSRuntime) message model =
                         parseAmendmentDraft = parseAmendmentDraft
                         parseAmendmentStatus =
                             Some
-                                ("Retired interpretation from active Model Fitting for "
+                                ("Excluded interpretation from active Model Fitting for "
                                  + cleanedSourcePhiId
                                  + ". "
                                  + resetSummary
@@ -1494,7 +1494,7 @@ let update (jsRuntime: IJSRuntime) message model =
                     |> appendLedgerEvent
                         parsedAtomRetiredLedgerKind
                         atomKey
-                        "Parsed atom retired"
+                        "Model Fitting item excluded"
                         (formatParsedAtomRetirementLedgerDetail
                             cleanedSourcePhiId
                             cleanedAtomKind

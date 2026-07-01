@@ -127,6 +127,34 @@
   padding: 0.75rem;
 }
 
+.model-fitting-note-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.model-fitting-note-row {
+  background: #fafafa;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  padding: 0.55rem 0.65rem;
+}
+
+.model-fitting-note-chip {
+  height: auto;
+  line-height: 1.2;
+  max-width: 100%;
+  padding-bottom: 0.25rem;
+  padding-top: 0.25rem;
+  white-space: normal;
+}
+
+.model-fitting-note-text {
+  color: #363636;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 .facts-reconstruction-result {
   overflow-wrap: anywhere;
 }

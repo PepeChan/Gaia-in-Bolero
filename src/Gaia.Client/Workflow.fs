@@ -1008,8 +1008,8 @@ let formulateCandidateDeltas (sigmaContext: SigmaContext) =
                     createCandidateDelta
                         AddState
                         "State"
-                        "Add exposed State atoms as candidate Σ structure."
-                        "State-relevant atoms were exposed by parsed Phi."
+                        "Add exposed Condition items as candidate Σ structure."
+                        "Condition-relevant items were exposed by parsed Phi."
                         (formatSigmaBasisGroup "State" sigmaContext.States)
                         (summarizeEntryProvenance sigmaContext.States)
 
@@ -1018,8 +1018,8 @@ let formulateCandidateDeltas (sigmaContext: SigmaContext) =
                     createCandidateDelta
                         AddMode
                         "Mode"
-                        "Add exposed Mode atoms as candidate Σ structure."
-                        "Mode-relevant atoms were exposed by parsed Phi."
+                        "Add exposed Use mode items as candidate Σ structure."
+                        "Use mode-relevant items were exposed by parsed Phi."
                         (formatSigmaBasisGroup "Mode" sigmaContext.Modes)
                         (summarizeEntryProvenance sigmaContext.Modes)
 
@@ -1057,7 +1057,7 @@ let formulateCandidateDeltas (sigmaContext: SigmaContext) =
                 "None"
                 "Keep current Σ unchanged."
                 "No actionable candidate Delta Sigma transition was detected."
-                [ "No included Sigma atom produced a T4 structural candidate." ]
+                [ "No included Sigma item produced a T4 structural candidate." ]
                 "Text"
         ]
     else
@@ -1731,8 +1731,8 @@ let isCandidateGroupUnresolvedOrConflicted governance =
 
 let getSigmaBasisItemDecisionRationale = function
     | Pending -> ""
-    | Accepted -> "Basis item accepted for later Sigma atom promotion."
-    | Rejected -> "Basis item rejected; no Sigma atom promotion should occur."
+    | Accepted -> "Basis item accepted for later Sigma item promotion."
+    | Rejected -> "Basis item rejected; no Sigma item promotion should occur."
     | Held -> "Basis item held for later review."
 
 let getSigmaBasisItemDecisionLedgerKind = function
@@ -1761,9 +1761,9 @@ let formatSigmaBasisItemLedgerDetail actionScope decision context =
     + formatCandidateDeltaKind candidate.Kind
     + "; Candidate target: "
     + candidate.Target
-    + "; Atom kind: "
+    + "; Basis item kind: "
     + basisItem.Kind
-    + "; Atom value: "
+    + "; Basis item value: "
     + basisItem.AtomValue
     + "; Supporting Phi IDs: "
     + formatSupportingPhiIds basisItem.SupportingPhiIds

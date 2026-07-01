@@ -102,7 +102,7 @@ let renderEvidenceCapturePanel (model: Model) dispatch =
 
         h2 {
             attr.``class`` "title is-5"
-            text "1sec Snip"
+            text "Evidence reference"
         }
 
         div {
@@ -227,7 +227,7 @@ let renderEvidenceCapturePanel (model: Model) dispatch =
             attr.``class`` "button is-link is-fullwidth"
             attr.``type`` "button"
             on.click (fun _ -> dispatch CreateEvidenceRecord)
-            text "Create 1sec Snip"
+            text "Create evidence reference"
         }
 
         match model.evidenceStatus with

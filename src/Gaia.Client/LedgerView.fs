@@ -25,6 +25,26 @@ let formatSignedDelta value =
     else
         string value
 
+let private replaceExclusionTerms (value: string) =
+    value.Replace("retirement", "exclusion")
+        .Replace("Retirement", "Exclusion")
+        .Replace("retired", "excluded")
+        .Replace("Retired", "Excluded")
+
+let private formatLedgerEventKind eventKind =
+    if eventKind = parsedAtomRetiredLedgerKind then
+        "ParsedAtomExcluded"
+    elif eventKind = parsedAtomRetirementUndoneLedgerKind then
+        "ParsedAtomExclusionUndone"
+    else
+        eventKind
+
+let private formatLedgerEventText eventKind value =
+    if eventKind = parsedAtomRetiredLedgerKind || eventKind = parsedAtomRetirementUndoneLedgerKind then
+        replaceExclusionTerms value
+    else
+        value
+
 let renderReplayDeltaRow measure selectedValue currentValue =
     tr {
         td { text measure }
@@ -150,7 +170,7 @@ let renderReplayPreviewPanel (replayPreviewSequence: int option) (ledgerEvents: 
                     }
                     span {
                         attr.``class`` "tag is-light"
-                        text ledgerEvent.EventKind
+                        text (formatLedgerEventKind ledgerEvent.EventKind)
                     }
                     span {
                         attr.``class`` "tag is-light"
@@ -229,10 +249,10 @@ let renderLedgerTab (ledgerEvents: LedgerEvent list) (replayPreviewSequence: int
                                             "")
                                     td { text (string ledgerEvent.SequenceNumber) }
                                     td { text ledgerEvent.TimestampUtc }
-                                    td { text ledgerEvent.EventKind }
+                                    td { text (formatLedgerEventKind ledgerEvent.EventKind) }
                                     td { text ledgerEvent.TargetId }
-                                    td { text ledgerEvent.Summary }
-                                    td { text ledgerEvent.Detail }
+                                    td { text (formatLedgerEventText ledgerEvent.EventKind ledgerEvent.Summary) }
+                                    td { text (formatLedgerEventText ledgerEvent.EventKind ledgerEvent.Detail) }
                                     td {
                                         button {
                                             attr.``class`` (

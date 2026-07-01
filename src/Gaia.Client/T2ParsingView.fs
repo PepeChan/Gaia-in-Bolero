@@ -65,11 +65,11 @@ let renderSigmaSnapshotCounts parsedPhiCount staleParsedPhiCount sigmaContext =
         attr.``class`` "tags are-medium mb-4"
         renderSigmaSnapshotMetric "Included parsed Φ" parsedPhiCount
         renderSigmaSnapshotMetric "Stale parsed Φ" staleParsedPhiCount
-        renderSigmaSnapshotMetric "Functions" (List.length sigmaContext.Functions)
-        renderSigmaSnapshotMetric "Modes" (List.length sigmaContext.Modes)
-        renderSigmaSnapshotMetric "Interfaces" (List.length sigmaContext.Interfaces)
-        renderSigmaSnapshotMetric "States" (List.length sigmaContext.States)
-        renderSigmaSnapshotMetric "Hosts" (List.length sigmaContext.Hosts)
+        renderSigmaSnapshotMetric "Capabilities" (List.length sigmaContext.Functions)
+        renderSigmaSnapshotMetric "Use modes" (List.length sigmaContext.Modes)
+        renderSigmaSnapshotMetric "Interaction points" (List.length sigmaContext.Interfaces)
+        renderSigmaSnapshotMetric "Conditions" (List.length sigmaContext.States)
+        renderSigmaSnapshotMetric "System elements" (List.length sigmaContext.Hosts)
     }
 
 let renderParsedPhiLedgerPanel parsedPhis staleParsedPhiIds excludedPhiIds dispatch =

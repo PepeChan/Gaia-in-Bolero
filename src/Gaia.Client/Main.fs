@@ -539,7 +539,7 @@ let homePage model dispatch =
                                     attr.``class`` "control"
                                     input {
                                         attr.``class`` "input"
-                                        attr.placeholder "function, mode, interface, state, unknown..."
+                                        attr.placeholder "capability, use mode, interaction point, condition, unknown..."
                                         bind.input.string model.phiDraftQuickTags (fun v -> dispatch (SetPhiDraftQuickTags v))
                                     }
                                 }
@@ -549,19 +549,19 @@ let homePage model dispatch =
                                 attr.``class`` "field"
                                 label {
                                     attr.``class`` "label"
-                                    text "Context entries / 1-second snip"
+                                    text "Context entries"
                                 }
                                 div {
                                     attr.``class`` "control"
                                     textarea {
                                         attr.``class`` "textarea"
-                                        attr.placeholder "host=Tablet Module\ninterface=Display ↔ Base\nmode=Standby\nconstraint=Max 45 C\nassumption=Passive Cooling\nevidence=Test Report 17"
+                                        attr.placeholder "system-element=Tablet Module\ninteraction-point=Display to Base\nuse-mode=Standby\nrule=Max 45 C\nassumption=Passive Cooling\nevidence=Test Report 17"
                                         bind.input.string model.phiContextSnipDraft (fun v -> dispatch (SetPhiContextSnipDraft v))
                                     }
                                 }
                                 p {
                                     attr.``class`` "help"
-                                    text "Entries are stored as Phi context, with Provenance=OneSecSnip. Raw Phi text remains unchanged."
+                                    text "Entries are stored as Phi context. Raw Phi text remains unchanged."
                                 }
                             }
 

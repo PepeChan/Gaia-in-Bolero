@@ -31,12 +31,12 @@ let getReinforcedAtomCount (entries: SigmaContextEntry list) =
 
 let getSigmaSummaryRows (sigmaContext: SigmaContext) =
     [
-        "Functions", sigmaContext.Functions
-        "Modes", sigmaContext.Modes
-        "Interfaces", sigmaContext.Interfaces
-        "States", sigmaContext.States
-        "Hosts", sigmaContext.Hosts
-        "Constraints", sigmaContext.Constraints
+        "Capabilities", sigmaContext.Functions
+        "Use modes", sigmaContext.Modes
+        "Interaction points", sigmaContext.Interfaces
+        "Conditions", sigmaContext.States
+        "System elements", sigmaContext.Hosts
+        "Rules / limits", sigmaContext.Constraints
     ]
 
 let hasExposureValue value =
@@ -88,12 +88,12 @@ let interpretPressure count =
 
 let getMissingContextSummaryRows (sequencedParsedPhis: (int * PhiParse) list) =
     [
-        "Hosts",
+        "System elements",
         countIncludedParsedPhisWith
             (fun parse -> parse.Exposure.HostCandidate = "" && hasAnyStructuralExposure parse)
             sequencedParsedPhis
 
-        "Interfaces",
+        "Interaction points",
         countIncludedParsedPhisWith
             (fun parse ->
                 parse.Exposure.Interface = ""
@@ -101,7 +101,7 @@ let getMissingContextSummaryRows (sequencedParsedPhis: (int * PhiParse) list) =
                 && (hasModeExposure parse || hasStateExposure parse))
             sequencedParsedPhis
 
-        "Modes",
+        "Use modes",
         countIncludedParsedPhisWith
             (fun parse ->
                 parse.Exposure.Mode = ""
@@ -109,7 +109,7 @@ let getMissingContextSummaryRows (sequencedParsedPhis: (int * PhiParse) list) =
                 && (hasStateExposure parse || hasInterfaceExposure parse))
             sequencedParsedPhis
 
-        "States",
+        "Conditions",
         countIncludedParsedPhisWith
             (fun parse ->
                 parse.Exposure.State = ""
@@ -128,19 +128,19 @@ let getArchitecturalPressureRows (sigmaContext: SigmaContext) =
     [
         "Host",
         hostBasisCount,
-        "Functions/states exist but no host candidates are present."
+        "Capabilities or conditions exist but no system elements are present."
 
-        "Interface",
+        "Interaction point",
         List.length sigmaContext.Interfaces,
-        "Interface atoms are available for boundary reasoning."
+        "Interaction points are available for boundary reasoning."
 
-        "State",
+        "Condition",
         List.length sigmaContext.States,
-        "State atoms are available for condition and behavior reasoning."
+        "Conditions are available for condition and behavior reasoning."
 
-        "Mode",
+        "Use mode",
         List.length sigmaContext.Modes,
-        "Mode atoms are available for operational-context reasoning."
+        "Use modes are available for operational-context reasoning."
     ]
 
 let getReinforcedAtoms (sigmaContext: SigmaContext) =
@@ -177,9 +177,9 @@ let renderCurrentSigmaSummaryTable sigmaContext =
 
                 thead {
                     tr {
-                        th { text "Atom kind" }
+                        th { text "Item kind" }
                         th { text "Count" }
-                        th { text "Reinforced atoms" }
+                        th { text "Reinforced items" }
                     }
                 }
 
@@ -273,14 +273,14 @@ let renderTopReinforcedAtomsTable sigmaContext =
 
         h3 {
             attr.``class`` "title is-6"
-            text "Top Reinforced Atoms"
+            text "Top Reinforced Items"
         }
 
         match reinforcedAtoms with
         | [] ->
             p {
                 attr.``class`` "has-text-grey"
-                text "No reinforced atoms yet."
+                text "No reinforced items yet."
             }
         | atoms ->
             div {
@@ -291,7 +291,7 @@ let renderTopReinforcedAtomsTable sigmaContext =
                     thead {
                         tr {
                             th { text "Kind" }
-                            th { text "Atom" }
+                            th { text "Item" }
                             th { text "Support" }
                             th { text "Supporting Phi" }
                         }
