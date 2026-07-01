@@ -884,12 +884,12 @@ let private atomLines prefix atoms =
 
 let private flattenAtomGroups (atomGroups: DeltaSigmaAtomGroups) =
     [
-        yield! atomGroups.FunctionAtoms |> List.map (fun value -> "Function", value)
-        yield! atomGroups.ModeAtoms |> List.map (fun value -> "Mode", value)
-        yield! atomGroups.InterfaceAtoms |> List.map (fun value -> "Interface", value)
-        yield! atomGroups.StateAtoms |> List.map (fun value -> "State", value)
-        yield! atomGroups.HostAtoms |> List.map (fun value -> "Host", value)
-        yield! atomGroups.ConstraintAtoms |> List.map (fun value -> "Constraint", value)
+        yield! atomGroups.FunctionAtoms |> List.map (fun value -> "Capability", value)
+        yield! atomGroups.ModeAtoms |> List.map (fun value -> "Use mode", value)
+        yield! atomGroups.InterfaceAtoms |> List.map (fun value -> "Interaction point", value)
+        yield! atomGroups.StateAtoms |> List.map (fun value -> "Condition", value)
+        yield! atomGroups.HostAtoms |> List.map (fun value -> "System element", value)
+        yield! atomGroups.ConstraintAtoms |> List.map (fun value -> "Rule / limit", value)
     ]
 
 let private reconstructPhiChange question model =
@@ -951,13 +951,13 @@ let private reconstructPhiChange question model =
                 elif List.isEmpty addedAtoms then
                     "After Phi "
                     + phiId
-                    + " was parsed, no new current Sigma atoms were added."
+                    + " was parsed, no new current Sigma items were added."
                 else
                     "After Phi "
                     + phiId
                     + " was parsed, current Sigma gained "
                     + string (List.length addedAtoms)
-                    + " atom(s): "
+                    + " item(s): "
                     + (addedAtoms |> List.map (fun (kind, value) -> kind + " " + value) |> String.concat "; ")
                     + "."
 
@@ -973,7 +973,7 @@ let private reconstructPhiChange question model =
                     if model.excludedPhiIds |> List.contains phiId then
                         "Phi " + phiId + " is excluded from replay."
                     if List.isEmpty addedAtoms then
-                        "No new current Sigma atoms were added by this Phi."
+                            "No new current Sigma items were added by this Phi."
                 ]
 
             let reasonLines =
@@ -981,11 +981,11 @@ let private reconstructPhiChange question model =
                     if model.excludedPhiIds |> List.contains phiId then
                         yield "Phi " + phiId + " is excluded from replay, so parsed facts are not applied to the current Sigma context."
                     elif List.isEmpty addedAtoms then
-                        yield "The parsed T2 result did not introduce any Sigma atom that was absent before this Phi."
+                        yield "The parsed T2 result did not introduce any Sigma item that was absent before this Phi."
                     else
                         yield
                             "The parsed T2 result introduced "
-                            + countLabel "current Sigma atom" "current Sigma atoms" (List.length addedAtoms)
+                            + countLabel "current Sigma item" "current Sigma items" (List.length addedAtoms)
                             + "."
                     if not (List.isEmpty relatedCandidates) then
                         yield
@@ -1007,17 +1007,17 @@ let private reconstructPhiChange question model =
                     if model.excludedPhiIds |> List.contains phiId then
                         yield "Include Phi " + phiId + " in replay if its parsed facts should affect current state."
                     if List.isEmpty addedAtoms then
-                        yield "Review the T2 parsed result if a new current Sigma atom was expected."
+                        yield "Review the T2 parsed result if a new current Sigma item was expected."
                 ]
                 |> distinctText
 
             let factLines =
                 [
                     yield "T2 statement: " + parse.Statement
-                    yield "T2 host candidate: " + (if isBlank parse.Exposure.HostCandidate then "None" else parse.Exposure.HostCandidate)
-                    yield "T2 interface: " + (if isBlank parse.Exposure.Interface then "None" else parse.Exposure.Interface)
-                    yield "T2 mode: " + (if isBlank parse.Exposure.Mode then "None" else parse.Exposure.Mode)
-                    yield "T2 state: " + (if isBlank parse.Exposure.State then "None" else parse.Exposure.State)
+                    yield "T2 system element: " + (if isBlank parse.Exposure.HostCandidate then "None" else parse.Exposure.HostCandidate)
+                    yield "T2 interaction point: " + (if isBlank parse.Exposure.Interface then "None" else parse.Exposure.Interface)
+                    yield "T2 use mode: " + (if isBlank parse.Exposure.Mode then "None" else parse.Exposure.Mode)
+                    yield "T2 condition: " + (if isBlank parse.Exposure.State then "None" else parse.Exposure.State)
                     yield! atomLines "Added" addedAtoms
                 ]
 

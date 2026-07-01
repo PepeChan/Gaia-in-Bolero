@@ -1081,3 +1081,301 @@ let getRealizationLinkRows (state: RealizationState) =
         yield! state.Sigma.TF_to_CTQ |> List.map (fun (source, target) -> realizationLinkKindTFToCTQ, source, target)
         yield! state.CTQ_to_VV |> List.map (fun (source, target) -> realizationLinkKindCTQToVV, source, target)
     ]
+
+type T6RealizationReviewImpact =
+    {
+        LedgerTargetId: string
+        AffectedObjectKind: string
+        AffectedObjectId: string
+        AffectedLinkKind: string
+        AffectedLinkSourceId: string
+        AffectedLinkTargetId: string
+        UpstreamAtomKind: string
+        UpstreamAtomValue: string
+        UpstreamCandidate: string
+        SupportingPhiId: string
+        SupportingPhiStatement: string
+        Reason: string
+    }
+
+type private T6RealizationReviewLink =
+    {
+        TargetObjectKind: string
+        TargetObjectId: string
+        LinkKind: string
+        LinkSourceId: string
+        LinkTargetId: string
+    }
+
+let private makeT6ReviewLink targetObjectKind targetObjectId linkKind sourceId targetId =
+    {
+        TargetObjectKind = targetObjectKind
+        TargetObjectId = targetObjectId
+        LinkKind = linkKind
+        LinkSourceId = sourceId
+        LinkTargetId = targetId
+    }
+
+let private linksFromSource linkKind sourceObjectId targetObjectKind links =
+    links
+    |> List.choose (fun (sourceId, targetId) ->
+        if equalsId sourceId sourceObjectId then
+            Some (makeT6ReviewLink targetObjectKind targetId linkKind sourceId targetId)
+        else
+            None)
+
+let rec private collectDownstreamT6ReviewLinks objectKind objectId (state: RealizationState) =
+    let directLinks =
+        match objectKind with
+        | kind when kind = realizationObjectKindFR ->
+            linksFromSource realizationLinkKindFRToDP objectId realizationObjectKindDP state.Sigma.FR_to_DP
+        | kind when kind = realizationObjectKindPart ->
+            linksFromSource realizationLinkKindPartToDP objectId realizationObjectKindDP (partToDpLinks state)
+        | kind when kind = realizationObjectKindDP ->
+            linksFromSource realizationLinkKindDPToTF objectId realizationObjectKindTF state.Sigma.DP_to_TF
+        | kind when kind = realizationObjectKindTF ->
+            linksFromSource realizationLinkKindTFToCTQ objectId realizationObjectKindCTQ state.Sigma.TF_to_CTQ
+        | kind when kind = realizationObjectKindCTQ ->
+            linksFromSource realizationLinkKindCTQToVV objectId realizationObjectKindVV state.CTQ_to_VV
+        | _ -> []
+
+    [
+        yield! directLinks
+
+        for directLink in directLinks do
+            yield! collectDownstreamT6ReviewLinks directLink.TargetObjectKind directLink.TargetObjectId state
+    ]
+
+let private getT6ReviewLinksForHost hostValue (state: RealizationState) =
+    let hostLinks =
+        state.Host_to_Part
+        |> List.choose (fun (sourceId, targetId) ->
+            if equalsId sourceId hostValue then
+                Some (makeT6ReviewLink realizationObjectKindPart targetId realizationLinkKindHostToPart sourceId targetId)
+            else
+                None)
+
+    [
+        yield! hostLinks
+
+        for hostLink in hostLinks do
+            yield! collectDownstreamT6ReviewLinks hostLink.TargetObjectKind hostLink.TargetObjectId state
+    ]
+
+let private getT6ReviewLinksForFunction functionValue (state: RealizationState) =
+    let functionLinks =
+        state.Function_to_FR
+        |> List.choose (fun (sourceId, targetId) ->
+            if equalsId sourceId functionValue then
+                Some (makeT6ReviewLink realizationObjectKindFR targetId realizationLinkKindFunctionToFR sourceId targetId)
+            else
+                None)
+
+    [
+        yield! functionLinks
+
+        for functionLink in functionLinks do
+            yield! collectDownstreamT6ReviewLinks functionLink.TargetObjectKind functionLink.TargetObjectId state
+    ]
+
+let private sanitizeLedgerTargetSegment value =
+    let value = clean value
+
+    if hasText value then
+        value.Replace("::", "/").Replace("|", "/")
+    else
+        "(none)"
+
+let private formatT6ReviewLedgerTargetId (link: T6RealizationReviewLink) =
+    [
+        "T6ReviewNeeded"
+        link.LinkKind
+        link.LinkSourceId
+        link.LinkTargetId
+        link.TargetObjectKind
+        link.TargetObjectId
+    ]
+    |> List.map sanitizeLedgerTargetSegment
+    |> String.concat "::"
+
+let private formatT6CandidateSummary candidateType candidateTarget =
+    let candidateType = clean candidateType
+    let candidateTarget = clean candidateTarget
+
+    match hasText candidateType, hasText candidateTarget with
+    | true, true -> candidateType + ": " + candidateTarget
+    | true, false -> candidateType
+    | false, true -> candidateTarget
+    | false, false -> ""
+
+let private getT6UpstreamCandidateSummary (amendment: ParseAmendmentImpactPreview) =
+    [
+        yield!
+            amendment.ResetImpacts
+            |> List.map (fun resetImpact -> formatT6CandidateSummary resetImpact.CandidateType resetImpact.CandidateTarget)
+
+        yield!
+            amendment.CandidateGroupImpacts
+            |> List.map (fun groupImpact -> formatT6CandidateSummary groupImpact.CandidateType groupImpact.CandidateTarget)
+    ]
+    |> distinctIds
+    |> fun values ->
+        match values with
+        | [] -> "(not computed)"
+        | _ -> String.concat "; " values
+
+let private getT6ReviewReason (amendment: ParseAmendmentImpactPreview) =
+    if amendment.ResetImpacts |> List.isEmpty then
+        "Parse amendment changed an upstream parsed atom used by this T6 realization path."
+    else
+        "Parse amendment reopened upstream T4/T5 basis governance for this atom."
+
+let private makeT6RealizationReviewImpact (amendment: ParseAmendmentImpactPreview) (link: T6RealizationReviewLink) =
+    {
+        LedgerTargetId = formatT6ReviewLedgerTargetId link
+        AffectedObjectKind = link.TargetObjectKind
+        AffectedObjectId = link.TargetObjectId
+        AffectedLinkKind = link.LinkKind
+        AffectedLinkSourceId = link.LinkSourceId
+        AffectedLinkTargetId = link.LinkTargetId
+        UpstreamAtomKind = amendment.OldAtomKind
+        UpstreamAtomValue = amendment.OldAtomValue
+        UpstreamCandidate = getT6UpstreamCandidateSummary amendment
+        SupportingPhiId = amendment.SourcePhiId
+        SupportingPhiStatement = amendment.SourcePhiStatement
+        Reason = getT6ReviewReason amendment
+    }
+
+let getT6ReviewNeededImpactsForParseAmendment
+    (amendment: ParseAmendmentImpactPreview)
+    (state: RealizationState)
+    =
+    let oldAtomKind = clean amendment.OldAtomKind
+
+    let reviewLinks =
+        if String.Equals(oldAtomKind, realizationSourceKindHost, StringComparison.OrdinalIgnoreCase) then
+            getT6ReviewLinksForHost amendment.OldAtomValue state
+        elif String.Equals(oldAtomKind, realizationSourceKindFunction, StringComparison.OrdinalIgnoreCase) then
+            getT6ReviewLinksForFunction amendment.OldAtomValue state
+        else
+            []
+
+    reviewLinks
+    |> List.map (makeT6RealizationReviewImpact amendment)
+    |> List.distinctBy (fun impact -> impact.LedgerTargetId)
+
+let private ledgerDetailValue value =
+    let value = clean value
+
+    if hasText value then
+        value.Replace("|", "/").Replace("\r", " ").Replace("\n", " ")
+    else
+        "(none)"
+
+let private ledgerDetailField label value =
+    label + ": " + ledgerDetailValue value
+
+let formatT6RealizationReviewLedgerDetail (impact: T6RealizationReviewImpact) =
+    [
+        ledgerDetailField "Affected object kind" impact.AffectedObjectKind
+        ledgerDetailField "Affected object id" impact.AffectedObjectId
+        ledgerDetailField "Affected link kind" impact.AffectedLinkKind
+        ledgerDetailField "Affected link source" impact.AffectedLinkSourceId
+        ledgerDetailField "Affected link target" impact.AffectedLinkTargetId
+        ledgerDetailField "Upstream atom kind" impact.UpstreamAtomKind
+        ledgerDetailField "Upstream atom value" impact.UpstreamAtomValue
+        ledgerDetailField "Upstream candidate" impact.UpstreamCandidate
+        ledgerDetailField "Supporting Phi ID" impact.SupportingPhiId
+        ledgerDetailField "Supporting Phi statement" impact.SupportingPhiStatement
+        ledgerDetailField "Reason" impact.Reason
+    ]
+    |> String.concat " | "
+
+let appendT6RealizationReviewNeededLedgerEvents
+    (amendment: ParseAmendmentImpactPreview)
+    (model: Model)
+    =
+    let existingReviewTargets =
+        model.LedgerEvents
+        |> List.filter (fun ledgerEvent -> ledgerEvent.EventKind = t6RealizationReviewNeededLedgerKind)
+        |> List.map (fun ledgerEvent -> ledgerEvent.TargetId)
+        |> Set.ofList
+
+    let newImpacts =
+        getT6ReviewNeededImpactsForParseAmendment amendment model.realizationState
+        |> List.filter (fun impact -> not (existingReviewTargets |> Set.contains impact.LedgerTargetId))
+
+    newImpacts
+    |> List.fold
+        (fun workingModel impact ->
+            workingModel
+            |> appendLedgerEvent
+                t6RealizationReviewNeededLedgerKind
+                impact.LedgerTargetId
+                "T6 realization review needed"
+                (formatT6RealizationReviewLedgerDetail impact))
+        model
+
+let private splitLedgerDetailFields (detail: string) =
+    if isNull detail then
+        []
+    else
+        detail.Split([| " | " |], StringSplitOptions.None)
+        |> Array.toList
+
+let private tryReadLedgerDetailField label detail =
+    let prefix = label + ": "
+
+    splitLedgerDetailFields detail
+    |> List.tryPick (fun field ->
+        if field.StartsWith(prefix, StringComparison.Ordinal) then
+            Some (field.Substring(prefix.Length))
+        else
+            None)
+
+let private readLedgerDetailFieldOrDefault label fallback detail =
+    tryReadLedgerDetailField label detail
+    |> Option.defaultValue fallback
+
+let private tryParseT6RealizationReviewImpact (ledgerEvent: LedgerEvent) =
+    if ledgerEvent.EventKind <> t6RealizationReviewNeededLedgerKind then
+        None
+    else
+        Some
+            {
+                LedgerTargetId = ledgerEvent.TargetId
+                AffectedObjectKind = readLedgerDetailFieldOrDefault "Affected object kind" "(unknown)" ledgerEvent.Detail
+                AffectedObjectId = readLedgerDetailFieldOrDefault "Affected object id" "(unknown)" ledgerEvent.Detail
+                AffectedLinkKind = readLedgerDetailFieldOrDefault "Affected link kind" "(unknown)" ledgerEvent.Detail
+                AffectedLinkSourceId = readLedgerDetailFieldOrDefault "Affected link source" "(unknown)" ledgerEvent.Detail
+                AffectedLinkTargetId = readLedgerDetailFieldOrDefault "Affected link target" "(unknown)" ledgerEvent.Detail
+                UpstreamAtomKind = readLedgerDetailFieldOrDefault "Upstream atom kind" "(unknown)" ledgerEvent.Detail
+                UpstreamAtomValue = readLedgerDetailFieldOrDefault "Upstream atom value" "(unknown)" ledgerEvent.Detail
+                UpstreamCandidate = readLedgerDetailFieldOrDefault "Upstream candidate" "(not computed)" ledgerEvent.Detail
+                SupportingPhiId = readLedgerDetailFieldOrDefault "Supporting Phi ID" "(unknown)" ledgerEvent.Detail
+                SupportingPhiStatement = readLedgerDetailFieldOrDefault "Supporting Phi statement" "" ledgerEvent.Detail
+                Reason = readLedgerDetailFieldOrDefault "Reason" "Upstream interpretation changed." ledgerEvent.Detail
+            }
+
+let getT6ReviewNeededImpactsFromLedger (ledgerEvents: LedgerEvent list) =
+    ledgerEvents
+    |> List.choose tryParseT6RealizationReviewImpact
+
+let t6ReviewNeededImpactsAffectLink linkKind sourceId targetId (impacts: T6RealizationReviewImpact list) =
+    impacts
+    |> List.exists (fun impact ->
+        equalsId impact.AffectedLinkKind linkKind
+        && equalsId impact.AffectedLinkSourceId sourceId
+        && equalsId impact.AffectedLinkTargetId targetId)
+
+let t6ReviewNeededImpactsAffectObject objectKind objectId (impacts: T6RealizationReviewImpact list) =
+    impacts
+    |> List.exists (fun impact ->
+        equalsId impact.AffectedObjectKind objectKind
+        && equalsId impact.AffectedObjectId objectId)
+
+let t6ReviewNeededImpactsAffectUpstreamAtom atomKind atomValue (impacts: T6RealizationReviewImpact list) =
+    impacts
+    |> List.exists (fun impact ->
+        equalsId impact.UpstreamAtomKind atomKind
+        && equalsId impact.UpstreamAtomValue atomValue)

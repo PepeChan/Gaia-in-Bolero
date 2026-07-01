@@ -36,6 +36,8 @@ type Model =
         phiBatchParseStatus: string option
         parseAmendmentDraft: ParseAmendmentDraft option
         parseAmendmentStatus: string option
+        lastWorkbenchUndoAction: WorkbenchUndoAction option
+        workbenchUndoStatus: string option
         selectedParsedAtomReviewKind: string option
         cognitionReviewTargetFilter: string
         cognitionReviewDecisionFilter: string
@@ -259,6 +261,8 @@ let restoreProjectSnapshot (snapshot: ProjectSnapshot) (model: Model) =
             phiBatchParseStatus = None
             parseAmendmentDraft = None
             parseAmendmentStatus = None
+            lastWorkbenchUndoAction = None
+            workbenchUndoStatus = None
             selectedParsedAtomReviewKind = None
             cognitionReviewTargetFilter = defaultCognitionReviewTargetFilter
             cognitionReviewDecisionFilter = defaultCognitionReviewDecisionFilter
@@ -348,6 +352,8 @@ let initModel =
         phiBatchParseStatus = None
         parseAmendmentDraft = None
         parseAmendmentStatus = None
+        lastWorkbenchUndoAction = None
+        workbenchUndoStatus = None
         selectedParsedAtomReviewKind = None
         cognitionReviewTargetFilter = defaultCognitionReviewTargetFilter
         cognitionReviewDecisionFilter = defaultCognitionReviewDecisionFilter
@@ -419,6 +425,8 @@ let clearProjectModel (model: Model) =
             phiBatchParseStatus = None
             parseAmendmentDraft = None
             parseAmendmentStatus = None
+            lastWorkbenchUndoAction = None
+            workbenchUndoStatus = None
             selectedParsedAtomReviewKind = None
             cognitionReviewTargetFilter = defaultCognitionReviewTargetFilter
             cognitionReviewDecisionFilter = defaultCognitionReviewDecisionFilter
@@ -544,6 +552,8 @@ type Message =
     | PreviewParseAmendment
     | ConfirmParseAmendment
     | CancelParseAmendment
+    | RetireParsedAtom of string * string * string * string
+    | UndoLastWorkbenchAction
     | SelectParsedAtomReviewKind of string
     | ClearParsedAtomReviewKind
     | SetCognitionReviewTargetFilter of string
@@ -581,6 +591,8 @@ type Message =
     | SetEvidenceNotes of string
     | SetEvidenceContentRef of string
     | CreateEvidenceRecord
+    | CreateEvidenceForParsedAtom of string * string * string
+    | CreatePhiFromParsedAtom of string * string * string * string
     | SetRealizationObjectKindDraft of string
     | SetRealizationObjectIdDraft of string
     | SetRealizationObjectNameDraft of string

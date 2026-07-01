@@ -10,8 +10,6 @@ type Page =
 
 type TopNavigationTab =
     | GaiaProbeTab
-    | DetailsTab
-    | DemoToolsTab
     | DesignRealizationTab
     | FactsReconstructionTab
     | EvidenceTab
@@ -92,6 +90,7 @@ type DeltaSigmaAnalysis =
 
 type CandidateDeltaKind =
     | AddUnknownRevealMissingHost
+    | AddFunction
     | AddInterface
     | AddState
     | AddMode
@@ -188,6 +187,24 @@ let parsedExposureAtomKinds =
         "Constraint"
     ]
 
+let formatModelFittingAtomKindLabel = function
+    | "Function" -> "Capability"
+    | "Mode" -> "Use mode"
+    | "Interface" -> "Interaction point"
+    | "State" -> "Condition"
+    | "Host" -> "System element"
+    | "Constraint" -> "Rule / limit"
+    | atomKind -> atomKind
+
+let formatModelFittingAtomKindPluralLabel = function
+    | "Function" -> "Capabilities"
+    | "Mode" -> "Use modes"
+    | "Interface" -> "Interaction points"
+    | "State" -> "Conditions"
+    | "Host" -> "System elements"
+    | "Constraint" -> "Rules / limits"
+    | atomKind -> atomKind
+
 let t6RealizationInquirySource = "T6 Realization Inquiry"
 let derivedInquiryTag = "derived-inquiry"
 let derivedInquiryContextKind = "DerivedInquiry"
@@ -226,6 +243,11 @@ type ReviewNeededMark =
         Reason: string
         CreatedAtUtc: string
     }
+let t6RealizationReviewNeededLedgerKind = "T6RealizationReviewNeeded"
+let parsedAtomRetiredLedgerKind = "ParsedAtomRetired"
+let parsedAtomRetirementUndoneLedgerKind = "ParsedAtomRetirementUndone"
+let phiDraftCreatedLedgerKind = "PhiDraftCreated"
+let workbenchUndoLedgerKind = "WorkbenchUndoApplied"
 
 type LedgerEvent =
     {
@@ -282,6 +304,52 @@ type EvidenceRecord =
         Notes: string
         ContentRef: string
     }
+
+type PhiDraftFormSnapshot =
+    {
+        ActiveTopNavigationTab: TopNavigationTab
+        PhiDraftStatus: string option
+        PhiDraftInputClass: string
+        PhiDraftActor: string
+        PhiDraftMission: string
+        PhiDraftOperationalContext: string
+        PhiDraftRawStatement: string
+        PhiDraftTriggerContext: string
+        PhiDraftSource: string
+        PhiDraftQuickTags: string
+        PhiDraftConfidence: string
+        PhiContextSnipDraft: string
+    }
+
+type BasisDecisionUndoSnapshot =
+    {
+        BasisItemKey: string
+        PreviousDecision: CandidateDecisionValue option
+    }
+
+type EvidenceRecordUndoSnapshot =
+    {
+        EvidenceRecord: EvidenceRecord
+        PreviousStaleParsedPhiIds: string list
+        PreviousPhiBatchParseStatus: string option
+    }
+
+type PhiContextEntryUndoSnapshot =
+    {
+        ContextEntry: PhiContextEntry
+        PreviousStaleParsedPhiIds: string list
+        PreviousPhiBatchParseStatus: string option
+    }
+
+type WorkbenchUndoAction =
+    | UndoParsedAtomRetirement of atomKey: string * sourcePhiId: string * atomKind: string * atomText: string * previousCandidateDecisions: CandidateDecision list * previousBasisDecisions: BasisDecisionUndoSnapshot list
+    | UndoParseAmendment of sourcePhiId: string * previousParse: PhiParse * previousBasisDecisions: BasisDecisionUndoSnapshot list
+    | UndoEvidenceRecordCreation of EvidenceRecordUndoSnapshot
+    | UndoPhiContextEntryCreation of PhiContextEntryUndoSnapshot
+    | UndoCandidateDecision of candidateId: string * previousDecision: CandidateDecision option
+    | UndoSigmaBasisItemDecision of BasisDecisionUndoSnapshot
+    | UndoSigmaBasisItemBulkDecision of BasisDecisionUndoSnapshot list
+    | UndoModelFittingDraftCreation of previousDraft: PhiDraftFormSnapshot * targetId: string
 
 type RealizationObjectNote =
     {

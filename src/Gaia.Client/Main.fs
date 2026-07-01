@@ -18,7 +18,6 @@ open Gaia.Client.Workflow
 open Gaia.Client.Inquiry
 open Gaia.Client.AppUpdate
 open Gaia.Client.T2ParsingView
-open Gaia.Client.T4CandidateView
 open Gaia.Client.T3SummaryView
 open Gaia.Client.T5GovernanceView
 open Gaia.Client.LedgerView
@@ -215,7 +214,7 @@ let renderPersistenceTab (model: Model) dispatch =
 
 let renderTopNavigation activeTab dispatch =
     div {
-        attr.``class`` "tabs is-toggle mb-5"
+        attr.``class`` "tabs is-toggle is-centered mb-4"
         ul {
             li {
                 attr.``class`` (
@@ -225,31 +224,7 @@ let renderTopNavigation activeTab dispatch =
                         "")
                 a {
                     on.click (fun _ -> dispatch (SelectTopNavigationTab GaiaProbeTab))
-                    text "Inquiry Intake"
-                }
-            }
-
-            li {
-                attr.``class`` (
-                    if activeTab = DetailsTab then
-                        "is-active"
-                    else
-                        "")
-                a {
-                    on.click (fun _ -> dispatch (SelectTopNavigationTab DetailsTab))
-                    text "Details"
-                }
-            }
-
-            li {
-                attr.``class`` (
-                    if activeTab = DemoToolsTab then
-                        "is-active"
-                    else
-                        "")
-                a {
-                    on.click (fun _ -> dispatch (SelectTopNavigationTab DemoToolsTab))
-                    text "Demo Tools"
+                    text "Inventory"
                 }
             }
 
@@ -261,7 +236,7 @@ let renderTopNavigation activeTab dispatch =
                         "")
                 a {
                     on.click (fun _ -> dispatch (SelectTopNavigationTab DesignRealizationTab))
-                    text "T6 Realization"
+                    text "Scenario"
                 }
             }
 
@@ -273,19 +248,7 @@ let renderTopNavigation activeTab dispatch =
                         "")
                 a {
                     on.click (fun _ -> dispatch (SelectTopNavigationTab FactsReconstructionTab))
-                    text "Inquiry Resolution"
-                }
-            }
-
-            li {
-                attr.``class`` (
-                    if activeTab = PersistenceTab then
-                        "is-active"
-                    else
-                        "")
-                a {
-                    on.click (fun _ -> dispatch (SelectTopNavigationTab PersistenceTab))
-                    text "Projects"
+                    text "Ask"
                 }
             }
 
@@ -300,88 +263,43 @@ let renderTopNavigation activeTab dispatch =
                     text "Ledger"
                 }
             }
+
+            li {
+                attr.``class`` (
+                    if activeTab = PersistenceTab then
+                        "is-active"
+                    else
+                        "")
+                a {
+                    on.click (fun _ -> dispatch (SelectTopNavigationTab PersistenceTab))
+                    text "Projects"
+                }
+            }
         }
     }
 
 let homePage model dispatch =
-    match tryGetSelectedScenario model, model.scenarioResolution with
-    | Some scenario, Some resolution ->
-        let admissibility = getAdmissibilityResult scenario.Parse
-        let matchedFrNames = mapIdsToNames (fun (fr: FR) -> fr.Id) (fun fr -> fr.Name) DemoData.demoSigma.FRs resolution.MatchedFRs
-        let matchedDpNames = mapIdsToNames (fun (dp: DP) -> dp.Id) (fun dp -> dp.Name) DemoData.demoSigma.DPs resolution.MatchedDPs
-        let matchedTfNames = mapIdsToNames (fun (tf: TF) -> tf.Id) (fun tf -> tf.Name) DemoData.demoSigma.TFs resolution.MatchedTFs
-        let matchedCtqNames = mapIdsToNames (fun (ctq: CTQ) -> ctq.Id) (fun ctq -> ctq.Name) DemoData.demoSigma.CTQs resolution.MatchedCTQs
-        let includedSequencedParsedPhis = getIncludedSequencedParsedPhis model.excludedPhiIds model.parsedPhis
-        let currentSigmaContext = buildSigmaContextWithContextEntries model.phiContextEntries includedSequencedParsedPhis
+    let includedSequencedParsedPhis = getIncludedSequencedParsedPhis model.excludedPhiIds model.parsedPhis
+    let modelFittingSequencedParsedPhis =
+        includedSequencedParsedPhis
+        |> applyParsedAtomRetirementsToSequencedPhis model.LedgerEvents
 
-        div {
+    let currentSigmaContext = buildSigmaContextWithContextEntries model.phiContextEntries modelFittingSequencedParsedPhis
+
+    div {
             attr.``class`` "content"
             h1 {
-                attr.``class`` "title"
+                attr.``class`` "title is-4 mb-1"
                 text "Cognopy Inquiry Console"
             }
             p {
-                attr.``class`` "subtitle is-6"
+                attr.``class`` "subtitle is-7 mb-2"
                 text "An inquiry resolution engine for adding stakeholder information and reconstructing answers from preserved reasoning history."
             }
 
             div {
-                attr.``class`` "notification is-info is-light"
+                attr.``class`` "notification is-info is-light py-2 px-3 mb-3"
                 text "Cognopy resolves stakeholder inquiries by translating them into structured reasoning, governing candidate changes, and reconstructing answers from preserved reasoning history."
-            }
-
-            div {
-                attr.``class`` "columns is-variable is-4 mb-5"
-
-                div {
-                    attr.``class`` "column is-6"
-                    div {
-                        attr.``class`` "box"
-                        p {
-                            attr.``class`` "heading mb-2"
-                            text "Tell Cognopy"
-                        }
-                        h2 {
-                            attr.``class`` "title is-5"
-                            text "Add information to the system"
-                        }
-                        p {
-                            attr.``class`` "has-text-grey"
-                            text "Use forward inquiry intake to capture stakeholder statements as Phi for the existing reasoning pipeline."
-                        }
-                        button {
-                            attr.``class`` "button is-link is-light"
-                            attr.``type`` "button"
-                            on.click (fun _ -> dispatch (SelectTopNavigationTab GaiaProbeTab))
-                            text "Tell Cognopy"
-                        }
-                    }
-                }
-
-                div {
-                    attr.``class`` "column is-6"
-                    div {
-                        attr.``class`` "box"
-                        p {
-                            attr.``class`` "heading mb-2"
-                            text "Ask Cognopy"
-                        }
-                        h2 {
-                            attr.``class`` "title is-5"
-                            text "Retrieve or explain information from the system"
-                        }
-                        p {
-                            attr.``class`` "has-text-grey"
-                            text "Use reverse inquiry resolution to answer questions from stored facts, decisions, provenance, and ledger history."
-                        }
-                        button {
-                            attr.``class`` "button is-link"
-                            attr.``type`` "button"
-                            on.click (fun _ -> dispatch (SelectTopNavigationTab FactsReconstructionTab))
-                            text "Ask Cognopy"
-                        }
-                    }
-                }
             }
 
             renderTopNavigation model.activeTopNavigationTab dispatch
@@ -409,7 +327,7 @@ let homePage model dispatch =
                     attr.``class`` "tags are-medium mb-5"
                     span {
                         attr.``class`` "tag is-link"
-                        text "T1 Inquiry Intake"
+                        text "Inventory Management"
                     }
                     span {
                         attr.``class`` "tag is-light"
@@ -463,7 +381,7 @@ let homePage model dispatch =
                             attr.``class`` "box"
                             h2 {
                                 attr.``class`` "title is-5"
-                                text "T1 - Inquiry Intake / Forward Inquiry"
+                                text "Inventory Management"
                             }
 
                             p {
@@ -621,7 +539,7 @@ let homePage model dispatch =
                                     attr.``class`` "control"
                                     input {
                                         attr.``class`` "input"
-                                        attr.placeholder "function, mode, interface, state, unknown..."
+                                        attr.placeholder "capability, use mode, interaction point, condition, unknown..."
                                         bind.input.string model.phiDraftQuickTags (fun v -> dispatch (SetPhiDraftQuickTags v))
                                     }
                                 }
@@ -631,19 +549,19 @@ let homePage model dispatch =
                                 attr.``class`` "field"
                                 label {
                                     attr.``class`` "label"
-                                    text "Context entries / 1-second snip"
+                                    text "Context entries"
                                 }
                                 div {
                                     attr.``class`` "control"
                                     textarea {
                                         attr.``class`` "textarea"
-                                        attr.placeholder "host=Tablet Module\ninterface=Display ↔ Base\nmode=Standby\nconstraint=Max 45 C\nassumption=Passive Cooling\nevidence=Test Report 17"
+                                        attr.placeholder "system-element=Tablet Module\ninteraction-point=Display to Base\nuse-mode=Standby\nrule=Max 45 C\nassumption=Passive Cooling\nevidence=Test Report 17"
                                         bind.input.string model.phiContextSnipDraft (fun v -> dispatch (SetPhiContextSnipDraft v))
                                     }
                                 }
                                 p {
                                     attr.``class`` "help"
-                                    text "Entries are stored as Phi context, with Provenance=OneSecSnip. Raw Phi text remains unchanged."
+                                    text "Entries are stored as Phi context. Raw Phi text remains unchanged."
                                 }
                             }
 
@@ -955,10 +873,10 @@ let homePage model dispatch =
                     div {
                         attr.``class`` "column is-8"
 
-                        renderCurrentSigmaSnapshotPanel includedSequencedParsedPhis model.staleParsedPhiIds currentSigmaContext
+                        renderCurrentSigmaSnapshotPanel modelFittingSequencedParsedPhis model.staleParsedPhiIds currentSigmaContext
 
-                        renderOperationalSummaryTablesPanel
-                            includedSequencedParsedPhis
+                        renderModelFittingWorkspace
+                            modelFittingSequencedParsedPhis
                             currentSigmaContext
                             model.lastReplayAction
                             model.candidateDecisions
@@ -968,227 +886,17 @@ let homePage model dispatch =
                             model.selectedParsedAtomReviewKind
                             model.parseAmendmentDraft
                             model.parseAmendmentStatus
+                            model.lastWorkbenchUndoAction
+                            model.workbenchUndoStatus
+                            model.phiContextEntries
+                            model.evidenceRecords
+                            model.evidenceCaptureKind
+                            model.evidenceTitle
+                            model.evidenceNotes
+                            model.evidenceContentRef
                             dispatch
 
-                        renderCognitionReviewPanel model includedSequencedParsedPhis currentSigmaContext dispatch
-
                         renderParsedPhiLedgerPanel model.parsedPhis model.staleParsedPhiIds model.excludedPhiIds dispatch
-                    }
-                }
-                }
-
-            | DetailsTab -> div {
-                attr.``class`` "mb-6 pb-5"
-
-                h2 {
-                    attr.``class`` "title is-4"
-                    text "Reasoning Details"
-                }
-
-                p {
-                    attr.``class`` "heading mb-2"
-                    text "Translation machinery"
-                }
-
-                div {
-                    attr.``class`` "tags are-medium mb-5"
-                    span {
-                        attr.``class`` "tag is-link"
-                        text "T2 Parse"
-                    }
-                    span {
-                        attr.``class`` "tag is-light"
-                        text "->"
-                    }
-                    span {
-                        attr.``class`` "tag is-link is-light"
-                        text "ΔΣ Analysis"
-                    }
-                    span {
-                        attr.``class`` "tag is-light"
-                        text "->"
-                    }
-                    span {
-                        attr.``class`` "tag is-link is-light"
-                        text "T3 Relevant Σ Context"
-                    }
-                    span {
-                        attr.``class`` "tag is-light"
-                        text "->"
-                    }
-                    span {
-                        attr.``class`` "tag is-link is-light"
-                        text "T4 Candidate ΔΣ"
-                    }
-                    span {
-                        attr.``class`` "tag is-light"
-                        text "->"
-                    }
-                    span {
-                        attr.``class`` "tag is-link is-light"
-                        text "T5 Governance"
-                    }
-                }
-
-                renderParseDetailsPanel model.selectedPhiParse model.selectedPhiResolution
-
-                renderDeltaSigmaAnalysisPanel model.lastReplayAction
-
-                renderRelevantSigmaContextPanel includedSequencedParsedPhis model.staleParsedPhiIds model.selectedPhiParse model.selectedPhiResolution
-
-                renderCandidateDeltaSigmaPanel
-                    currentSigmaContext
-                    model.candidateDecisions
-                    model.sigmaBasisItemDecisions
-                    includedSequencedParsedPhis
-                    model.reviewNeededMarks
-                    model.LedgerEvents
-                    dispatch
-
-                renderT5DecisionHistoryPanel model.candidateDecisions model.reviewNeededMarks
-                }
-
-            | DemoToolsTab -> div {
-                attr.``class`` "pt-2"
-
-                h2 {
-                    attr.``class`` "title is-4"
-                    text "Legacy Examples"
-                }
-
-                div {
-                    attr.``class`` "columns is-variable is-5"
-
-                    div {
-                        attr.``class`` "column is-4"
-
-                        div {
-                            attr.``class`` "box"
-                            h2 {
-                                attr.``class`` "title is-5"
-                                text "Demo Scenarios / Legacy Examples"
-                            }
-                            div {
-                                attr.``class`` "buttons"
-                                forEach demoScenarios <| fun candidate ->
-                                    button {
-                                        attr.``class`` (
-                                            if Some candidate.Id = model.selectedScenarioId then
-                                                "button is-link is-fullwidth"
-                                            else
-                                                "button is-fullwidth")
-                                        attr.``type`` "button"
-                                        on.click (fun _ -> dispatch (SelectScenario candidate.Id))
-                                        text candidate.Title
-                                    }
-                            }
-                            p {
-                                attr.``class`` "has-text-grey"
-                                text scenario.Description
-                            }
-                        }
-                    }
-
-                    div {
-                        attr.``class`` "column is-8"
-
-                        div {
-                            attr.``class`` "box"
-                            h2 {
-                                attr.``class`` "title is-4"
-                                text "Legacy Scenario Resolution"
-                            }
-                            p {
-                                attr.``class`` "is-size-7 has-text-grey"
-                                text scenario.Parse.PhiId
-                            }
-                            div {
-                                attr.``class`` "mb-4"
-                                h3 {
-                                    attr.``class`` "title is-6"
-                                    text "Admissibility Result"
-                                }
-                                span {
-                                    attr.``class`` (admissibilityBadgeClass admissibility)
-                                    text (formatAdmissibilityResult admissibility)
-                                }
-                            }
-
-                            h3 {
-                                attr.``class`` "title is-6"
-                                text "Φ statement"
-                            }
-                            p {
-                                text scenario.Parse.Statement
-                            }
-                        }
-
-                        div {
-                            attr.``class`` "columns"
-
-                            div {
-                                attr.``class`` "column is-3"
-                                renderSummaryBox
-                                    "Selected derivation entry"
-                                    (formatDerivationEntry resolution.SelectedEntry)
-                            }
-
-                            div {
-                                attr.``class`` "column is-3"
-                                renderSummaryBox
-                                    "DeltaSigmaSummary"
-                                    resolution.DeltaSigmaSummary
-                            }
-
-                            div {
-                                attr.``class`` "column is-3"
-                                renderSummaryBox
-                                    "Delta Candidate"
-                                    resolution.DeltaCandidateSummary
-                            }
-
-                            div {
-                                attr.``class`` "column is-3"
-                                renderSummaryBox
-                                    "GammaSummary"
-                                    resolution.GammaSummary
-                            }
-                        }
-
-                        div {
-                            attr.``class`` "box"
-                            h3 {
-                                attr.``class`` "title is-6"
-                                text "Execution path"
-                            }
-                            ol {
-                                forEach resolution.ExecutionPath <| fun step ->
-                                    li {
-                                        text step
-                                    }
-                            }
-                        }
-
-                        div {
-                            attr.``class`` "columns is-multiline"
-
-                            div {
-                                attr.``class`` "column is-6"
-                                renderMatchedGroup "Matched FR names" matchedFrNames
-                            }
-                            div {
-                                attr.``class`` "column is-6"
-                                renderMatchedGroup "Matched DP names" matchedDpNames
-                            }
-                            div {
-                                attr.``class`` "column is-6"
-                                renderMatchedGroup "Matched TF names" matchedTfNames
-                            }
-                            div {
-                                attr.``class`` "column is-6"
-                                renderMatchedGroup "Matched CTQ names" matchedCtqNames
-                            }
-                        }
                     }
                 }
                 }
@@ -1208,24 +916,9 @@ let homePage model dispatch =
             | LedgerTab ->
                 renderLedgerTab model.LedgerEvents model.ReplayPreviewSequence dispatch
         }
-    | _ ->
-        div {
-            attr.``class`` "notification is-warning"
-            text "No demo scenarios are available."
-        }
-
-let menuItem (model: Model) (page: Page) (text: string) =
-    Main.MenuItem()
-        .Active(if model.page = page then "is-active" else "")
-        .Url(router.Link page)
-        .Text(text)
-        .Elt()
 
 let view model dispatch =
     Main()
-        .Menu(concat {
-            menuItem model Probe "Inquiry Console"            
-        })
         .Body(
             cond model.page <| function
             | Probe -> homePage model dispatch

@@ -7,6 +7,12 @@ open Gaia.Client.Types
 open Gaia.Client.AppState
 open Gaia.Client.Workflow
 
+let private formatEvidenceTargetKindLabel targetKind =
+    if parsedExposureAtomKinds |> List.contains targetKind then
+        formatModelFittingAtomKindLabel targetKind
+    else
+        targetKind
+
 let private renderEvidenceRecords title emptyText (evidenceRecords: EvidenceRecord list) =
     div {
         attr.``class`` "box"
@@ -46,7 +52,7 @@ let private renderEvidenceRecords title emptyText (evidenceRecords: EvidenceReco
                                 td { text evidenceRecord.EvidenceId }
                                 td { text evidenceRecord.TimestampUtc }
                                 td { text evidenceRecord.CaptureKind }
-                                td { text (evidenceRecord.TargetKind + ": " + evidenceRecord.TargetLabel) }
+                                td { text (formatEvidenceTargetKindLabel evidenceRecord.TargetKind + ": " + evidenceRecord.TargetLabel) }
                                 td { text evidenceRecord.Title }
                                 td { text evidenceRecord.Notes }
                                 td { text evidenceRecord.ContentRef }
@@ -96,7 +102,7 @@ let renderEvidenceCapturePanel (model: Model) dispatch =
 
         h2 {
             attr.``class`` "title is-5"
-            text "1sec Snip"
+            text "Evidence reference"
         }
 
         div {
@@ -131,7 +137,10 @@ let renderEvidenceCapturePanel (model: Model) dispatch =
                     select {
                         bind.input.string model.evidenceTargetKind (fun value -> dispatch (SetEvidenceTargetKind value))
                         forEach evidenceTargetKinds <| fun targetKind ->
-                            option { text targetKind }
+                            option {
+                                attr.value targetKind
+                                text (formatEvidenceTargetKindLabel targetKind)
+                            }
                     }
                 }
             }
@@ -218,7 +227,7 @@ let renderEvidenceCapturePanel (model: Model) dispatch =
             attr.``class`` "button is-link is-fullwidth"
             attr.``type`` "button"
             on.click (fun _ -> dispatch CreateEvidenceRecord)
-            text "Create 1sec Snip"
+            text "Create evidence reference"
         }
 
         match model.evidenceStatus with

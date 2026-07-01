@@ -78,6 +78,83 @@
   overflow-wrap: anywhere;
 }
 
+.model-fitting-workspace .cognition-review-section {
+  border-top: 0;
+  margin-top: 0;
+  padding-top: 0;
+}
+
+.model-fitting-atom-card > .card-content {
+  padding: 1rem;
+}
+
+.model-fitting-raw-preview {
+  background: #f7f7f7;
+  border: 1px solid #dbdbdb;
+  border-radius: 6px;
+  color: #4a4a4a;
+  padding: 0.75rem;
+}
+
+.model-fitting-raw-preview p:last-child,
+.model-fitting-status-tag {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.model-fitting-panel,
+.model-fitting-summary-details {
+  border-top: 1px solid #f0f0f0;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+}
+
+.model-fitting-panel-summary {
+  color: #3273dc;
+  cursor: pointer;
+  font-weight: 600;
+  list-style-position: inside;
+}
+
+.model-fitting-panel-body {
+  margin-top: 0.75rem;
+}
+
+.model-fitting-governance-row {
+  background: #fff;
+  border: 1px solid #dbdbdb;
+  border-radius: 6px;
+  padding: 0.75rem;
+}
+
+.model-fitting-note-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.model-fitting-note-row {
+  background: #fafafa;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  padding: 0.55rem 0.65rem;
+}
+
+.model-fitting-note-chip {
+  height: auto;
+  line-height: 1.2;
+  max-width: 100%;
+  padding-bottom: 0.25rem;
+  padding-top: 0.25rem;
+  white-space: normal;
+}
+
+.model-fitting-note-text {
+  color: #363636;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 .facts-reconstruction-result {
   overflow-wrap: anywhere;
 }
