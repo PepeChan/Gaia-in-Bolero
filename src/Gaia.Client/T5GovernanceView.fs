@@ -665,7 +665,7 @@ let renderParseAmendmentPanel (draft: ParseAmendmentDraft option) status dispatc
                         div {
                             attr.``class`` "select is-fullwidth is-small"
                             select {
-                                bind.input.string amendment.ProposedAtomKind (fun value -> dispatch (SetParseAmendmentProposedKind value))
+                                bind.change.string amendment.ProposedAtomKind (fun value -> dispatch (SetParseAmendmentProposedKind value))
                                 forEach parsedExposureAtomKinds <| fun atomKind ->
                                     option {
                                         attr.value atomKind
@@ -683,7 +683,7 @@ let renderParseAmendmentPanel (draft: ParseAmendmentDraft option) status dispatc
                         }
                         input {
                             attr.``class`` "input is-small"
-                            bind.input.string amendment.ProposedAtomText (fun value -> dispatch (SetParseAmendmentProposedText value))
+                            bind.change.string amendment.ProposedAtomText (fun value -> dispatch (SetParseAmendmentProposedText value))
                         }
                     }
                 }
@@ -697,7 +697,7 @@ let renderParseAmendmentPanel (draft: ParseAmendmentDraft option) status dispatc
                     textarea {
                         attr.``class`` "textarea"
                         attr.style "min-height: 5rem;"
-                        bind.input.string amendment.Reason (fun value -> dispatch (SetParseAmendmentReason value))
+                        bind.change.string amendment.Reason (fun value -> dispatch (SetParseAmendmentReason value))
                     }
                 }
 
@@ -820,7 +820,7 @@ let renderParseAmendmentInlineEditor amendment candidateDecisions sigmaBasisItem
                 div {
                     attr.``class`` "select is-fullwidth is-small"
                     select {
-                        bind.input.string amendment.ProposedAtomKind (fun value -> dispatch (SetParseAmendmentProposedKind value))
+                        bind.change.string amendment.ProposedAtomKind (fun value -> dispatch (SetParseAmendmentProposedKind value))
                         forEach parsedExposureAtomKinds <| fun atomKind ->
                             option {
                                 attr.value atomKind
@@ -838,7 +838,7 @@ let renderParseAmendmentInlineEditor amendment candidateDecisions sigmaBasisItem
                 }
                 input {
                     attr.``class`` "input is-small"
-                    bind.input.string amendment.ProposedAtomText (fun value -> dispatch (SetParseAmendmentProposedText value))
+                    bind.change.string amendment.ProposedAtomText (fun value -> dispatch (SetParseAmendmentProposedText value))
                 }
             }
         }
@@ -852,7 +852,7 @@ let renderParseAmendmentInlineEditor amendment candidateDecisions sigmaBasisItem
             textarea {
                 attr.``class`` "textarea is-small"
                 attr.style "min-height: 4rem;"
-                bind.input.string amendment.Reason (fun value -> dispatch (SetParseAmendmentReason value))
+                bind.change.string amendment.Reason (fun value -> dispatch (SetParseAmendmentReason value))
             }
         }
 
