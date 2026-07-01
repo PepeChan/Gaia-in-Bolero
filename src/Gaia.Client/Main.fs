@@ -214,7 +214,7 @@ let renderPersistenceTab (model: Model) dispatch =
 
 let renderTopNavigation activeTab dispatch =
     div {
-        attr.``class`` "tabs is-toggle mb-5"
+        attr.``class`` "tabs is-toggle is-centered mb-4"
         ul {
             li {
                 attr.``class`` (
@@ -224,7 +224,7 @@ let renderTopNavigation activeTab dispatch =
                         "")
                 a {
                     on.click (fun _ -> dispatch (SelectTopNavigationTab GaiaProbeTab))
-                    text "Inventory Management"
+                    text "Inventory"
                 }
             }
 
@@ -236,7 +236,7 @@ let renderTopNavigation activeTab dispatch =
                         "")
                 a {
                     on.click (fun _ -> dispatch (SelectTopNavigationTab DesignRealizationTab))
-                    text "Scenario Preview"
+                    text "Scenario"
                 }
             }
 
@@ -248,19 +248,7 @@ let renderTopNavigation activeTab dispatch =
                         "")
                 a {
                     on.click (fun _ -> dispatch (SelectTopNavigationTab FactsReconstructionTab))
-                    text "Inquiry Resolution"
-                }
-            }
-
-            li {
-                attr.``class`` (
-                    if activeTab = PersistenceTab then
-                        "is-active"
-                    else
-                        "")
-                a {
-                    on.click (fun _ -> dispatch (SelectTopNavigationTab PersistenceTab))
-                    text "Projects"
+                    text "Ask"
                 }
             }
 
@@ -273,6 +261,18 @@ let renderTopNavigation activeTab dispatch =
                 a {
                     on.click (fun _ -> dispatch (SelectTopNavigationTab LedgerTab))
                     text "Ledger"
+                }
+            }
+
+            li {
+                attr.``class`` (
+                    if activeTab = PersistenceTab then
+                        "is-active"
+                    else
+                        "")
+                a {
+                    on.click (fun _ -> dispatch (SelectTopNavigationTab PersistenceTab))
+                    text "Projects"
                 }
             }
         }
@@ -289,71 +289,17 @@ let homePage model dispatch =
     div {
             attr.``class`` "content"
             h1 {
-                attr.``class`` "title"
+                attr.``class`` "title is-4 mb-1"
                 text "Cognopy Inquiry Console"
             }
             p {
-                attr.``class`` "subtitle is-6"
+                attr.``class`` "subtitle is-7 mb-2"
                 text "An inquiry resolution engine for adding stakeholder information and reconstructing answers from preserved reasoning history."
             }
 
             div {
-                attr.``class`` "notification is-info is-light"
+                attr.``class`` "notification is-info is-light py-2 px-3 mb-3"
                 text "Cognopy resolves stakeholder inquiries by translating them into structured reasoning, governing candidate changes, and reconstructing answers from preserved reasoning history."
-            }
-
-            div {
-                attr.``class`` "columns is-variable is-4 mb-5"
-
-                div {
-                    attr.``class`` "column is-6"
-                    div {
-                        attr.``class`` "box"
-                        p {
-                            attr.``class`` "heading mb-2"
-                            text "Tell Cognopy"
-                        }
-                        h2 {
-                            attr.``class`` "title is-5"
-                            text "Add information to the system"
-                        }
-                        p {
-                            attr.``class`` "has-text-grey"
-                            text "Use forward inquiry intake to capture stakeholder statements as Phi for the existing reasoning pipeline."
-                        }
-                        button {
-                            attr.``class`` "button is-link is-light"
-                            attr.``type`` "button"
-                            on.click (fun _ -> dispatch (SelectTopNavigationTab GaiaProbeTab))
-                            text "Tell Cognopy"
-                        }
-                    }
-                }
-
-                div {
-                    attr.``class`` "column is-6"
-                    div {
-                        attr.``class`` "box"
-                        p {
-                            attr.``class`` "heading mb-2"
-                            text "Ask Cognopy"
-                        }
-                        h2 {
-                            attr.``class`` "title is-5"
-                            text "Retrieve or explain information from the system"
-                        }
-                        p {
-                            attr.``class`` "has-text-grey"
-                            text "Use reverse inquiry resolution to answer questions from stored facts, decisions, provenance, and ledger history."
-                        }
-                        button {
-                            attr.``class`` "button is-link"
-                            attr.``type`` "button"
-                            on.click (fun _ -> dispatch (SelectTopNavigationTab FactsReconstructionTab))
-                            text "Ask Cognopy"
-                        }
-                    }
-                }
             }
 
             renderTopNavigation model.activeTopNavigationTab dispatch
@@ -970,18 +916,8 @@ let homePage model dispatch =
                 renderLedgerTab model.LedgerEvents model.ReplayPreviewSequence dispatch
         }
 
-let menuItem (model: Model) (page: Page) (text: string) =
-    Main.MenuItem()
-        .Active(if model.page = page then "is-active" else "")
-        .Url(router.Link page)
-        .Text(text)
-        .Elt()
-
 let view model dispatch =
     Main()
-        .Menu(concat {
-            menuItem model Probe "Inquiry Console"            
-        })
         .Body(
             cond model.page <| function
             | Probe -> homePage model dispatch
