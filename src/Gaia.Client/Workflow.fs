@@ -1517,9 +1517,7 @@ let buildParseAmendmentImpactPreview
                     })
         |> List.distinctBy (fun resetImpact -> resetImpact.BasisItemKey)
 
-    let afterDecisionMap =
-        sigmaBasisItemDecisions
-        |> removeResetBasisItemDecisions resetImpacts
+    let afterDecisionMap = sigmaBasisItemDecisions
 
     let affectedCandidateIds =
         [
@@ -1588,6 +1586,45 @@ let tryGetCandidateIdFromSigmaBasisItemKey (basisItemKey: string) =
         None
     else
         Some (basisItemKey.Substring(0, separatorIndex))
+
+let reviewNeededTargetMatches targetKind targetId (mark: ReviewNeededMark) =
+    String.Equals(mark.TargetKind, targetKind, StringComparison.Ordinal)
+    && String.Equals(mark.TargetId, targetId, StringComparison.OrdinalIgnoreCase)
+
+let hasReviewNeededMark targetKind targetId marks =
+    marks
+    |> List.exists (reviewNeededTargetMatches targetKind targetId)
+
+let tryFindReviewNeededMark targetKind targetId marks =
+    marks
+    |> List.tryFind (reviewNeededTargetMatches targetKind targetId)
+
+let isReviewNeededForTarget targetKind targetId (model: Model) =
+    hasReviewNeededMark targetKind targetId model.reviewNeededMarks
+
+let getReviewNeededMarksForCandidate candidateId marks =
+    marks
+    |> List.filter (fun mark ->
+        (reviewNeededTargetMatches reviewTargetKindCandidateDecision candidateId mark)
+        ||
+        (mark.TargetKind = reviewTargetKindSigmaBasisItemDecision
+         &&
+         match tryGetCandidateIdFromSigmaBasisItemKey mark.TargetId with
+         | Some basisCandidateId -> String.Equals(basisCandidateId, candidateId, StringComparison.OrdinalIgnoreCase)
+         | None -> false))
+
+let candidateHasReviewNeededMarks candidateId marks =
+    marks
+    |> getReviewNeededMarksForCandidate candidateId
+    |> List.isEmpty
+    |> not
+
+let getRealizationReviewNeededMarks (marks: ReviewNeededMark list) =
+    marks
+    |> List.filter (fun mark ->
+        mark.TargetKind = reviewTargetKindRealizationObject
+        || mark.TargetKind = reviewTargetKindRealizationLink
+        || mark.TargetKind = reviewTargetKindRealizationPath)
 
 let getParseAmendmentResetLedgerEvents (ledgerEvents: LedgerEvent list) =
     ledgerEvents

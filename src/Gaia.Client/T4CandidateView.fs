@@ -56,6 +56,12 @@ let renderCandidateGroupStatusTag status =
         text (formatCandidateGroupStatus status)
     }
 
+let renderReviewNeededBadge () =
+    span {
+        attr.``class`` "tag is-warning is-light review-needed-badge"
+        text reviewNeededLabel
+    }
+
 let candidateDecisionButtonClass decisionValue activeDecision buttonStyle =
     if decisionValue = activeDecision then
         "button is-small " + buttonStyle
@@ -112,31 +118,30 @@ let renderCandidateDecisionMetadata (candidateDecision: CandidateDecision option
             }
         }
 
-let renderCandidateAmendmentResetNotice (candidate: CandidateDelta) ledgerEvents =
-    let resetEvents =
-        ledgerEvents
-        |> getParseAmendmentResetEventsForCandidate candidate.CandidateId
-        |> List.rev
+let renderCandidateReviewNeededNotice (candidate: CandidateDelta) reviewNeededMarks =
+    let marks =
+        reviewNeededMarks
+        |> getReviewNeededMarksForCandidate candidate.CandidateId
         |> List.truncate 3
 
-    match resetEvents with
+    match marks with
     | [] -> empty()
-    | events ->
+    | values ->
         div {
             attr.``class`` "notification is-warning is-light is-size-7 mb-2"
             p {
                 attr.``class`` "has-text-weight-semibold mb-1"
-                text "Basis decision reset by parse amendment"
+                text reviewNeededLabel
             }
-            forEach events <| fun ledgerEvent ->
+            forEach values <| fun mark ->
                 div {
                     p {
                         attr.``class`` "mb-1"
-                        code { text ledgerEvent.TargetId }
+                        code { text (mark.TargetKind + " " + mark.TargetId) }
                     }
                     p {
                         attr.``class`` "mb-2"
-                        text ledgerEvent.Detail
+                        text mark.Reason
                     }
                 }
         }
@@ -159,11 +164,15 @@ let renderCandidateDeltaCard
     (candidateDecisions: CandidateDecision list)
     sigmaBasisItemDecisions
     sequencedParsedPhis
+    reviewNeededMarks
     ledgerEvents
     dispatch =
     let candidateDecision = tryFindCandidateDecision candidate.CandidateId candidateDecisions
     let decisionValue = getCandidateDecisionValue candidate.CandidateId candidateDecisions
     let groupGovernance = buildCandidateGroupGovernance candidate candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
+    let candidateNeedsReview = candidateHasReviewNeededMarks candidate.CandidateId reviewNeededMarks
+    let classDecisionNeedsReview =
+        hasReviewNeededMark reviewTargetKindCandidateDecision candidate.CandidateId reviewNeededMarks
 
     div {
         attr.``class`` "card mb-4"
@@ -179,6 +188,11 @@ let renderCandidateDeltaCard
             h3 {
                 attr.``class`` "title is-6"
                 text (formatCandidateDeltaKind candidate.Kind)
+                if candidateNeedsReview then
+                    span {
+                        attr.``class`` "ml-2"
+                        renderReviewNeededBadge ()
+                    }
             }
 
             p {
@@ -255,6 +269,11 @@ let renderCandidateDeltaCard
                     p {
                         strong { text "Basis-derived status: " }
                         renderCandidateGroupStatusTag groupGovernance.Status
+                        if candidateNeedsReview then
+                            span {
+                                attr.``class`` "ml-1"
+                                renderReviewNeededBadge ()
+                            }
                     }
 
                     p {
@@ -270,11 +289,16 @@ let renderCandidateDeltaCard
                             text conflict
                         }
 
-                    renderCandidateAmendmentResetNotice candidate ledgerEvents
+                    renderCandidateReviewNeededNotice candidate reviewNeededMarks
 
                     p {
                         strong { text "Candidate class decision: " }
                         renderCandidateClassDecisionTag candidateDecision
+                        if classDecisionNeedsReview then
+                            span {
+                                attr.``class`` "ml-1"
+                                renderReviewNeededBadge ()
+                            }
                     }
 
                     div {
@@ -288,7 +312,7 @@ let renderCandidateDeltaCard
         }
     }
 
-let renderCandidateDeltaSigmaPanel sigmaContext (candidateDecisions: CandidateDecision list) sigmaBasisItemDecisions sequencedParsedPhis ledgerEvents dispatch =
+let renderCandidateDeltaSigmaPanel sigmaContext (candidateDecisions: CandidateDecision list) sigmaBasisItemDecisions sequencedParsedPhis reviewNeededMarks ledgerEvents dispatch =
     let candidateDeltas = formulateCandidateDeltas sigmaContext
 
     div {
@@ -305,6 +329,5 @@ let renderCandidateDeltaSigmaPanel sigmaContext (candidateDecisions: CandidateDe
         }
 
         forEach candidateDeltas <| fun candidateDelta ->
-            renderCandidateDeltaCard candidateDelta candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis ledgerEvents dispatch
+            renderCandidateDeltaCard candidateDelta candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis reviewNeededMarks ledgerEvents dispatch
     }
-

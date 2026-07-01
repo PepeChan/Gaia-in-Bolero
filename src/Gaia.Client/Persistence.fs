@@ -160,6 +160,16 @@ let candidateDecisionToJson (decision: CandidateDecision) =
     json["Rationale"] <- JsonValue.Create(decision.Rationale)
     json
 
+let reviewNeededMarkToJson (mark: ReviewNeededMark) =
+    let json = JsonObject()
+    json["TargetKind"] <- JsonValue.Create(mark.TargetKind)
+    json["TargetId"] <- JsonValue.Create(mark.TargetId)
+    json["SourcePhiId"] <- JsonValue.Create(mark.SourcePhiId)
+    json["Trigger"] <- JsonValue.Create(mark.Trigger)
+    json["Reason"] <- JsonValue.Create(mark.Reason)
+    json["CreatedAtUtc"] <- JsonValue.Create(mark.CreatedAtUtc)
+    json
+
 let ledgerEventToJson (ledgerEvent: LedgerEvent) =
     let json = JsonObject()
     json["EventId"] <- JsonValue.Create(ledgerEvent.EventId)
@@ -279,6 +289,7 @@ let projectSnapshotToJson (snapshot: ProjectSnapshot) =
     json["StaleParsedPhiIds"] <- jsonStringArray snapshot.StaleParsedPhiIds
     json["ExcludedPhiIds"] <- jsonStringArray snapshot.ExcludedPhiIds
     json["CandidateDecisions"] <- jsonArrayFrom snapshot.CandidateDecisions candidateDecisionToJson
+    json["ReviewNeededMarks"] <- jsonArrayFrom snapshot.ReviewNeededMarks reviewNeededMarkToJson
     json["LedgerEvents"] <- jsonArrayFrom snapshot.LedgerEvents ledgerEventToJson
     json["EvidenceRecords"] <- jsonArrayFrom snapshot.EvidenceRecords evidenceRecordToJson
     json["RealizationState"] <- realizationStateToJson snapshot.RealizationState
@@ -537,6 +548,16 @@ let readCandidateDecision context (json: JsonObject) =
         Rationale = readString context "Rationale" json
     }
 
+let readReviewNeededMark context (json: JsonObject) =
+    {
+        TargetKind = readString context "TargetKind" json
+        TargetId = readString context "TargetId" json
+        SourcePhiId = readString context "SourcePhiId" json
+        Trigger = readString context "Trigger" json
+        Reason = readString context "Reason" json
+        CreatedAtUtc = readString context "CreatedAtUtc" json
+    }
+
 let readLedgerEvent context (json: JsonObject) =
     {
         EventId = readString context "EventId" json
@@ -667,6 +688,7 @@ let tryDeserializeProjectSnapshot json =
                 StaleParsedPhiIds = readOptionalStringList "ProjectSnapshot" "StaleParsedPhiIds" root
                 ExcludedPhiIds = readStringList "ProjectSnapshot" "ExcludedPhiIds" root
                 CandidateDecisions = readObjectList "ProjectSnapshot" "CandidateDecisions" readCandidateDecision root
+                ReviewNeededMarks = readOptionalObjectList "ProjectSnapshot" "ReviewNeededMarks" readReviewNeededMark root
                 LedgerEvents = readObjectList "ProjectSnapshot" "LedgerEvents" readLedgerEvent root
                 EvidenceRecords = readOptionalObjectList "ProjectSnapshot" "EvidenceRecords" readEvidenceRecord root
                 RealizationState = readOptionalRealizationState "ProjectSnapshot" root

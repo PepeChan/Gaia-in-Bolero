@@ -195,6 +195,37 @@ let t6InquiryTargetContextKind = "T6InquiryTarget"
 let t6InquiryGapKeyContextKind = "T6InquiryGapKey"
 let t6InquiryQuestionContextKind = "T6InquiryQuestion"
 let sigmaBasisItemDecisionResetLedgerKind = "SigmaBasisItemDecisionReset"
+let reviewNeededLabel = "Review Needed"
+let reviewNeededMarkedLedgerKind = "ReviewNeededMarked"
+let reviewTargetKindCandidateDecision = "CandidateDecision"
+let reviewTargetKindSigmaBasisItemDecision = "SigmaBasisItemDecision"
+let reviewTargetKindRealizationObject = "RealizationObject"
+let reviewTargetKindRealizationLink = "RealizationLink"
+let reviewTargetKindRealizationPath = "RealizationPath"
+
+let makeReviewNeededTargetId (parts: string list) =
+    parts
+    |> List.map (fun value -> if isNull value then "" else value.Trim())
+    |> String.concat "|"
+
+let realizationObjectReviewTargetId objectKind objectId =
+    makeReviewNeededTargetId [ objectKind; objectId ]
+
+let realizationLinkReviewTargetId linkKind sourceId targetId =
+    makeReviewNeededTargetId [ linkKind; sourceId; targetId ]
+
+let realizationPathReviewTargetId sourceKind sourceValue =
+    makeReviewNeededTargetId [ sourceKind; sourceValue ]
+
+type ReviewNeededMark =
+    {
+        TargetKind: string
+        TargetId: string
+        SourcePhiId: string
+        Trigger: string
+        Reason: string
+        CreatedAtUtc: string
+    }
 
 type LedgerEvent =
     {
@@ -402,6 +433,7 @@ type ProjectSnapshot =
         StaleParsedPhiIds: string list
         ExcludedPhiIds: string list
         CandidateDecisions: CandidateDecision list
+        ReviewNeededMarks: ReviewNeededMark list
         LedgerEvents: LedgerEvent list
         EvidenceRecords: EvidenceRecord list
         RealizationState: RealizationState

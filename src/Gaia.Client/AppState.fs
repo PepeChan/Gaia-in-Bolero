@@ -51,6 +51,7 @@ type Model =
         lastReplayAction: DeltaSigmaAnalysis option
         candidateDecisions: CandidateDecision list
         sigmaBasisItemDecisions: Map<string, CandidateDecisionValue>
+        reviewNeededMarks: ReviewNeededMark list
         LedgerEvents: LedgerEvent list
         ReplayPreviewSequence: int option
         factsReconstructionQuestion: string
@@ -185,7 +186,7 @@ let buildSigmaBasisItemDecisionsFromLedger ledgerEvents =
             | "SigmaBasisItemHeld" ->
                 decisions |> Map.add ledgerEvent.TargetId Held
             | eventKind when eventKind = sigmaBasisItemDecisionResetLedgerKind ->
-                decisions |> Map.remove ledgerEvent.TargetId
+                decisions
             | _ ->
                 decisions)
         Map.empty<string, CandidateDecisionValue>
@@ -227,6 +228,7 @@ let buildProjectSnapshot (model: Model) =
         StaleParsedPhiIds = model.staleParsedPhiIds
         ExcludedPhiIds = model.excludedPhiIds
         CandidateDecisions = model.candidateDecisions
+        ReviewNeededMarks = model.reviewNeededMarks
         LedgerEvents = model.LedgerEvents
         EvidenceRecords = model.evidenceRecords
         RealizationState = model.realizationState
@@ -263,6 +265,7 @@ let restoreProjectSnapshot (snapshot: ProjectSnapshot) (model: Model) =
             cognitionReviewTextFilter = ""
             candidateDecisions = snapshot.CandidateDecisions
             sigmaBasisItemDecisions = buildSigmaBasisItemDecisionsFromLedger snapshot.LedgerEvents
+            reviewNeededMarks = snapshot.ReviewNeededMarks
             LedgerEvents = snapshot.LedgerEvents
             ReplayPreviewSequence = None
             factsReconstructionQuestion = defaultFactsReconstructionQuestion
@@ -360,6 +363,7 @@ let initModel =
         lastReplayAction = None
         candidateDecisions = []
         sigmaBasisItemDecisions = Map.empty
+        reviewNeededMarks = []
         LedgerEvents = []
         ReplayPreviewSequence = None
         factsReconstructionQuestion = defaultFactsReconstructionQuestion
@@ -430,6 +434,7 @@ let clearProjectModel (model: Model) =
             lastReplayAction = None
             candidateDecisions = []
             sigmaBasisItemDecisions = Map.empty
+            reviewNeededMarks = []
             LedgerEvents = []
             ReplayPreviewSequence = None
             factsReconstructionQuestion = defaultFactsReconstructionQuestion
@@ -497,6 +502,7 @@ let buildSphynxSampleSnapshot () =
         StaleParsedPhiIds = []
         ExcludedPhiIds = []
         CandidateDecisions = []
+        ReviewNeededMarks = []
         LedgerEvents = sampleLedgerEvents
         EvidenceRecords = []
         RealizationState = emptyRealizationState

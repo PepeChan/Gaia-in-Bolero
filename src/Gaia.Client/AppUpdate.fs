@@ -99,34 +99,251 @@ let formatParseAmendmentLedgerDetail (draft: ParseAmendmentDraft) =
     ]
     |> String.concat " | "
 
-let formatParseAmendmentDecisionResetLedgerDetail (draft: ParseAmendmentDraft) (resetImpact: ParseAmendmentBasisDecisionResetImpact) =
+let private formatReviewNeededMarkLedgerDetail (mark: ReviewNeededMark) =
     [
-        "Source Phi ID: " + draft.SourcePhiId
-        "Original kind: " + draft.OriginalAtomKind
-        "Original text: " + draft.OriginalAtomText
-        "New kind: " + draft.ProposedAtomKind
-        "New text: " + draft.ProposedAtomText
-        "Candidate ID: " + resetImpact.CandidateId
-        "Candidate type: " + resetImpact.CandidateType
-        "Candidate target: " + resetImpact.CandidateTarget
-        "Basis item key: " + resetImpact.BasisItemKey
-        "Previous decision: " + formatSigmaBasisItemDecisionValue resetImpact.PreviousDecision
-        "Reason: Parse amendment changed or moved the interpreted atom that this basis-item decision governed."
-        "Amendment reason: " + (if String.IsNullOrWhiteSpace(draft.Reason) then "(none supplied)" else draft.Reason)
+        "State: " + reviewNeededLabel
+        "Target kind: " + mark.TargetKind
+        "Target ID: " + mark.TargetId
+        "Source Phi ID: " + mark.SourcePhiId
+        "Trigger: " + mark.Trigger
+        "Reason: " + mark.Reason
     ]
     |> String.concat " | "
 
-let appendParseAmendmentDecisionResetLedgerEvents draft resetImpacts model =
-    resetImpacts
-    |> List.fold
-        (fun workingModel resetImpact ->
-            workingModel
-            |> appendLedgerEvent
-                sigmaBasisItemDecisionResetLedgerKind
-                resetImpact.BasisItemKey
-                "Sigma basis-item decision reset"
-                (formatParseAmendmentDecisionResetLedgerDetail draft resetImpact))
+let private appendReviewNeededMark targetKind targetId sourcePhiId trigger reason (model: Model) =
+    if hasReviewNeededMark targetKind targetId model.reviewNeededMarks then
         model
+    else
+        let mark =
+            {
+                TargetKind = targetKind
+                TargetId = targetId
+                SourcePhiId = sourcePhiId
+                Trigger = trigger
+                Reason = reason
+                CreatedAtUtc = getUtcTimestampString ()
+            }
+
+        { model with reviewNeededMarks = model.reviewNeededMarks @ [ mark ] }
+        |> appendLedgerEvent
+            reviewNeededMarkedLedgerKind
+            mark.TargetId
+            "Review needed marked"
+            (formatReviewNeededMarkLedgerDetail mark)
+
+let private equalsReviewText left right =
+    String.Equals(cleanFormValue left, cleanFormValue right, StringComparison.OrdinalIgnoreCase)
+
+let private hasCandidateDecision candidateId (model: Model) =
+    model.candidateDecisions
+    |> List.exists (fun decision -> equalsReviewText decision.CandidateId candidateId)
+
+let private phiIdIsSupportingSource phiId (supportingPhiIds: string list) =
+    supportingPhiIds
+    |> List.exists (equalsReviewText phiId)
+
+let private markRealizationLinkReviewNeeded linkKind sourceId targetId sourcePhiId trigger reason model =
+    model
+    |> appendReviewNeededMark
+        reviewTargetKindRealizationLink
+        (realizationLinkReviewTargetId linkKind sourceId targetId)
+        sourcePhiId
+        trigger
+        reason
+
+let rec private markRealizationObjectDownstream sourcePhiId trigger reason objectKind objectId visited model =
+    let objectTargetId = realizationObjectReviewTargetId objectKind objectId
+
+    if visited |> Set.contains objectTargetId then
+        model
+    else
+        let visited = visited |> Set.add objectTargetId
+
+        let markedModel =
+            model
+            |> appendReviewNeededMark reviewTargetKindRealizationObject objectTargetId sourcePhiId trigger reason
+
+        match objectKind with
+        | kind when kind = realizationObjectKindFR ->
+            getDpIdsForFR objectId markedModel.realizationState
+            |> List.fold
+                (fun workingModel dpId ->
+                    workingModel
+                    |> markRealizationLinkReviewNeeded realizationLinkKindFRToDP objectId dpId sourcePhiId trigger reason
+                    |> markRealizationObjectDownstream sourcePhiId trigger reason realizationObjectKindDP dpId visited)
+                markedModel
+        | kind when kind = realizationObjectKindPart ->
+            getDpIdsForPart objectId markedModel.realizationState
+            |> List.fold
+                (fun workingModel dpId ->
+                    workingModel
+                    |> markRealizationLinkReviewNeeded realizationLinkKindPartToDP objectId dpId sourcePhiId trigger reason
+                    |> markRealizationObjectDownstream sourcePhiId trigger reason realizationObjectKindDP dpId visited)
+                markedModel
+        | kind when kind = realizationObjectKindDP ->
+            getTfIdsForDp objectId markedModel.realizationState
+            |> List.fold
+                (fun workingModel tfId ->
+                    workingModel
+                    |> markRealizationLinkReviewNeeded realizationLinkKindDPToTF objectId tfId sourcePhiId trigger reason
+                    |> markRealizationObjectDownstream sourcePhiId trigger reason realizationObjectKindTF tfId visited)
+                markedModel
+        | kind when kind = realizationObjectKindTF ->
+            getCtqIdsForTf objectId markedModel.realizationState
+            |> List.fold
+                (fun workingModel ctqId ->
+                    workingModel
+                    |> markRealizationLinkReviewNeeded realizationLinkKindTFToCTQ objectId ctqId sourcePhiId trigger reason
+                    |> markRealizationObjectDownstream sourcePhiId trigger reason realizationObjectKindCTQ ctqId visited)
+                markedModel
+        | kind when kind = realizationObjectKindCTQ ->
+            getVvIdsForCtq objectId markedModel.realizationState
+            |> List.fold
+                (fun workingModel vvId ->
+                    workingModel
+                    |> markRealizationLinkReviewNeeded realizationLinkKindCTQToVV objectId vvId sourcePhiId trigger reason
+                    |> markRealizationObjectDownstream sourcePhiId trigger reason realizationObjectKindVV vvId visited)
+                markedModel
+        | _ ->
+            markedModel
+
+let private markHostRealizationReviewNeeded sourcePhiId trigger reason hostValue model =
+    let pathTargetId = realizationPathReviewTargetId realizationSourceKindHost hostValue
+
+    let markedModel =
+        model
+        |> appendReviewNeededMark reviewTargetKindRealizationPath pathTargetId sourcePhiId trigger reason
+
+    markedModel.realizationState.Host_to_Part
+    |> List.filter (fun (sourceId, _) -> equalsReviewText sourceId hostValue)
+    |> List.fold
+        (fun workingModel (sourceId, partId) ->
+            workingModel
+            |> markRealizationLinkReviewNeeded realizationLinkKindHostToPart sourceId partId sourcePhiId trigger reason
+            |> markRealizationObjectDownstream sourcePhiId trigger reason realizationObjectKindPart partId Set.empty)
+        markedModel
+
+let private markFunctionRealizationReviewNeeded sourcePhiId trigger reason functionValue model =
+    let pathTargetId = realizationPathReviewTargetId realizationSourceKindFunction functionValue
+
+    let markedModel =
+        model
+        |> appendReviewNeededMark reviewTargetKindRealizationPath pathTargetId sourcePhiId trigger reason
+
+    markedModel.realizationState.Function_to_FR
+    |> List.filter (fun (sourceId, _) -> equalsReviewText sourceId functionValue)
+    |> List.fold
+        (fun workingModel (sourceId, frId) ->
+            workingModel
+            |> markRealizationLinkReviewNeeded realizationLinkKindFunctionToFR sourceId frId sourcePhiId trigger reason
+            |> markRealizationObjectDownstream sourcePhiId trigger reason realizationObjectKindFR frId Set.empty)
+        markedModel
+
+let private getSigmaSourceEntries atomKind sigmaContext =
+    match atomKind with
+    | "Host" -> sigmaContext.Hosts
+    | "Function" -> sigmaContext.Functions
+    | _ -> []
+
+let private getAffectedSigmaSourceValues atomKind sourcePhiId (model: Model) =
+    model
+    |> getCurrentSigmaContext
+    |> getSigmaSourceEntries atomKind
+    |> List.filter (fun entry -> phiIdIsSupportingSource sourcePhiId entry.SupportingPhiIds)
+    |> List.map (fun entry -> entry.Value)
+    |> List.distinct
+
+let private markGovernanceReviewNeededForPhi sourcePhiId trigger reason (model: Model) =
+    let basisMarkedModel =
+        model
+        |> getCurrentSigmaBasisItemLedgerContexts
+        |> List.filter (fun context ->
+            phiIdIsSupportingSource sourcePhiId context.BasisItem.SupportingPhiIds
+            && getSigmaBasisItemDecisionValue context.BasisItem.Key model.sigmaBasisItemDecisions <> Pending)
+        |> List.fold
+            (fun workingModel context ->
+                workingModel
+                |> appendReviewNeededMark
+                    reviewTargetKindSigmaBasisItemDecision
+                    context.BasisItem.Key
+                    sourcePhiId
+                    trigger
+                    reason)
+            model
+
+    basisMarkedModel
+    |> getCurrentCandidateDeltas
+    |> List.filter (fun candidate -> getCandidateSupportingPhiIds candidate |> phiIdIsSupportingSource sourcePhiId)
+    |> List.map (fun candidate -> candidate.CandidateId)
+    |> List.distinct
+    |> List.filter (fun candidateId -> hasCandidateDecision candidateId basisMarkedModel)
+    |> List.fold
+        (fun workingModel candidateId ->
+            workingModel
+            |> appendReviewNeededMark reviewTargetKindCandidateDecision candidateId sourcePhiId trigger reason)
+        basisMarkedModel
+
+let private markRealizationReviewNeededForPhi sourcePhiId trigger reason (model: Model) =
+    let hostValues = getAffectedSigmaSourceValues "Host" sourcePhiId model
+    let functionValues = getAffectedSigmaSourceValues "Function" sourcePhiId model
+
+    model
+    |> fun workingModel ->
+        hostValues
+        |> List.fold
+            (fun modelWithHostMarks hostValue ->
+                modelWithHostMarks
+                |> markHostRealizationReviewNeeded sourcePhiId trigger reason hostValue)
+            workingModel
+    |> fun workingModel ->
+        functionValues
+        |> List.fold
+            (fun modelWithFunctionMarks functionValue ->
+                modelWithFunctionMarks
+                |> markFunctionRealizationReviewNeeded sourcePhiId trigger reason functionValue)
+            workingModel
+
+let private markReviewNeededForPhiImpact sourcePhiId trigger reason (model: Model) =
+    model
+    |> markGovernanceReviewNeededForPhi sourcePhiId trigger reason
+    |> markRealizationReviewNeededForPhi sourcePhiId trigger reason
+
+let private markReviewNeededForParseAmendment (draft: ParseAmendmentDraft) (impact: ParseAmendmentImpactPreview) model =
+    let trigger = "Parse amendment confirmed"
+    let reason = "A parsed interpretation was amended; dependent governance or realization should be reviewed."
+
+    let basisMarkedModel =
+        impact.ResetImpacts
+        |> List.fold
+            (fun workingModel impact ->
+                workingModel
+                |> appendReviewNeededMark
+                    reviewTargetKindSigmaBasisItemDecision
+                    impact.BasisItemKey
+                    draft.SourcePhiId
+                    trigger
+                    reason)
+            model
+
+    let governanceMarkedModel =
+        impact.CandidateGroupImpacts
+        |> List.map (fun impact -> impact.CandidateId)
+        |> List.distinct
+        |> List.filter (fun candidateId -> hasCandidateDecision candidateId basisMarkedModel)
+        |> List.fold
+            (fun workingModel candidateId ->
+                workingModel
+                |> appendReviewNeededMark reviewTargetKindCandidateDecision candidateId draft.SourcePhiId trigger reason)
+            basisMarkedModel
+
+    if equalsReviewText draft.OriginalAtomKind "Host" then
+        governanceMarkedModel
+        |> markHostRealizationReviewNeeded draft.SourcePhiId trigger reason draft.OriginalAtomText
+    elif equalsReviewText draft.OriginalAtomKind "Function" then
+        governanceMarkedModel
+        |> markFunctionRealizationReviewNeeded draft.SourcePhiId trigger reason draft.OriginalAtomText
+    else
+        governanceMarkedModel
 
 let normalizeProjectFileNamePart (value: string) =
     let source =
@@ -249,6 +466,10 @@ let addContextEntryToPhi phiId (model: Model) =
                 phiContextEntryDraftValue = ""
                 phiBatchParseStatus = model.phiBatchParseStatus }
             |> markPhiParseStaleIfParsed phiId ("Parse marked stale for " + phiId + ". Recompute parse to apply new Phi context.")
+            |> markReviewNeededForPhiImpact
+                phiId
+                "Phi context changed"
+                "A Phi context entry changed the source interpretation; dependent decisions and realization should be reviewed."
 
         contextModel
         |> appendPhiContextEntryLedgerEvent entry
@@ -497,6 +718,10 @@ let update (jsRuntime: IJSRuntime) message model =
 
                         evidenceModel
                         |> markPhiParseStaleIfParsed evidenceRecord.TargetId staleStatus
+                        |> markReviewNeededForPhiImpact
+                            evidenceRecord.TargetId
+                            "Phi evidence changed"
+                            "Phi-targeted evidence changed the source interpretation; dependent decisions and realization should be reviewed."
                     else
                         evidenceModel
 
@@ -739,7 +964,17 @@ let update (jsRuntime: IJSRuntime) message model =
             |> Option.map (fun parse -> parse.Statement)
             |> Option.defaultValue "Source statement unavailable."
 
-        { model with
+        let reviewMarkedModel =
+            if wasExcluded then
+                model
+            else
+                model
+                |> markReviewNeededForPhiImpact
+                    phiId
+                    "Phi excluded from replay"
+                    "A parsed Phi was excluded from replay; dependent decisions and realization should be reviewed."
+
+        { reviewMarkedModel with
             excludedPhiIds = excludedPhiIds
             lastReplayAction = Some lastReplayAction
             phiBatchParseStatus = None }
@@ -882,19 +1117,14 @@ let update (jsRuntime: IJSRuntime) message model =
                         | _ ->
                             model.selectedPhiResolution
 
-                    let sigmaBasisItemDecisions =
-                        model.sigmaBasisItemDecisions
-                        |> removeParseAmendmentResetDecisions impactPreview
-
-                    let resetSummary =
+                    let reviewSummary =
                         match List.length impactPreview.ResetImpacts with
-                        | 0 -> "No basis-item decisions were reset."
-                        | 1 -> "Reset 1 basis-item decision to pending."
-                        | count -> "Reset " + string count + " basis-item decisions to pending."
+                        | 0 -> "No existing basis-item decision needed review marking."
+                        | 1 -> "Marked 1 basis-item decision Review Needed."
+                        | count -> "Marked " + string count + " basis-item decisions Review Needed."
 
                     { model with
                         parsedPhis = parsedPhis
-                        sigmaBasisItemDecisions = sigmaBasisItemDecisions
                         selectedPhiParse = selectedPhiParse
                         selectedPhiResolution = selectedPhiResolution
                         parseAmendmentDraft = None
@@ -905,14 +1135,14 @@ let update (jsRuntime: IJSRuntime) message model =
                                  + ". Review affected T4/T5 candidate groups: "
                                  + formatAffectedParseAmendmentGroups validatedDraft.OriginalAtomKind validatedDraft.ProposedAtomKind
                                  + ". "
-                                 + resetSummary)
+                                 + reviewSummary)
                         phiBatchParseStatus = None }
                     |> appendLedgerEvent
                         "ParseAmendmentConfirmed"
                         validatedDraft.SourcePhiId
                         "Parse amendment confirmed"
                         (formatParseAmendmentLedgerDetail validatedDraft)
-                    |> appendParseAmendmentDecisionResetLedgerEvents validatedDraft impactPreview.ResetImpacts
+                    |> markReviewNeededForParseAmendment validatedDraft impactPreview
                     |> fun updatedModel -> updatedModel, Cmd.none
 
     | CancelParseAmendment ->

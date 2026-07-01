@@ -12,6 +12,12 @@ let renderLedgerCounter label count =
         text (label + ": " + string count)
     }
 
+let renderReviewNeededBadge () =
+    span {
+        attr.``class`` "tag is-warning is-light review-needed-badge"
+        text reviewNeededLabel
+    }
+
 let renderReplayComparisonRow measure selectedValue currentValue =
     tr {
         td { text measure }
@@ -172,6 +178,7 @@ let renderLedgerTab (ledgerEvents: LedgerEvent list) (replayPreviewSequence: int
     let replayEvents = countLedgerEvents isReplayLedgerEvent ledgerEvents
     let governanceEvents = countLedgerEvents isGovernanceLedgerEvent ledgerEvents
     let inquiryEvents = countLedgerEvents isInquiryLedgerEvent ledgerEvents
+    let reviewNeededEvents = countLedgerEvents isReviewNeededLedgerEvent ledgerEvents
 
     div {
         attr.``class`` "mb-6 pb-5"
@@ -191,6 +198,7 @@ let renderLedgerTab (ledgerEvents: LedgerEvent list) (replayPreviewSequence: int
                 renderLedgerCounter "Replay events" replayEvents
                 renderLedgerCounter "Governance events" governanceEvents
                 renderLedgerCounter "Inquiry events" inquiryEvents
+                renderLedgerCounter reviewNeededLabel reviewNeededEvents
             }
 
             match ledgerEvents with
@@ -232,7 +240,14 @@ let renderLedgerTab (ledgerEvents: LedgerEvent list) (replayPreviewSequence: int
                                     td { text ledgerEvent.EventKind }
                                     td { text ledgerEvent.TargetId }
                                     td { text ledgerEvent.Summary }
-                                    td { text ledgerEvent.Detail }
+                                    td {
+                                        if ledgerEvent.EventKind = reviewNeededMarkedLedgerKind then
+                                            div {
+                                                attr.``class`` "mb-1"
+                                                renderReviewNeededBadge ()
+                                            }
+                                        text ledgerEvent.Detail
+                                    }
                                     td {
                                         button {
                                             attr.``class`` (

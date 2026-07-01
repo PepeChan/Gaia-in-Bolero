@@ -43,6 +43,10 @@ let isGovernanceLedgerEvent eventKind =
     || eventKind = "SigmaBasisItemRejected"
     || eventKind = "SigmaBasisItemHeld"
     || eventKind = sigmaBasisItemDecisionResetLedgerKind
+    || eventKind = reviewNeededMarkedLedgerKind
+
+let isReviewNeededLedgerEvent eventKind =
+    eventKind = reviewNeededMarkedLedgerKind
 
 let isInquiryLedgerEvent eventKind =
     eventKind = inquiryResolvedLedgerEventKind

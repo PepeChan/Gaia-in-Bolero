@@ -33,7 +33,7 @@ let renderCandidateDecisionTag decisionValue =
         text (formatCandidateDecisionValue decisionValue)
     }
 
-let renderT5GovernanceSummaryTable sigmaContext (candidateDecisions: CandidateDecision list) sigmaBasisItemDecisions sequencedParsedPhis ledgerEvents dispatch =
+let renderT5GovernanceSummaryTable sigmaContext (candidateDecisions: CandidateDecision list) sigmaBasisItemDecisions sequencedParsedPhis reviewNeededMarks ledgerEvents dispatch =
     let candidateDeltas = formulateCandidateDeltas sigmaContext
     let pendingCount = countCandidateGroupStatuses GroupPending candidateDeltas candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
     let acceptedCount = countCandidateGroupStatuses GroupAccepted candidateDeltas candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
@@ -85,14 +85,31 @@ let renderT5GovernanceSummaryTable sigmaContext (candidateDecisions: CandidateDe
                         let candidateDecision = tryFindCandidateDecision candidate.CandidateId candidateDecisions
                         let groupGovernance =
                             buildCandidateGroupGovernance candidate candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
+                        let candidateNeedsReview = candidateHasReviewNeededMarks candidate.CandidateId reviewNeededMarks
+                        let classDecisionNeedsReview =
+                            hasReviewNeededMark reviewTargetKindCandidateDecision candidate.CandidateId reviewNeededMarks
 
                         tr {
                             td { text (formatCandidateDeltaKind candidate.Kind) }
                             td { text candidate.Target }
                             td { text (string (List.length candidate.RelevantSigmaBasis)) }
                             td { text candidate.Provenance }
-                            td { renderCandidateGroupStatusTag groupGovernance.Status }
-                            td { renderCandidateClassDecisionTag candidateDecision }
+                            td {
+                                renderCandidateGroupStatusTag groupGovernance.Status
+                                if candidateNeedsReview then
+                                    span {
+                                        attr.``class`` "ml-1"
+                                        renderReviewNeededBadge ()
+                                    }
+                            }
+                            td {
+                                renderCandidateClassDecisionTag candidateDecision
+                                if classDecisionNeedsReview then
+                                    span {
+                                        attr.``class`` "ml-1"
+                                        renderReviewNeededBadge ()
+                                    }
+                            }
                             td {
                                 p {
                                     attr.``class`` "is-size-7 mb-1"
@@ -105,15 +122,16 @@ let renderT5GovernanceSummaryTable sigmaContext (candidateDecisions: CandidateDe
                                         attr.``class`` "is-size-7 has-text-warning-dark mb-0"
                                         text conflict
                                     }
-                                let resetCount =
-                                    ledgerEvents
-                                    |> getParseAmendmentResetEventsForCandidate candidate.CandidateId
+
+                                let reviewCount =
+                                    reviewNeededMarks
+                                    |> getReviewNeededMarksForCandidate candidate.CandidateId
                                     |> List.length
 
-                                if resetCount > 0 then
+                                if reviewCount > 0 then
                                     p {
                                         attr.``class`` "is-size-7 has-text-warning-dark mb-0"
-                                        text ("Parse amendment reset basis decisions for this group: " + string resetCount)
+                                        text (reviewNeededLabel + " marks for this group: " + string reviewCount)
                                     }
                             }
                             td { renderCandidateGovernanceActions candidate decisionValue dispatch }
@@ -243,7 +261,7 @@ let renderParseAmendmentPreview (draft: ParseAmendmentDraft) (impact: ParseAmend
         | None ->
             p {
                 attr.``class`` "mb-0"
-                text "Candidate group before/after status is available from the inline selected-kind review panel. T6 stale propagation is not performed in this slice."
+                text "Candidate group before/after status is available from the inline selected-kind review panel."
             }
         | Some preview ->
             match preview.CandidateGroupImpacts with
@@ -297,27 +315,27 @@ let renderParseAmendmentPreview (draft: ParseAmendmentDraft) (impact: ParseAmend
             | [] ->
                 p {
                     attr.``class`` "mb-2"
-                    text "No existing T4/T5 basis-item decisions are attached to the amended atom, so no basis decisions will be reset."
+                    text "No existing T4/T5 basis-item decisions are attached to the amended atom, so no basis decisions need review marking."
                 }
             | resets ->
                 div {
                     attr.``class`` "mb-2"
                     p {
                         attr.``class`` "has-text-weight-semibold mb-1"
-                        text "Basis-item decisions to reopen"
+                        text "Basis-item decisions to mark Review Needed"
                     }
                     forEach resets <| fun resetImpact ->
                         p {
                             attr.``class`` "mb-1"
                             renderCandidateDecisionTag resetImpact.PreviousDecision
-                            text (" -> Pending for ")
+                            text (" + " + reviewNeededLabel + " for ")
                             code { text resetImpact.BasisItemKey }
                         }
                 }
 
             p {
                 attr.``class`` "mb-0"
-                text "T6 stale propagation is intentionally deferred."
+                text "Existing decisions are preserved; affected items are marked for review."
             }
     }
 
@@ -995,9 +1013,11 @@ let renderSigmaBasisItemBulkActions basisItemKeys dispatch =
         }
     }
 
-let renderSigmaBasisItemReview (basisItem: SigmaBasisItemReview) (sigmaBasisItemDecisions: Map<string, CandidateDecisionValue>) ledgerEvents dispatch =
+let renderSigmaBasisItemReview (basisItem: SigmaBasisItemReview) (sigmaBasisItemDecisions: Map<string, CandidateDecisionValue>) reviewNeededMarks ledgerEvents dispatch =
     let decisionValue = getSigmaBasisItemDecisionValue basisItem.Key sigmaBasisItemDecisions
-    let resetEvent = tryFindLatestParseAmendmentResetEventForBasisItem basisItem.Key ledgerEvents
+    let reviewMark =
+        reviewNeededMarks
+        |> tryFindReviewNeededMark reviewTargetKindSigmaBasisItemDecision basisItem.Key
 
     div {
         attr.``class`` "sigma-basis-item"
@@ -1032,23 +1052,30 @@ let renderSigmaBasisItemReview (basisItem: SigmaBasisItemReview) (sigmaBasisItem
                     attr.``class`` "mb-2"
                     strong { text "Item review state: " }
                     renderCandidateDecisionTag decisionValue
+                    match reviewMark with
+                    | None -> empty()
+                    | Some _ ->
+                        span {
+                            attr.``class`` "ml-1"
+                            renderReviewNeededBadge ()
+                        }
                 }
                 renderSigmaBasisItemActions basisItem.Key decisionValue dispatch
             }
         }
 
-        match resetEvent with
+        match reviewMark with
         | None -> empty()
-        | Some ledgerEvent ->
+        | Some mark ->
             div {
                 attr.``class`` "notification is-warning is-light is-size-7 py-2 mb-2"
                 p {
                     attr.``class`` "has-text-weight-semibold mb-1"
-                    text "Decision reset by parsed atom amendment"
+                    text reviewNeededLabel
                 }
                 p {
                     attr.``class`` "mb-0"
-                    text ledgerEvent.Detail
+                    text mark.Reason
                 }
             }
 
@@ -1245,6 +1272,7 @@ let renderReviewCandidateCard
     (candidateDecisions: CandidateDecision list)
     (sigmaBasisItemDecisions: Map<string, CandidateDecisionValue>)
     sequencedParsedPhis
+    reviewNeededMarks
     ledgerEvents
     dispatch =
     let decisionValue = getCandidateDecisionValue candidate.CandidateId candidateDecisions
@@ -1252,6 +1280,9 @@ let renderReviewCandidateCard
     let basisItems = buildSigmaBasisItemReviews candidate sequencedParsedPhis
     let basisItemKeys = basisItems |> List.map (fun basisItem -> basisItem.Key)
     let groupGovernance = buildCandidateGroupGovernance candidate candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
+    let candidateNeedsReview = candidateHasReviewNeededMarks candidate.CandidateId reviewNeededMarks
+    let classDecisionNeedsReview =
+        hasReviewNeededMark reviewTargetKindCandidateDecision candidate.CandidateId reviewNeededMarks
 
     div {
         attr.``class`` "card mb-4 cognition-review-card"
@@ -1271,6 +1302,11 @@ let renderReviewCandidateCard
                     h4 {
                         attr.``class`` "title is-6 mb-2"
                         text (formatCandidateDeltaKind candidate.Kind)
+                        if candidateNeedsReview then
+                            span {
+                                attr.``class`` "ml-2"
+                                renderReviewNeededBadge ()
+                            }
                     }
                     p {
                         attr.``class`` "is-size-7 has-text-grey"
@@ -1303,6 +1339,11 @@ let renderReviewCandidateCard
                         text "Group status"
                     }
                     renderCandidateGroupStatusTag groupGovernance.Status
+                    if candidateNeedsReview then
+                        span {
+                            attr.``class`` "ml-1"
+                            renderReviewNeededBadge ()
+                        }
                 }
 
                 div {
@@ -1350,6 +1391,11 @@ let renderReviewCandidateCard
                             attr.``class`` "mb-2"
                             strong { text "Basis-derived status: " }
                             renderCandidateGroupStatusTag groupGovernance.Status
+                            if candidateNeedsReview then
+                                span {
+                                    attr.``class`` "ml-1"
+                                    renderReviewNeededBadge ()
+                                }
                         }
 
                         p {
@@ -1365,12 +1411,17 @@ let renderReviewCandidateCard
                                 text conflict
                             }
 
-                        renderCandidateAmendmentResetNotice candidate ledgerEvents
+                        renderCandidateReviewNeededNotice candidate reviewNeededMarks
 
                         p {
                             attr.``class`` "mb-2"
                             strong { text "Candidate class decision: " }
                             renderCandidateClassDecisionTag candidateDecision
+                            if classDecisionNeedsReview then
+                                span {
+                                    attr.``class`` "ml-1"
+                                    renderReviewNeededBadge ()
+                                }
                         }
 
                         renderCandidateGovernanceActions candidate decisionValue dispatch
@@ -1425,7 +1476,7 @@ let renderReviewCandidateCard
                     div {
                         attr.``class`` "sigma-basis-list"
                         forEach items <| fun basisItem ->
-                            renderSigmaBasisItemReview basisItem sigmaBasisItemDecisions ledgerEvents dispatch
+                            renderSigmaBasisItemReview basisItem sigmaBasisItemDecisions reviewNeededMarks ledgerEvents dispatch
                     }
             }
         }
@@ -1444,44 +1495,39 @@ let private tryExtractLedgerDetailField fieldName (detail: string) =
             else
                 None)
 
-let private formatParseAmendmentResetSummary (ledgerEvent: LedgerEvent) =
-    let atomKind =
+let private formatReviewNeededEventSummary (ledgerEvent: LedgerEvent) =
+    let targetKind =
         ledgerEvent.Detail
-        |> tryExtractLedgerDetailField "Original kind"
-        |> Option.defaultValue "Basis item"
+        |> tryExtractLedgerDetailField "Target kind"
+        |> Option.defaultValue "Target"
 
-    let atomValue =
-        ledgerEvent.Detail
-        |> tryExtractLedgerDetailField "Original text"
-        |> Option.defaultValue ledgerEvent.TargetId
+    targetKind + " marked " + reviewNeededLabel
 
-    atomKind + " decision reopened: \"" + atomValue + "\""
-
-let renderRecentParseAmendmentResetEvents ledgerEvents =
-    let resetEvents =
+let renderRecentReviewNeededEvents ledgerEvents =
+    let reviewEvents =
         ledgerEvents
-        |> getParseAmendmentResetLedgerEvents
+        |> List.filter (fun ledgerEvent -> ledgerEvent.EventKind = reviewNeededMarkedLedgerKind)
         |> List.rev
         |> List.truncate 5
 
-    match resetEvents with
+    match reviewEvents with
     | [] -> empty()
     | events ->
         div {
             attr.``class`` "notification is-warning is-light cognition-review-helper"
             p {
                 attr.``class`` "has-text-weight-semibold mb-2"
-                text "Basis decisions reopened by parse amendment"
+                text "Recent Review Needed marks"
             }
             forEach events <| fun ledgerEvent ->
                 div {
                     p {
                         attr.``class`` "is-size-7 has-text-weight-semibold mb-1"
-                        text (formatParseAmendmentResetSummary ledgerEvent)
+                        text (formatReviewNeededEventSummary ledgerEvent)
                     }
                     p {
                         attr.``class`` "is-size-7 has-text-grey mb-2"
-                        text "Basis key: "
+                        text "Target: "
                         code { text ledgerEvent.TargetId }
                     }
                 }
@@ -1503,7 +1549,7 @@ let renderCognitionReviewPanel (model: Model) sequencedParsedPhis sigmaContext d
             text "Candidate-class decisions persist. Basis-derived group status is the human-facing governance state."
         }
 
-        renderRecentParseAmendmentResetEvents model.LedgerEvents
+        renderRecentReviewNeededEvents model.LedgerEvents
 
         div {
             attr.``class`` "columns is-variable is-4"
@@ -1542,6 +1588,7 @@ let renderCognitionReviewPanel (model: Model) sequencedParsedPhis sigmaContext d
                     model.candidateDecisions
                     model.sigmaBasisItemDecisions
                     sequencedParsedPhis
+                    model.reviewNeededMarks
                     model.LedgerEvents
                     dispatch
     }
@@ -1586,7 +1633,7 @@ let renderLatestDeltaSummaryTable lastReplayAction =
             }
     }
 
-let renderT5DecisionHistoryPanel (candidateDecisions: CandidateDecision list) =
+let renderT5DecisionHistoryPanel (candidateDecisions: CandidateDecision list) reviewNeededMarks =
     div {
         attr.``class`` "box"
 
@@ -1613,6 +1660,7 @@ let renderT5DecisionHistoryPanel (candidateDecisions: CandidateDecision list) =
                             th { text "Candidate type" }
                             th { text "Target" }
                             th { text "Decision" }
+                            th { text "Review" }
                             th { text "Timestamp" }
                             th { text "Rationale" }
                         }
@@ -1620,11 +1668,20 @@ let renderT5DecisionHistoryPanel (candidateDecisions: CandidateDecision list) =
 
                     tbody {
                         forEach decisions <| fun decision ->
+                            let needsReview =
+                                hasReviewNeededMark reviewTargetKindCandidateDecision decision.CandidateId reviewNeededMarks
+
                             tr {
                                 td { code { text decision.CandidateId } }
                                 td { text decision.CandidateType }
                                 td { text decision.Target }
                                 td { renderCandidateDecisionTag decision.Decision }
+                                td {
+                                    if needsReview then
+                                        renderReviewNeededBadge ()
+                                    else
+                                        text ""
+                                }
                                 td { text (formatCandidateDecisionTimestamp decision.Timestamp) }
                                 td { text decision.Rationale }
                             }
@@ -1639,6 +1696,7 @@ let renderOperationalSummaryTablesPanel
     lastReplayAction
     (candidateDecisions: CandidateDecision list)
     sigmaBasisItemDecisions
+    reviewNeededMarks
     ledgerEvents
     selectedParsedAtomReviewKind
     parseAmendmentDraft
@@ -1672,7 +1730,7 @@ let renderOperationalSummaryTablesPanel
 
         renderT4CandidateSummaryTable sigmaContext
 
-        renderT5GovernanceSummaryTable sigmaContext candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis ledgerEvents dispatch
+        renderT5GovernanceSummaryTable sigmaContext candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis reviewNeededMarks ledgerEvents dispatch
 
         renderLatestDeltaSummaryTable lastReplayAction
     }

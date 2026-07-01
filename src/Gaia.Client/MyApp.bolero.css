@@ -239,3 +239,10 @@
   margin-top: 0.25rem;
   overflow-wrap: anywhere;
 }
+
+.review-needed-badge {
+  font-size: 0.72rem;
+  height: auto;
+  line-height: 1.2;
+  white-space: nowrap;
+}

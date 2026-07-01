@@ -8,6 +8,7 @@ open Gaia.Client.AppState
 open Gaia.Client.EvidenceView
 open Gaia.Client.Realization
 open Gaia.Client.RealizationInquiryEngine
+open Gaia.Client.Workflow
 
 let private formatNone (values: string list) =
     match values with
@@ -96,6 +97,33 @@ let private renderReadinessBadge prefix showLabel readiness =
         if body <> "" then
             text body
     }
+
+let private renderReviewNeededBadge () =
+    span {
+        attr.``class`` "tag is-warning is-light review-needed-badge"
+        text reviewNeededLabel
+    }
+
+let private renderReviewNeededBadgeIf needsReview =
+    if needsReview then
+        span {
+            attr.``class`` "ml-1"
+            renderReviewNeededBadge ()
+        }
+    else
+        empty()
+
+let private realizationObjectNeedsReview objectKind objectId reviewNeededMarks =
+    reviewNeededMarks
+    |> hasReviewNeededMark reviewTargetKindRealizationObject (realizationObjectReviewTargetId objectKind objectId)
+
+let private realizationLinkNeedsReview linkKind sourceId targetId reviewNeededMarks =
+    reviewNeededMarks
+    |> hasReviewNeededMark reviewTargetKindRealizationLink (realizationLinkReviewTargetId linkKind sourceId targetId)
+
+let private realizationPathNeedsReview sourceKind sourceValue reviewNeededMarks =
+    reviewNeededMarks
+    |> hasReviewNeededMark reviewTargetKindRealizationPath (realizationPathReviewTargetId sourceKind sourceValue)
 
 let private renderObjectReadiness objectKind readiness =
     concat {
@@ -353,9 +381,15 @@ let private renderHostCompletenessTable (model: Model) =
                             let partIds, dpIds, tfIds, ctqIds, vvIds = getHostContinuityIds entry.Value state
                             let status = getHostRealizationStatus entry.Value state
                             let readiness = getHostReadiness entry.Value state
+                            let needsReview =
+                                model.reviewNeededMarks
+                                |> realizationPathNeedsReview realizationSourceKindHost entry.Value
 
                             tr {
-                                td { text entry.Value }
+                                td {
+                                    text entry.Value
+                                    renderReviewNeededBadgeIf needsReview
+                                }
                                 td { text (string entry.SupportCount) }
                                 renderReadinessCell realizationObjectKindPart readiness.Part partIds
                                 renderReadinessCell realizationObjectKindDP readiness.DP dpIds
@@ -391,6 +425,10 @@ let private renderT6Summary (model: Model) =
     let dpReadiness = getGapReadiness (List.length state.Sigma.DPs) (List.length dpsWithoutTFs)
     let tfReadiness = getGapReadiness (List.length state.Sigma.TFs) (List.length tfsWithoutCTQs)
     let ctqReadiness = getGapReadiness (List.length state.Sigma.CTQs) (List.length ctqsWithoutVV)
+    let reviewNeededCount =
+        model.reviewNeededMarks
+        |> Gaia.Client.Workflow.getRealizationReviewNeededMarks
+        |> List.length
 
     div {
         attr.``class`` "box"
@@ -399,6 +437,15 @@ let private renderT6Summary (model: Model) =
             attr.``class`` "title is-5"
             text "T6 Summary"
         }
+
+        if reviewNeededCount > 0 then
+            div {
+                attr.``class`` "tags mb-3"
+                span {
+                    attr.``class`` "tag is-warning is-light"
+                    text (reviewNeededLabel + ": " + string reviewNeededCount)
+                }
+            }
 
         div {
             attr.``class`` "table-container"
@@ -425,14 +472,18 @@ let private renderT6Summary (model: Model) =
         }
     }
 
-let private renderObjectRow (state: RealizationState) (objectKind: string, objectId: string, objectName: string) =
+let private renderObjectRow (state: RealizationState) reviewNeededMarks (objectKind: string, objectId: string, objectName: string) =
     let note = tryFindObjectNote objectKind objectId state
     let readiness = getRealizationObjectReadiness objectKind objectId state
+    let needsReview =
+        reviewNeededMarks
+        |> realizationObjectNeedsReview objectKind objectId
 
     tr {
         attr.``class`` (semanticObjectRowClass objectKind)
         td {
             renderObjectReadiness objectKind readiness
+            renderReviewNeededBadgeIf needsReview
         }
         td { code { text objectId } }
         td { text objectName }
@@ -468,7 +519,15 @@ let private isProjectionTarget (target: RealizationNavigationNode) (node: Realiz
     String.Equals(target.ObjectKind, node.ObjectKind, StringComparison.OrdinalIgnoreCase)
     && String.Equals(target.ObjectId, node.ObjectId, StringComparison.OrdinalIgnoreCase)
 
-let private renderProjectionNodeSummary emphasize (node: RealizationNavigationNode) =
+let private navigationNodeNeedsReview reviewNeededMarks (node: RealizationNavigationNode) =
+    if node.ObjectKind = realizationSourceKindHost || node.ObjectKind = realizationSourceKindFunction then
+        reviewNeededMarks
+        |> realizationPathNeedsReview node.ObjectKind node.ObjectId
+    else
+        reviewNeededMarks
+        |> realizationObjectNeedsReview node.ObjectKind node.ObjectId
+
+let private renderProjectionNodeSummary reviewNeededMarks emphasize (node: RealizationNavigationNode) =
     span {
         attr.``class`` (if emphasize then "has-text-weight-semibold" else "")
         renderObjectKindTag node.ObjectKind
@@ -476,13 +535,14 @@ let private renderProjectionNodeSummary emphasize (node: RealizationNavigationNo
             attr.``class`` "ml-1"
             text (formatRealizationNavigationNodeLabel node)
         }
+        renderReviewNeededBadgeIf (navigationNodeNeedsReview reviewNeededMarks node)
     }
 
-let rec private renderNavigationNode (node: RealizationNavigationNode) =
+let rec private renderNavigationNode reviewNeededMarks (node: RealizationNavigationNode) =
     li {
         div {
             attr.``class`` "is-flex is-align-items-center is-flex-wrap-wrap"
-            renderProjectionNodeSummary false node
+            renderProjectionNodeSummary reviewNeededMarks false node
             span {
                 attr.``class`` "ml-2"
                 renderReadinessBadge "" true node.Readiness
@@ -504,11 +564,11 @@ let rec private renderNavigationNode (node: RealizationNavigationNode) =
         | children ->
             ul {
                 forEach children <| fun child ->
-                    renderNavigationNode child
+                    renderNavigationNode reviewNeededMarks child
             }
     }
 
-let private renderProjectionTarget (node: RealizationNavigationNode) =
+let private renderProjectionTarget reviewNeededMarks (node: RealizationNavigationNode) =
     div {
         attr.``class`` "notification is-link is-light py-3 my-3"
         div {
@@ -517,7 +577,7 @@ let private renderProjectionTarget (node: RealizationNavigationNode) =
                 attr.``class`` "mr-2"
                 text "Target"
             }
-            renderProjectionNodeSummary true node
+            renderProjectionNodeSummary reviewNeededMarks true node
             span {
                 attr.``class`` "ml-2"
                 renderReadinessBadge "" true node.Readiness
@@ -531,7 +591,7 @@ let private renderProjectionTarget (node: RealizationNavigationNode) =
             }
     }
 
-let private renderUpstreamPath (target: RealizationNavigationNode) (path: RealizationNavigationNode list) =
+let private renderUpstreamPath reviewNeededMarks (target: RealizationNavigationNode) (path: RealizationNavigationNode list) =
     li {
         forEach (path |> List.mapi (fun index node -> index, node)) <| fun (index, node) ->
             concat {
@@ -541,11 +601,11 @@ let private renderUpstreamPath (target: RealizationNavigationNode) (path: Realiz
                         text "->"
                     }
 
-                renderProjectionNodeSummary (isProjectionTarget target node) node
+                renderProjectionNodeSummary reviewNeededMarks (isProjectionTarget target node) node
             }
     }
 
-let private renderUpstreamProjection (topology: RealizationTargetTopology) =
+let private renderUpstreamProjection reviewNeededMarks (topology: RealizationTargetTopology) =
     let upstreamPaths =
         topology.UpstreamPaths
         |> List.filter (fun path -> List.length path > 1)
@@ -558,10 +618,10 @@ let private renderUpstreamProjection (topology: RealizationTargetTopology) =
     else
         ul {
             forEach upstreamPaths <| fun path ->
-                renderUpstreamPath topology.Target path
+                renderUpstreamPath reviewNeededMarks topology.Target path
         }
 
-let private renderDownstreamProjection (topology: RealizationTargetTopology) =
+let private renderDownstreamProjection reviewNeededMarks (topology: RealizationTargetTopology) =
     if topology.DownstreamTree.Children |> List.isEmpty then
         div {
             p {
@@ -575,10 +635,14 @@ let private renderDownstreamProjection (topology: RealizationTargetTopology) =
         }
     else
         ul {
-            renderNavigationNode topology.DownstreamTree
+            renderNavigationNode reviewNeededMarks topology.DownstreamTree
         }
 
-let private renderNavigationGapRow (gap: RealizationNavigationGap) =
+let private renderNavigationGapRow reviewNeededMarks (gap: RealizationNavigationGap) =
+    let needsReview =
+        reviewNeededMarks
+        |> realizationObjectNeedsReview gap.OwnerKind gap.OwnerId
+
     tr {
         td {
             renderObjectKindTag gap.OwnerKind
@@ -586,6 +650,7 @@ let private renderNavigationGapRow (gap: RealizationNavigationGap) =
                 attr.``class`` "ml-1"
                 text (formatRealizationNavigationObjectLabel gap.OwnerKind gap.OwnerId gap.OwnerName)
             }
+            renderReviewNeededBadgeIf needsReview
         }
         td {
             renderReadinessBadge ("Missing " + gap.MissingKind) false Missing
@@ -593,7 +658,7 @@ let private renderNavigationGapRow (gap: RealizationNavigationGap) =
         td { text (String.concat " -> " gap.PathLabels) }
     }
 
-let private renderCompletenessGaps (gaps: RealizationNavigationGap list) =
+let private renderCompletenessGaps reviewNeededMarks (gaps: RealizationNavigationGap list) =
     match gaps with
     | [] ->
         p {
@@ -614,7 +679,7 @@ let private renderCompletenessGaps (gaps: RealizationNavigationGap list) =
                 }
                 tbody {
                     forEach missingGaps <| fun gap ->
-                        renderNavigationGapRow gap
+                        renderNavigationGapRow reviewNeededMarks gap
                 }
             }
         }
@@ -622,6 +687,7 @@ let private renderCompletenessGaps (gaps: RealizationNavigationGap list) =
 let private renderNavigationResult (model: Model) (target: RealizationNavigationTarget) =
     let selectedOperator = getSelectedRealizationNavigationOperator model
     let topology = getTargetTopology target.ObjectKind target.ObjectId model
+    let reviewNeededMarks = model.reviewNeededMarks
 
     div {
         attr.``class`` "mt-4"
@@ -637,23 +703,23 @@ let private renderNavigationResult (model: Model) (target: RealizationNavigation
                 attr.``class`` "subtitle is-6 mb-2"
                 text "Upstream"
             }
-            renderUpstreamProjection topology
-            renderProjectionTarget topology.Target
+            renderUpstreamProjection reviewNeededMarks topology
+            renderProjectionTarget reviewNeededMarks topology.Target
         | value when value = realizationNavigationOperatorDownstream ->
-            renderProjectionTarget topology.Target
+            renderProjectionTarget reviewNeededMarks topology.Target
             h5 {
                 attr.``class`` "subtitle is-6 mb-2"
                 text "Downstream"
             }
-            renderDownstreamProjection topology
+            renderDownstreamProjection reviewNeededMarks topology
         | value when value = realizationNavigationOperatorTopology ->
             div {
                 attr.``class`` "content"
                 h5 { text "Upstream" }
-                renderUpstreamProjection topology
-                renderProjectionTarget topology.Target
+                renderUpstreamProjection reviewNeededMarks topology
+                renderProjectionTarget reviewNeededMarks topology.Target
                 h5 { text "Downstream" }
-                renderDownstreamProjection topology
+                renderDownstreamProjection reviewNeededMarks topology
             }
         | value when value = realizationNavigationOperatorCompleteness ->
             let targetWithCompleteness =
@@ -661,8 +727,8 @@ let private renderNavigationResult (model: Model) (target: RealizationNavigation
 
             div {
                 attr.``class`` "content"
-                renderProjectionTarget targetWithCompleteness
-                renderCompletenessGaps topology.MissingGaps
+                renderProjectionTarget reviewNeededMarks targetWithCompleteness
+                renderCompletenessGaps reviewNeededMarks topology.MissingGaps
             }
         | _ ->
             p {
@@ -919,7 +985,7 @@ let private renderNavigationOperatorsSection (model: Model) dispatch =
             }
     }
 
-let private renderObjectsTable (state: RealizationState) =
+let private renderObjectsTable (state: RealizationState) reviewNeededMarks =
     let objectRows = getObjectRows state
 
     div {
@@ -954,7 +1020,7 @@ let private renderObjectsTable (state: RealizationState) =
 
                     tbody {
                         forEach rows <| fun row ->
-                            renderObjectRow state row
+                            renderObjectRow state reviewNeededMarks row
                     }
                 }
             }
@@ -962,6 +1028,7 @@ let private renderObjectsTable (state: RealizationState) =
 
 let private renderRealizationTraceSection (model: Model) =
     let state = model.realizationState
+    let reviewNeededMarks = model.reviewNeededMarks
     let traces =
         getRealizationSourceHosts model
         |> List.map (fun entry -> getHostRealizationTrace entry.Value state)
@@ -973,6 +1040,10 @@ let private renderRealizationTraceSection (model: Model) =
         }
 
     let rec renderTraceNode (node: RealizationTraceNode) =
+        let needsReview =
+            reviewNeededMarks
+            |> realizationObjectNeedsReview node.ObjectKind node.ObjectId
+
         li {
             div {
                 attr.``class`` "is-flex is-align-items-center is-flex-wrap-wrap"
@@ -981,6 +1052,7 @@ let private renderRealizationTraceSection (model: Model) =
                     attr.``class`` "ml-1"
                     text (formatTraceObjectLabel node)
                 }
+                renderReviewNeededBadgeIf needsReview
                 span {
                     attr.``class`` "ml-2"
                     renderReadinessBadge "" true node.Readiness
@@ -1001,6 +1073,10 @@ let private renderRealizationTraceSection (model: Model) =
         }
 
     let renderHostTrace (trace: HostRealizationTrace) =
+        let needsReview =
+            reviewNeededMarks
+            |> realizationPathNeedsReview realizationSourceKindHost trace.HostValue
+
         li {
             div {
                 attr.``class`` "is-flex is-align-items-center is-flex-wrap-wrap"
@@ -1009,6 +1085,7 @@ let private renderRealizationTraceSection (model: Model) =
                     attr.``class`` "ml-1"
                     text trace.HostValue
                 }
+                renderReviewNeededBadgeIf needsReview
                 span {
                     attr.``class`` "ml-2"
                     renderReadinessBadge "" true trace.Readiness
@@ -1052,7 +1129,7 @@ let private renderRealizationTraceSection (model: Model) =
             }
     }
 
-let private renderLinksTable (state: RealizationState) =
+let private renderLinksTable (state: RealizationState) reviewNeededMarks =
     let linkRows = getRealizationLinkRows state
 
     div {
@@ -1085,8 +1162,15 @@ let private renderLinksTable (state: RealizationState) =
 
                     tbody {
                         forEach rows <| fun (linkKind, sourceId, targetId) ->
+                            let needsReview =
+                                reviewNeededMarks
+                                |> realizationLinkNeedsReview linkKind sourceId targetId
+
                             tr {
-                                td { text linkKind }
+                                td {
+                                    text linkKind
+                                    renderReviewNeededBadgeIf needsReview
+                                }
                                 td { text sourceId }
                                 td { text targetId }
                             }
@@ -1101,6 +1185,10 @@ let renderT6RealizationTab (model: Model) dispatch =
     let functionCount = model |> getRealizationSourceFunctions |> List.length
     let objectCount = getObjectRows state |> List.length
     let linkCount = getRealizationLinkRows state |> List.length
+    let realizationReviewNeededCount =
+        model.reviewNeededMarks
+        |> Gaia.Client.Workflow.getRealizationReviewNeededMarks
+        |> List.length
 
     div {
         attr.``class`` "mb-6 pb-5"
@@ -1133,6 +1221,11 @@ let renderT6RealizationTab (model: Model) dispatch =
                 attr.``class`` "tag is-light"
                 text ("Links: " + string linkCount)
             }
+            if realizationReviewNeededCount > 0 then
+                span {
+                    attr.``class`` "tag is-warning is-light"
+                    text (reviewNeededLabel + ": " + string realizationReviewNeededCount)
+                }
         }
 
         renderStatusNotification model.realizationStatus
@@ -1154,8 +1247,8 @@ let renderT6RealizationTab (model: Model) dispatch =
                 renderT6Summary model
                 renderNavigationOperatorsSection model dispatch
                 renderRealizationTraceSection model
-                renderObjectsTable state
-                renderLinksTable state
+                renderObjectsTable state model.reviewNeededMarks
+                renderLinksTable state model.reviewNeededMarks
             }
         }
     }
