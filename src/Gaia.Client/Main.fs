@@ -939,6 +939,8 @@ let homePage model dispatch =
                             model.selectedParsedAtomReviewKind
                             model.parseAmendmentDraft
                             model.parseAmendmentStatus
+                            model.lastWorkbenchUndoAction
+                            model.workbenchUndoStatus
                             model.phiContextEntries
                             model.evidenceRecords
                             model.evidenceCaptureKind

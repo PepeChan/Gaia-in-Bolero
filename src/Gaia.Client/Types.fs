@@ -214,6 +214,9 @@ let t6InquiryQuestionContextKind = "T6InquiryQuestion"
 let sigmaBasisItemDecisionResetLedgerKind = "SigmaBasisItemDecisionReset"
 let t6RealizationReviewNeededLedgerKind = "T6RealizationReviewNeeded"
 let parsedAtomRetiredLedgerKind = "ParsedAtomRetired"
+let parsedAtomRetirementUndoneLedgerKind = "ParsedAtomRetirementUndone"
+let phiDraftCreatedLedgerKind = "PhiDraftCreated"
+let workbenchUndoLedgerKind = "WorkbenchUndoApplied"
 
 type LedgerEvent =
     {
@@ -270,6 +273,52 @@ type EvidenceRecord =
         Notes: string
         ContentRef: string
     }
+
+type PhiDraftFormSnapshot =
+    {
+        ActiveTopNavigationTab: TopNavigationTab
+        PhiDraftStatus: string option
+        PhiDraftInputClass: string
+        PhiDraftActor: string
+        PhiDraftMission: string
+        PhiDraftOperationalContext: string
+        PhiDraftRawStatement: string
+        PhiDraftTriggerContext: string
+        PhiDraftSource: string
+        PhiDraftQuickTags: string
+        PhiDraftConfidence: string
+        PhiContextSnipDraft: string
+    }
+
+type BasisDecisionUndoSnapshot =
+    {
+        BasisItemKey: string
+        PreviousDecision: CandidateDecisionValue option
+    }
+
+type EvidenceRecordUndoSnapshot =
+    {
+        EvidenceRecord: EvidenceRecord
+        PreviousStaleParsedPhiIds: string list
+        PreviousPhiBatchParseStatus: string option
+    }
+
+type PhiContextEntryUndoSnapshot =
+    {
+        ContextEntry: PhiContextEntry
+        PreviousStaleParsedPhiIds: string list
+        PreviousPhiBatchParseStatus: string option
+    }
+
+type WorkbenchUndoAction =
+    | UndoParsedAtomRetirement of atomKey: string * sourcePhiId: string * atomKind: string * atomText: string * previousCandidateDecisions: CandidateDecision list * previousBasisDecisions: BasisDecisionUndoSnapshot list
+    | UndoParseAmendment of sourcePhiId: string * previousParse: PhiParse * previousBasisDecisions: BasisDecisionUndoSnapshot list
+    | UndoEvidenceRecordCreation of EvidenceRecordUndoSnapshot
+    | UndoPhiContextEntryCreation of PhiContextEntryUndoSnapshot
+    | UndoCandidateDecision of candidateId: string * previousDecision: CandidateDecision option
+    | UndoSigmaBasisItemDecision of BasisDecisionUndoSnapshot
+    | UndoSigmaBasisItemBulkDecision of BasisDecisionUndoSnapshot list
+    | UndoModelFittingDraftCreation of previousDraft: PhiDraftFormSnapshot * targetId: string
 
 type RealizationObjectNote =
     {

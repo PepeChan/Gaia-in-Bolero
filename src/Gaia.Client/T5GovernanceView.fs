@@ -422,6 +422,64 @@ let formatParsedAtomKindLabel atomKind =
 let formatParsedAtomKindPluralLabel atomKind =
     formatModelFittingAtomKindPluralLabel atomKind
 
+let describeWorkbenchUndoAction = function
+    | UndoParsedAtomRetirement (_, sourcePhiId, atomKind, atomText, _, _) ->
+        "Retirement: " + formatParsedAtomKindLabel atomKind + " = " + atomText + " from " + sourcePhiId
+    | UndoParseAmendment (sourcePhiId, _, _) ->
+        "Amendment: " + sourcePhiId
+    | UndoEvidenceRecordCreation snapshot ->
+        "Note / evidence: " + snapshot.EvidenceRecord.Title
+    | UndoPhiContextEntryCreation snapshot ->
+        "Context note: " + snapshot.ContextEntry.Value
+    | UndoCandidateDecision (candidateId, _) ->
+        "Candidate governance: " + candidateId
+    | UndoSigmaBasisItemDecision snapshot ->
+        "Basis governance: " + snapshot.BasisItemKey
+    | UndoSigmaBasisItemBulkDecision snapshots ->
+        "Bulk basis governance: " + string (List.length snapshots) + " items"
+    | UndoModelFittingDraftCreation (_, targetId) ->
+        "Draft Phi creation: " + targetId
+
+let renderWorkbenchUndoControl lastWorkbenchUndoAction workbenchUndoStatus dispatch =
+    div {
+        attr.``class`` "mb-4"
+
+        div {
+            attr.``class`` "buttons are-small mb-1"
+
+            match lastWorkbenchUndoAction with
+            | None ->
+                button {
+                    attr.``class`` "button is-light"
+                    attr.``type`` "button"
+                    text "Undo last action"
+                }
+            | Some _ ->
+                button {
+                    attr.``class`` "button is-warning is-light"
+                    attr.``type`` "button"
+                    on.click (fun _ -> dispatch UndoLastWorkbenchAction)
+                    text "Undo last action"
+                }
+        }
+
+        match lastWorkbenchUndoAction with
+        | None -> empty()
+        | Some undoAction ->
+            p {
+                attr.``class`` "is-size-7 has-text-grey mb-1"
+                text ("Available: " + describeWorkbenchUndoAction undoAction)
+            }
+
+        match workbenchUndoStatus with
+        | None -> empty()
+        | Some status ->
+            p {
+                attr.``class`` "is-size-7 has-text-grey mb-0"
+                text status
+            }
+    }
+
 let renderParseAmendmentPreview (draft: ParseAmendmentDraft) (impact: ParseAmendmentImpactPreview option) =
     div {
         attr.``class`` "notification is-warning is-light py-2"
@@ -1046,7 +1104,7 @@ let renderParsedAtomItemActions (row: ParsedAtomReviewRow) dispatch =
             button {
                 attr.``class`` "button is-link is-light"
                 attr.``type`` "button"
-                on.click (fun _ -> dispatch (CreatePhiFromParsedAtom (row.AtomKind, row.AtomText, row.SourcePhiId)))
+                on.click (fun _ -> dispatch (CreatePhiFromParsedAtom (row.AtomKind, row.AtomText, row.SourcePhiId, row.Provenance)))
                 text "Create Phi from this item"
             }
 
@@ -2530,6 +2588,8 @@ let renderModelFittingWorkspace
     selectedParsedAtomReviewKind
     parseAmendmentDraft
     parseAmendmentStatus
+    lastWorkbenchUndoAction
+    workbenchUndoStatus
     phiContextEntries
     evidenceRecords
     evidenceCaptureKind
@@ -2552,6 +2612,8 @@ let renderModelFittingWorkspace
             attr.``class`` "is-size-7 has-text-grey mb-4"
             text "Review, amendment, candidate governance, basis governance, notes, and retirement are handled from the item cards below."
         }
+
+        renderWorkbenchUndoControl lastWorkbenchUndoAction workbenchUndoStatus dispatch
 
         renderModelFittingSummaryCounts
             atomRows

@@ -475,9 +475,15 @@ let createParsedAtomReviewKey sourcePhiId atomKind atomText =
 
 let getRetiredParsedAtomKeys (ledgerEvents: LedgerEvent list) =
     ledgerEvents
-    |> List.filter (fun ledgerEvent -> ledgerEvent.EventKind = parsedAtomRetiredLedgerKind)
-    |> List.map (fun ledgerEvent -> ledgerEvent.TargetId)
-    |> Set.ofList
+    |> List.fold
+        (fun retiredKeys ledgerEvent ->
+            if ledgerEvent.EventKind = parsedAtomRetiredLedgerKind then
+                retiredKeys |> Set.add ledgerEvent.TargetId
+            elif ledgerEvent.EventKind = parsedAtomRetirementUndoneLedgerKind then
+                retiredKeys |> Set.remove ledgerEvent.TargetId
+            else
+                retiredKeys)
+        Set.empty<string>
 
 let isParsedAtomRetired ledgerEvents sourcePhiId atomKind atomText =
     ledgerEvents
@@ -1892,6 +1898,9 @@ let decideCandidate candidateId (decision: CandidateDecisionValue) (model: Model
     match getCurrentCandidateDeltas model |> List.tryFind (fun candidate -> candidate.CandidateId = candidateId) with
     | Some candidate ->
         let candidateDecision = createCandidateDecision decision candidate
+        let previousDecision =
+            model.candidateDecisions
+            |> List.tryFind (fun decision -> decision.CandidateId = candidateId)
 
         match decision with
         | Pending ->
@@ -1914,7 +1923,10 @@ let decideCandidate candidateId (decision: CandidateDecisionValue) (model: Model
                 + "; Rationale: "
                 + candidateDecision.Rationale
 
-            { model with candidateDecisions = upsertCandidateDecision candidateDecision model.candidateDecisions }
+            { model with
+                candidateDecisions = upsertCandidateDecision candidateDecision model.candidateDecisions
+                lastWorkbenchUndoAction = Some (UndoCandidateDecision (candidateDecision.CandidateId, previousDecision))
+                workbenchUndoStatus = None }
             |> appendLedgerEvent eventKind candidateDecision.CandidateId summary detail
             |> fun updatedModel -> updatedModel, Cmd.none
     | None ->

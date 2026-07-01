@@ -276,12 +276,19 @@ let private markPhiParseStaleIfParsed phiId statusMessage (model: Model) =
     else
         model
 
+let private setWorkbenchUndo action (model: Model) =
+    { model with
+        lastWorkbenchUndoAction = Some action
+        workbenchUndoStatus = None }
+
 let addContextEntryToPhi phiId (model: Model) =
     let value = model.phiContextEntryDraftValue.Trim()
 
     if String.IsNullOrWhiteSpace(phiId) || String.IsNullOrWhiteSpace(value) then
         model
     else
+        let previousStaleParsedPhiIds = model.staleParsedPhiIds
+        let previousPhiBatchParseStatus = model.phiBatchParseStatus
         let entry =
             createNextPhiContextEntry phiId model.phiContextEntryDraftKind value "Manual" model.phiContextEntries
 
@@ -295,6 +302,13 @@ let addContextEntryToPhi phiId (model: Model) =
 
         contextModel
         |> appendPhiContextEntryLedgerEvent entry
+        |> setWorkbenchUndo
+            (UndoPhiContextEntryCreation
+                {
+                    ContextEntry = entry
+                    PreviousStaleParsedPhiIds = previousStaleParsedPhiIds
+                    PreviousPhiBatchParseStatus = previousPhiBatchParseStatus
+                })
 
 let private containsDraftMarker (marker: string) (value: string) =
     not (String.IsNullOrWhiteSpace(value))
@@ -303,6 +317,279 @@ let private containsDraftMarker (marker: string) (value: string) =
 let private isDerivedInquiryDraft (source: string) (quickTags: string) =
     String.Equals(source, t6RealizationInquirySource, StringComparison.OrdinalIgnoreCase)
     || containsDraftMarker derivedInquiryTag quickTags
+
+let private snapshotPhiDraftForm (model: Model) =
+    {
+        ActiveTopNavigationTab = model.activeTopNavigationTab
+        PhiDraftStatus = model.phiDraftStatus
+        PhiDraftInputClass = model.phiDraftInputClass
+        PhiDraftActor = model.phiDraftActor
+        PhiDraftMission = model.phiDraftMission
+        PhiDraftOperationalContext = model.phiDraftOperationalContext
+        PhiDraftRawStatement = model.phiDraftRawStatement
+        PhiDraftTriggerContext = model.phiDraftTriggerContext
+        PhiDraftSource = model.phiDraftSource
+        PhiDraftQuickTags = model.phiDraftQuickTags
+        PhiDraftConfidence = model.phiDraftConfidence
+        PhiContextSnipDraft = model.phiContextSnipDraft
+    }
+
+let private restorePhiDraftFormSnapshot snapshot (model: Model) =
+    { model with
+        activeTopNavigationTab = snapshot.ActiveTopNavigationTab
+        phiDraftStatus = snapshot.PhiDraftStatus
+        phiDraftInputClass = snapshot.PhiDraftInputClass
+        phiDraftActor = snapshot.PhiDraftActor
+        phiDraftMission = snapshot.PhiDraftMission
+        phiDraftOperationalContext = snapshot.PhiDraftOperationalContext
+        phiDraftRawStatement = snapshot.PhiDraftRawStatement
+        phiDraftTriggerContext = snapshot.PhiDraftTriggerContext
+        phiDraftSource = snapshot.PhiDraftSource
+        phiDraftQuickTags = snapshot.PhiDraftQuickTags
+        phiDraftConfidence = snapshot.PhiDraftConfidence
+        phiContextSnipDraft = snapshot.PhiContextSnipDraft }
+
+let private applyPhiDraftPrefill draft (model: Model) =
+    { model with
+        activeTopNavigationTab = GaiaProbeTab
+        phiDraftStatus = Some draft.StatusMessage
+        phiDraftInputClass = defaultPhiDraftInputClass
+        phiDraftActor = ""
+        phiDraftMission = ""
+        phiDraftOperationalContext = ""
+        phiDraftRawStatement = draft.RawStatement
+        phiDraftTriggerContext = draft.TriggerContext
+        phiDraftSource = draft.Source
+        phiDraftQuickTags = draft.QuickTags
+        phiDraftConfidence = draft.Confidence
+        phiContextSnipDraft = draft.ContextSnip }
+
+let private createBasisDecisionUndoSnapshot basisItemKey (model: Model) : BasisDecisionUndoSnapshot =
+    {
+        BasisItemKey = basisItemKey
+        PreviousDecision = model.sigmaBasisItemDecisions |> Map.tryFind basisItemKey
+    }
+
+let private restoreBasisDecisionSnapshot (snapshot: BasisDecisionUndoSnapshot) decisions =
+    match snapshot.PreviousDecision with
+    | Some decision ->
+        decisions |> Map.add snapshot.BasisItemKey decision
+    | None ->
+        decisions |> Map.remove snapshot.BasisItemKey
+
+let private restoreBasisDecisionSnapshots (snapshots: BasisDecisionUndoSnapshot list) decisions =
+    snapshots
+    |> List.fold (fun workingDecisions snapshot -> workingDecisions |> restoreBasisDecisionSnapshot snapshot) decisions
+
+let private appendBasisDecisionUndoLedgerEvents actionScope (snapshots: BasisDecisionUndoSnapshot list) model =
+    snapshots
+    |> List.fold
+        (fun workingModel snapshot ->
+            match snapshot.PreviousDecision with
+            | Some decision when decision <> Pending ->
+                workingModel
+                |> appendLedgerEvent
+                    (getSigmaBasisItemDecisionLedgerKind decision)
+                    snapshot.BasisItemKey
+                    "Sigma basis-item decision restored by undo"
+                    ("Undo action: " + actionScope + "; Restored decision: " + formatSigmaBasisItemDecisionValue decision)
+            | _ ->
+                workingModel
+                |> appendLedgerEvent
+                    sigmaBasisItemDecisionResetLedgerKind
+                    snapshot.BasisItemKey
+                    "Sigma basis-item decision reset by undo"
+                    ("Undo action: " + actionScope + "; Restored decision: Pending"))
+        model
+
+let private appendWorkbenchUndoLedgerEvent targetId summary detail model =
+    model
+    |> appendLedgerEvent workbenchUndoLedgerKind targetId summary detail
+
+let private buildModelFittingDraft
+    cleanedAtomKind
+    cleanedAtomText
+    cleanedSourcePhiId
+    provenance
+    sourceStatement
+    sourceContext =
+    let atomLabel = formatModelFittingAtomKindLabel cleanedAtomKind
+
+    let rawStatement =
+        "Model fitting "
+        + atomLabel.ToLowerInvariant()
+        + ": "
+        + cleanedAtomText
+        + "."
+
+    let triggerContext =
+        "Draft created from a Model Fitting item so it can be reviewed and edited before ingestion."
+
+    let contextLines =
+        [
+            if not (String.IsNullOrWhiteSpace(cleanedSourcePhiId)) then
+                "source-phi-id=" + cleanedSourcePhiId
+            "source-atom-kind=" + cleanedAtomKind
+            "source-atom-text=" + cleanedAtomText
+            if not (String.IsNullOrWhiteSpace(provenance)) then
+                "source-provenance=" + provenance
+            if not (String.IsNullOrWhiteSpace(sourceStatement)) then
+                "source-phi-statement=" + sourceStatement
+            if not (String.IsNullOrWhiteSpace(sourceContext)) then
+                "source-phi-context=" + sourceContext
+            "note=Created from a Model Fitting item; edit this draft before ingestion."
+        ]
+
+    {
+        RawStatement = rawStatement
+        TriggerContext = triggerContext
+        Source = "Model Fitting"
+        QuickTags =
+            "model-fitting; draft-investigation; "
+            + cleanedAtomKind
+            + (if String.IsNullOrWhiteSpace(cleanedSourcePhiId) then "" else "; source-phi=" + cleanedSourcePhiId)
+        Confidence = "Medium"
+        ContextSnip = String.concat Environment.NewLine contextLines
+        StatusMessage = "Draft investigation created from Model Fitting item. Review and edit before ingestion."
+    }
+
+let private formatModelFittingDraftLedgerDetail sourcePhiId atomKind atomText provenance =
+    [
+        "Source: Model Fitting"
+        "Source Phi ID: " + sourcePhiId
+        "Atom kind: " + atomKind
+        "Atom text: " + atomText
+        "Provenance: " + provenance
+        "Result: editable Inventory Management draft only; no intake, parse, or ingestion was created."
+    ]
+    |> String.concat " | "
+
+let private undoLastWorkbenchAction (model: Model) =
+    match model.lastWorkbenchUndoAction with
+    | None ->
+        { model with workbenchUndoStatus = Some "No supported Workbench action is available to undo." }, Cmd.none
+    | Some action ->
+        match action with
+        | UndoParsedAtomRetirement (atomKey, sourcePhiId, atomKind, atomText, previousCandidateDecisions, previousBasisDecisions) ->
+            { model with
+                candidateDecisions = previousCandidateDecisions
+                sigmaBasisItemDecisions = model.sigmaBasisItemDecisions |> restoreBasisDecisionSnapshots previousBasisDecisions
+                parseAmendmentStatus = Some ("Undo restored retired Model Fitting item for " + sourcePhiId + ".")
+                lastWorkbenchUndoAction = None
+                workbenchUndoStatus = Some "Undid parsed atom retirement. Ledger history was retained with an undo event." }
+            |> appendLedgerEvent
+                parsedAtomRetirementUndoneLedgerKind
+                atomKey
+                "Parsed atom retirement undone"
+                ("Source Phi ID: " + sourcePhiId + " | Atom kind: " + atomKind + " | Atom text: " + atomText)
+            |> appendBasisDecisionUndoLedgerEvents "Undo parsed atom retirement" previousBasisDecisions
+            |> appendWorkbenchUndoLedgerEvent atomKey "Workbench undo applied" "Undo restored a retired parsed atom and any reset governance decisions."
+            |> fun updatedModel -> updatedModel, Cmd.none
+
+        | UndoParseAmendment (sourcePhiId, previousParse, previousBasisDecisions) ->
+            let parsedPhis =
+                model.parsedPhis
+                |> List.map (fun parse ->
+                    if parse.PhiId = previousParse.PhiId then
+                        previousParse
+                    else
+                        parse)
+
+            let selectedPhiParse =
+                match model.selectedPhiParse, model.selectedPhiId with
+                | Some selected, _ when selected.PhiId = previousParse.PhiId -> Some previousParse
+                | _, Some selectedPhiId when selectedPhiId = previousParse.PhiId -> Some previousParse
+                | selected, _ -> selected
+
+            let selectedPhiResolution =
+                match selectedPhiParse with
+                | Some selected when selected.PhiId = previousParse.PhiId ->
+                    Some (Engine.resolveParse DemoData.demoSigma previousParse)
+                | _ ->
+                    model.selectedPhiResolution
+
+            { model with
+                parsedPhis = parsedPhis
+                selectedPhiParse = selectedPhiParse
+                selectedPhiResolution = selectedPhiResolution
+                sigmaBasisItemDecisions = model.sigmaBasisItemDecisions |> restoreBasisDecisionSnapshots previousBasisDecisions
+                parseAmendmentDraft = None
+                parseAmendmentStatus = Some ("Undo restored the previous parse for " + sourcePhiId + ".")
+                phiBatchParseStatus = None
+                lastWorkbenchUndoAction = None
+                workbenchUndoStatus = Some "Undid parsed atom amendment. Ledger history was retained with an undo event." }
+            |> appendBasisDecisionUndoLedgerEvents "Undo parse amendment" previousBasisDecisions
+            |> appendWorkbenchUndoLedgerEvent sourcePhiId "Workbench undo applied" "Undo restored the previous parsed Phi state after an amendment."
+            |> fun updatedModel -> updatedModel, Cmd.none
+
+        | UndoEvidenceRecordCreation snapshot ->
+            let evidenceId = snapshot.EvidenceRecord.EvidenceId
+
+            { model with
+                evidenceRecords = model.evidenceRecords |> List.filter (fun record -> record.EvidenceId <> evidenceId)
+                staleParsedPhiIds = snapshot.PreviousStaleParsedPhiIds
+                phiBatchParseStatus = snapshot.PreviousPhiBatchParseStatus
+                evidenceStatus = Some ("Undo removed evidence reference from active state: " + evidenceId)
+                lastWorkbenchUndoAction = None
+                workbenchUndoStatus = Some "Undid note / evidence addition. Ledger history was retained with an undo event." }
+            |> appendWorkbenchUndoLedgerEvent evidenceId "Workbench undo applied" "Undo removed the evidence reference from active state."
+            |> fun updatedModel -> updatedModel, Cmd.none
+
+        | UndoPhiContextEntryCreation snapshot ->
+            let contextId = snapshot.ContextEntry.ContextId
+
+            { model with
+                phiContextEntries = model.phiContextEntries |> List.filter (fun entry -> entry.ContextId <> contextId)
+                staleParsedPhiIds = snapshot.PreviousStaleParsedPhiIds
+                phiBatchParseStatus = snapshot.PreviousPhiBatchParseStatus
+                existingPhiContextTargetId = snapshot.ContextEntry.PhiId
+                lastWorkbenchUndoAction = None
+                workbenchUndoStatus = Some "Undid context-note addition. Ledger history was retained with an undo event." }
+            |> appendWorkbenchUndoLedgerEvent contextId "Workbench undo applied" "Undo removed the Phi context entry from active state."
+            |> fun updatedModel -> updatedModel, Cmd.none
+
+        | UndoCandidateDecision (candidateId, previousDecision) ->
+            let candidateDecisions =
+                match previousDecision with
+                | Some decision ->
+                    model.candidateDecisions |> upsertCandidateDecision decision
+                | None ->
+                    model.candidateDecisions |> List.filter (fun decision -> decision.CandidateId <> candidateId)
+
+            { model with
+                candidateDecisions = candidateDecisions
+                lastWorkbenchUndoAction = None
+                workbenchUndoStatus = Some "Undid candidate governance decision. Ledger history was retained with an undo event." }
+            |> appendWorkbenchUndoLedgerEvent candidateId "Workbench undo applied" "Undo restored the previous candidate governance decision."
+            |> fun updatedModel -> updatedModel, Cmd.none
+
+        | UndoSigmaBasisItemDecision snapshot ->
+            { model with
+                sigmaBasisItemDecisions = model.sigmaBasisItemDecisions |> restoreBasisDecisionSnapshot snapshot
+                lastWorkbenchUndoAction = None
+                workbenchUndoStatus = Some "Undid basis governance decision. Ledger history was retained with an undo event." }
+            |> appendBasisDecisionUndoLedgerEvents "Undo basis governance decision" [ snapshot ]
+            |> appendWorkbenchUndoLedgerEvent snapshot.BasisItemKey "Workbench undo applied" "Undo restored the previous basis-item governance decision."
+            |> fun updatedModel -> updatedModel, Cmd.none
+
+        | UndoSigmaBasisItemBulkDecision snapshots ->
+            { model with
+                sigmaBasisItemDecisions = model.sigmaBasisItemDecisions |> restoreBasisDecisionSnapshots snapshots
+                lastWorkbenchUndoAction = None
+                workbenchUndoStatus = Some "Undid bulk basis governance decision. Ledger history was retained with undo events." }
+            |> appendBasisDecisionUndoLedgerEvents "Undo bulk basis governance decision" snapshots
+            |> appendWorkbenchUndoLedgerEvent "BulkBasisGovernance" "Workbench undo applied" "Undo restored previous basis-item governance decisions for a bulk action."
+            |> fun updatedModel -> updatedModel, Cmd.none
+
+        | UndoModelFittingDraftCreation (previousDraft, targetId) ->
+            model
+            |> restorePhiDraftFormSnapshot previousDraft
+            |> fun restoredModel ->
+                { restoredModel with
+                    lastWorkbenchUndoAction = None
+                    workbenchUndoStatus = Some "Undid draft Phi creation from Model Fitting. Ledger history was retained with an undo event." }
+            |> appendWorkbenchUndoLedgerEvent targetId "Workbench undo applied" "Undo restored the previous Inventory Management draft form."
+            |> fun updatedModel -> updatedModel, Cmd.none
 
 let createInquiryResolvedLedgerEvent (result: FactsReconstructionResult) ledgerEvents =
     let answer =
@@ -357,6 +644,8 @@ let update (jsRuntime: IJSRuntime) message model =
         { model with ReplayPreviewSequence = Some sequenceNumber }, Cmd.none
     | ClearReplayPreview ->
         { model with ReplayPreviewSequence = None }, Cmd.none
+    | UndoLastWorkbenchAction ->
+        undoLastWorkbenchAction model
     | SetFactsReconstructionQuestion value ->
         { model with
             factsReconstructionQuestion = value
@@ -498,6 +787,8 @@ let update (jsRuntime: IJSRuntime) message model =
             | None ->
                 { model with evidenceStatus = Some "Select a valid evidence target." }, Cmd.none
             | Some targetLabel ->
+                let previousStaleParsedPhiIds = model.staleParsedPhiIds
+                let previousPhiBatchParseStatus = model.phiBatchParseStatus
                 let evidenceId = createEvidenceId model.evidenceRecords
 
                 let evidenceRecord =
@@ -545,6 +836,13 @@ let update (jsRuntime: IJSRuntime) message model =
 
                 contextAwareEvidenceModel
                 |> appendLedgerEvent "EvidenceReferenceCreated" evidenceId "Evidence reference created" detail
+                |> setWorkbenchUndo
+                    (UndoEvidenceRecordCreation
+                        {
+                            EvidenceRecord = evidenceRecord
+                            PreviousStaleParsedPhiIds = previousStaleParsedPhiIds
+                            PreviousPhiBatchParseStatus = previousPhiBatchParseStatus
+                        })
                 |> fun updatedModel -> updatedModel, Cmd.none
     | CreateEvidenceForParsedAtom (atomKind, atomText, sourcePhiId) ->
         let cleanedAtomKind = cleanFormValue atomKind
@@ -605,79 +903,58 @@ let update (jsRuntime: IJSRuntime) message model =
                 evidenceContentRef = ""
                 evidenceStatus = Some ("Evidence reference captured: " + evidenceId) }
             |> appendLedgerEvent "EvidenceReferenceCreated" evidenceId "Evidence reference created" detail
+            |> setWorkbenchUndo
+                (UndoEvidenceRecordCreation
+                    {
+                        EvidenceRecord = evidenceRecord
+                        PreviousStaleParsedPhiIds = model.staleParsedPhiIds
+                        PreviousPhiBatchParseStatus = model.phiBatchParseStatus
+                    })
             |> fun updatedModel -> updatedModel, Cmd.none
-    | CreatePhiFromParsedAtom (atomKind, atomText, sourcePhiId) ->
+    | CreatePhiFromParsedAtom (atomKind, atomText, sourcePhiId, provenance) ->
         let cleanedAtomKind = cleanFormValue atomKind
         let cleanedAtomText = cleanFormValue atomText
         let cleanedSourcePhiId = cleanFormValue sourcePhiId
+        let cleanedProvenance = cleanFormValue provenance
 
         if not (isValidParsedExposureAtomKind cleanedAtomKind) || String.IsNullOrWhiteSpace(cleanedAtomText) then
             { model with phiDraftStatus = Some "Select a valid Model Fitting item before creating Phi." }, Cmd.none
         else
-            let timestamp = DateTime.UtcNow
-            let phiId =
-                "PHI-"
-                + timestamp.ToString("yyyyMMdd-HHmmss")
-                + "-MF"
-                + sprintf "%03d" (List.length model.ingestedPhis + 1)
-
-            let atomLabel = formatModelFittingAtomKindLabel cleanedAtomKind
-
             let sourceStatement =
                 model.parsedPhis
                 |> List.tryFind (fun parse -> parse.PhiId = cleanedSourcePhiId)
                 |> Option.map (fun parse -> parse.Statement)
                 |> Option.defaultValue ""
 
-            let generatedStatement =
-                "Model fitting "
-                + atomLabel.ToLowerInvariant()
-                + ": "
-                + cleanedAtomText
-                + "."
+            let sourceContext =
+                model.ingestedPhis
+                |> List.tryFind (fun phi -> phi.PhiId = cleanedSourcePhiId)
+                |> Option.map (fun phi ->
+                    if String.IsNullOrWhiteSpace(phi.Context) then
+                        phi.Trigger
+                    else
+                        phi.Context)
+                |> Option.defaultValue ""
 
-            let context =
-                [
-                    "Created from Model Fitting item."
-                    if not (String.IsNullOrWhiteSpace(cleanedSourcePhiId)) then
-                        "Source Phi: " + cleanedSourcePhiId + "."
-                    if not (String.IsNullOrWhiteSpace(sourceStatement)) then
-                        "Source statement: " + sourceStatement
-                ]
-                |> String.concat " "
+            let previousDraft = snapshotPhiDraftForm model
+            let atomKey = createParsedAtomReviewKey cleanedSourcePhiId cleanedAtomKind cleanedAtomText
+            let draft =
+                buildModelFittingDraft
+                    cleanedAtomKind
+                    cleanedAtomText
+                    cleanedSourcePhiId
+                    cleanedProvenance
+                    sourceStatement
+                    sourceContext
 
-            let intake =
-                {
-                    PhiId = phiId
-                    Date = timestamp.ToString("yyyy-MM-dd")
-                    InputClass = Some "Model Fitting"
-                    Actor = Some "Demo user"
-                    Mission = None
-                    OperationalContext = None
-                    Source = "Model Fitting"
-                    Context = context
-                    Confidence = "Medium"
-                    Status = "Ingested"
-                    RawStatement = generatedStatement
-                    Trigger = context
-                    Claim = cleanedAtomText
-                    About = atomLabel
-                    Condition = ""
-                    Assumption = ""
-                    TypeText =
-                        "model-fitting-derived; "
-                        + cleanedAtomKind
-                        + "; source-phi="
-                        + cleanedSourcePhiId
-                    Impact = ""
-                    UnresolvedSignal = ""
-                }
-
-            { model with
-                ingestedPhis = intake :: model.ingestedPhis
-                phiDraftStatus = Some ("Phi created from Model Fitting item: " + intake.PhiId)
-                phiBatchParseStatus = None }
-            |> appendLedgerEvent "PhiIngested" intake.PhiId "Phi ingested" intake.RawStatement
+            model
+            |> applyPhiDraftPrefill draft
+            |> appendLedgerEvent
+                phiDraftCreatedLedgerKind
+                atomKey
+                "Phi draft created"
+                (formatModelFittingDraftLedgerDetail cleanedSourcePhiId cleanedAtomKind cleanedAtomText cleanedProvenance)
+            |> setWorkbenchUndo (UndoModelFittingDraftCreation (previousDraft, atomKey))
             |> fun updatedModel -> updatedModel, Cmd.none
     | SetRealizationObjectKindDraft value ->
         { model with realizationObjectKindDraft = value }, Cmd.none
@@ -756,20 +1033,7 @@ let update (jsRuntime: IJSRuntime) message model =
     | SetRealizationInquiryQuestion value ->
         { model with realizationInquiryQuestion = value }, Cmd.none
     | PrefillPhiDraft draft ->
-        { model with
-            activeTopNavigationTab = GaiaProbeTab
-            phiDraftStatus = Some draft.StatusMessage
-            phiDraftInputClass = defaultPhiDraftInputClass
-            phiDraftActor = ""
-            phiDraftMission = ""
-            phiDraftOperationalContext = ""
-            phiDraftRawStatement = draft.RawStatement
-            phiDraftTriggerContext = draft.TriggerContext
-            phiDraftSource = draft.Source
-            phiDraftQuickTags = draft.QuickTags
-            phiDraftConfidence = draft.Confidence
-            phiContextSnipDraft = draft.ContextSnip },
-        Cmd.none
+        model |> applyPhiDraftPrefill draft |> fun updatedModel -> updatedModel, Cmd.none
     | SetPhiDraftInputClass value ->
         { model with phiDraftInputClass = value }, Cmd.none
 
@@ -1028,15 +1292,23 @@ let update (jsRuntime: IJSRuntime) message model =
                     |> applyParsedAtomRetirementsToSequencedPhis model.LedgerEvents
                     |> buildParseAmendmentImpactPreview validatedDraft model.candidateDecisions model.sigmaBasisItemDecisions
 
-                let amendedParse =
+                let sourceParse =
                     model.parsedPhis
                     |> List.tryFind (fun parse -> parse.PhiId = validatedDraft.SourcePhiId)
+
+                let amendedParse =
+                    sourceParse
                     |> Option.map (applyParseAmendment validatedDraft)
 
-                match amendedParse with
-                | None ->
+                match sourceParse, amendedParse with
+                | _, None
+                | None, Some _ ->
                     { model with parseAmendmentStatus = Some "The source Phi parse is no longer available." }, Cmd.none
-                | Some updatedParse ->
+                | Some originalParse, Some updatedParse ->
+                    let previousBasisDecisions =
+                        impactPreview.ResetImpacts
+                        |> List.map (fun resetImpact -> createBasisDecisionUndoSnapshot resetImpact.BasisItemKey model)
+
                     let parsedPhis =
                         model.parsedPhis
                         |> List.map (fun parse ->
@@ -1083,7 +1355,10 @@ let update (jsRuntime: IJSRuntime) message model =
                                  + formatAffectedParseAmendmentGroups validatedDraft.OriginalAtomKind validatedDraft.ProposedAtomKind
                                  + ". "
                                  + resetSummary)
-                        phiBatchParseStatus = None }
+                        phiBatchParseStatus = None
+                        lastWorkbenchUndoAction =
+                            Some (UndoParseAmendment (validatedDraft.SourcePhiId, originalParse, previousBasisDecisions))
+                        workbenchUndoStatus = None }
                     |> appendLedgerEvent
                         "ParseAmendmentConfirmed"
                         validatedDraft.SourcePhiId
@@ -1152,6 +1427,12 @@ let update (jsRuntime: IJSRuntime) message model =
                             candidateDeltas
                             activeSequencedParsedPhis
 
+                    let previousBasisDecisions =
+                        resetImpacts
+                        |> List.map (fun resetImpact -> createBasisDecisionUndoSnapshot resetImpact.BasisItemKey model)
+
+                    let previousCandidateDecisions = model.candidateDecisions
+
                     let sigmaBasisItemDecisions =
                         resetImpacts
                         |> List.fold
@@ -1199,7 +1480,17 @@ let update (jsRuntime: IJSRuntime) message model =
                                  + ". "
                                  + resetSummary
                                  + " "
-                                 + candidateResetSummary) }
+                                 + candidateResetSummary)
+                        lastWorkbenchUndoAction =
+                            Some
+                                (UndoParsedAtomRetirement
+                                    (atomKey,
+                                     cleanedSourcePhiId,
+                                     cleanedAtomKind,
+                                     cleanedAtomText,
+                                     previousCandidateDecisions,
+                                     previousBasisDecisions))
+                        workbenchUndoStatus = None }
                     |> appendLedgerEvent
                         parsedAtomRetiredLedgerKind
                         atomKey
@@ -1249,8 +1540,13 @@ let update (jsRuntime: IJSRuntime) message model =
         decideCandidate candidateId Held model
 
     | SetSigmaBasisItemDecision (basisItemKey, decision) ->
+        let previousDecision = createBasisDecisionUndoSnapshot basisItemKey model
+
         let updatedModel =
-            { model with sigmaBasisItemDecisions = model.sigmaBasisItemDecisions |> Map.add basisItemKey decision }
+            { model with
+                sigmaBasisItemDecisions = model.sigmaBasisItemDecisions |> Map.add basisItemKey decision
+                lastWorkbenchUndoAction = Some (UndoSigmaBasisItemDecision previousDecision)
+                workbenchUndoStatus = None }
 
         match tryFindCurrentSigmaBasisItemLedgerContext basisItemKey model with
         | Some context ->
@@ -1261,12 +1557,19 @@ let update (jsRuntime: IJSRuntime) message model =
             updatedModel, Cmd.none
 
     | SetSigmaBasisItemDecisions (basisItemKeys, decision) ->
+        let previousDecisions =
+            basisItemKeys
+            |> List.map (fun basisItemKey -> createBasisDecisionUndoSnapshot basisItemKey model)
+
         let sigmaBasisItemDecisions =
             basisItemKeys
             |> List.fold (fun decisions basisItemKey -> decisions |> Map.add basisItemKey decision) model.sigmaBasisItemDecisions
 
         let updatedModel =
-            { model with sigmaBasisItemDecisions = sigmaBasisItemDecisions }
+            { model with
+                sigmaBasisItemDecisions = sigmaBasisItemDecisions
+                lastWorkbenchUndoAction = Some (UndoSigmaBasisItemBulkDecision previousDecisions)
+                workbenchUndoStatus = None }
 
         let ledgerModel =
             basisItemKeys
@@ -1328,7 +1631,9 @@ let update (jsRuntime: IJSRuntime) message model =
             phiDraftStatus = None
             phiContextSnipDraft = ""
             phiContextEntries = model.phiContextEntries @ contextEntries
-            phiBatchParseStatus = None }
+            phiBatchParseStatus = None
+            lastWorkbenchUndoAction = None
+            workbenchUndoStatus = None }
         |> appendLedgerEvent "PhiIngested" intake.PhiId "Phi ingested" intake.RawStatement
         |> appendPhiContextEntryLedgerEvents contextEntries
         |> fun updatedModel -> updatedModel, Cmd.none

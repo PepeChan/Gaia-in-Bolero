@@ -44,6 +44,7 @@ let isGovernanceLedgerEvent eventKind =
     || eventKind = "SigmaBasisItemHeld"
     || eventKind = sigmaBasisItemDecisionResetLedgerKind
     || eventKind = parsedAtomRetiredLedgerKind
+    || eventKind = parsedAtomRetirementUndoneLedgerKind
 
 let isInquiryLedgerEvent eventKind =
     eventKind = inquiryResolvedLedgerEventKind
