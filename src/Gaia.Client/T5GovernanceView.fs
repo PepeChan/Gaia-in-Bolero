@@ -10,6 +10,7 @@ open Gaia.Client.Workflow
 open Gaia.Client.T2ParsingView
 open Gaia.Client.T3SummaryView
 open Gaia.Client.T4CandidateView
+open Gaia.Client.ImpactProjection
 
 let formatModelFittingCandidateDeltaKind = function
     | AddUnknownRevealMissingHost -> "REVEAL MISSING SYSTEM ELEMENT"
@@ -179,6 +180,7 @@ type ParsedAtomReviewRow =
         SourcePhiId: string
         SourcePhiStatement: string
         Provenance: string
+        IsExcluded: bool
         CandidateId: string option
         CandidateGovernanceStatus: string
         CandidateLinks: ParsedAtomCandidateLink list
@@ -401,28 +403,34 @@ let formatParsedAtomCandidateGovernanceStatus (candidateLinks: ParsedAtomCandida
         |> String.concat " | "
 
 let buildParsedAtomReviewRows
-    sequencedParsedPhis
+    visibleSequencedParsedPhis
+    activeSequencedParsedPhis
     sigmaContext
     (candidateDecisions: CandidateDecision list)
-    sigmaBasisItemDecisions =
+    sigmaBasisItemDecisions
+    ledgerEvents =
     let candidateDeltas = formulateCandidateDeltas sigmaContext
 
-    sequencedParsedPhis
+    visibleSequencedParsedPhis
     |> List.collect (fun (_, parse: PhiParse) ->
         parsedExposureAtomKinds
         |> List.collect (fun atomKind ->
             getExposureAtomValue atomKind parse
             |> splitExposureAtomValues
             |> List.map (fun atomText ->
+                let isExcluded = isParsedAtomRetired ledgerEvents parse.PhiId atomKind atomText
                 let candidateLinks =
-                    buildParsedAtomCandidateLinks
-                        candidateDeltas
-                        candidateDecisions
-                        sigmaBasisItemDecisions
-                        sequencedParsedPhis
-                        atomKind
-                        atomText
-                        parse.PhiId
+                    if isExcluded then
+                        []
+                    else
+                        buildParsedAtomCandidateLinks
+                            candidateDeltas
+                            candidateDecisions
+                            sigmaBasisItemDecisions
+                            activeSequencedParsedPhis
+                            atomKind
+                            atomText
+                            parse.PhiId
 
                 {
                     AtomKind = atomKind
@@ -430,11 +438,16 @@ let buildParsedAtomReviewRows
                     SourcePhiId = parse.PhiId
                     SourcePhiStatement = parse.Statement
                     Provenance = getExposureProvenance atomKind parse
+                    IsExcluded = isExcluded
                     CandidateId =
                         candidateLinks
                         |> List.tryHead
                         |> Option.map (fun link -> link.Candidate.CandidateId)
-                    CandidateGovernanceStatus = formatParsedAtomCandidateGovernanceStatus candidateLinks
+                    CandidateGovernanceStatus =
+                        if isExcluded then
+                            "Excluded"
+                        else
+                            formatParsedAtomCandidateGovernanceStatus candidateLinks
                     CandidateLinks = candidateLinks
                 })))
 
@@ -903,63 +916,75 @@ let renderParseAmendmentInlineEditor amendment candidateDecisions sigmaBasisItem
         }
     }
 
-let renderAtomCandidateStatusTags (candidateLinks: ParsedAtomCandidateLink list) =
-    match candidateLinks with
-    | [] ->
+let renderAtomCandidateStatusTags (row: ParsedAtomReviewRow) =
+    if row.IsExcluded then
         span {
-            attr.``class`` "tag is-light"
-            text "No candidate group yet."
+            attr.``class`` "tag is-danger is-light"
+            text "Excluded"
         }
-    | links ->
-        div {
-            attr.``class`` "tags mb-0"
-            forEach (links |> List.distinctBy (fun link -> link.Candidate.CandidateId)) <| fun link ->
-                concat {
-                    span {
-                        attr.``class`` "tag is-info is-light model-fitting-status-tag"
-                        text (formatModelFittingCandidateDeltaKind link.Candidate.Kind)
+    else
+        match row.CandidateLinks with
+        | [] ->
+            span {
+                attr.``class`` "tag is-light"
+                text "No candidate group yet."
+            }
+        | links ->
+            div {
+                attr.``class`` "tags mb-0"
+                forEach (links |> List.distinctBy (fun link -> link.Candidate.CandidateId)) <| fun link ->
+                    concat {
+                        span {
+                            attr.``class`` "tag is-info is-light model-fitting-status-tag"
+                            text (formatModelFittingCandidateDeltaKind link.Candidate.Kind)
+                        }
+                        renderCandidateGroupStatusTag link.GroupGovernance.Status
+                        renderCandidateDecisionTag link.ClassDecision
                     }
-                    renderCandidateGroupStatusTag link.GroupGovernance.Status
-                    renderCandidateDecisionTag link.ClassDecision
-                }
-        }
+            }
 
 let countBasisDecisions decision (candidateLinks: ParsedAtomCandidateLink list) =
     candidateLinks
     |> List.filter (fun link -> link.BasisDecision = decision)
     |> List.length
 
-let renderAtomBasisStatusTags (candidateLinks: ParsedAtomCandidateLink list) =
-    match candidateLinks with
-    | [] ->
+let renderAtomBasisStatusTags (row: ParsedAtomReviewRow) =
+    if row.IsExcluded then
         span {
-            attr.``class`` "tag is-light"
-            text "No supporting basis yet."
+            attr.``class`` "tag is-danger is-light"
+            text "Inactive basis"
         }
-    | links ->
-        div {
-            attr.``class`` "tags mb-0"
+    else
+        match row.CandidateLinks with
+        | [] ->
             span {
                 attr.``class`` "tag is-light"
-                text ("Basis items: " + string (List.length links))
+                text "No supporting basis yet."
             }
-            span {
-                attr.``class`` "tag is-light"
-                text ("Pending: " + string (countBasisDecisions Pending links))
+        | links ->
+            div {
+                attr.``class`` "tags mb-0"
+                span {
+                    attr.``class`` "tag is-light"
+                    text ("Basis items: " + string (List.length links))
+                }
+                span {
+                    attr.``class`` "tag is-light"
+                    text ("Pending: " + string (countBasisDecisions Pending links))
+                }
+                span {
+                    attr.``class`` "tag is-success is-light"
+                    text ("Accepted: " + string (countBasisDecisions Accepted links))
+                }
+                span {
+                    attr.``class`` "tag is-danger is-light"
+                    text ("Rejected: " + string (countBasisDecisions Rejected links))
+                }
+                span {
+                    attr.``class`` "tag is-warning is-light"
+                    text ("Held: " + string (countBasisDecisions Held links))
+                }
             }
-            span {
-                attr.``class`` "tag is-success is-light"
-                text ("Accepted: " + string (countBasisDecisions Accepted links))
-            }
-            span {
-                attr.``class`` "tag is-danger is-light"
-                text ("Rejected: " + string (countBasisDecisions Rejected links))
-            }
-            span {
-                attr.``class`` "tag is-warning is-light"
-                text ("Held: " + string (countBasisDecisions Held links))
-            }
-        }
 
 let renderParsedAtomNotes (notes: ParsedAtomNoteSummary list) =
     div {
@@ -1122,35 +1147,40 @@ let renderParsedAtomItemActions (row: ParsedAtomReviewRow) dispatch =
             text "Item actions"
         }
 
-        div {
-            attr.``class`` "buttons are-small mb-2"
-
-            button {
-                attr.``class`` "button is-link is-light"
-                attr.``type`` "button"
-                on.click (fun _ -> dispatch (CreatePhiFromParsedAtom (row.AtomKind, row.AtomText, row.SourcePhiId, row.Provenance)))
-                text "Create Phi from this item"
+        if row.IsExcluded then
+            div {
+                attr.``class`` "notification is-danger is-light is-size-7 py-2 mb-0"
+                text "This item is Excluded. It remains visible for audit and notes, but is inactive for active scenario projection, realization link selection, decomposition, and Phi draft replay."
             }
+        else
+            concat {
+                div {
+                    attr.``class`` "buttons are-small mb-2"
 
-            button {
-                attr.``class`` "button is-danger is-light"
-                attr.``type`` "button"
-                on.click (fun _ -> dispatch (RetireParsedAtom (row.SourcePhiId, row.AtomKind, row.AtomText, row.Provenance)))
-                text "Exclude interpretation"
+                    button {
+                        attr.``class`` "button is-link is-light"
+                        attr.``type`` "button"
+                        on.click (fun _ -> dispatch (CreatePhiFromParsedAtom (row.AtomKind, row.AtomText, row.SourcePhiId, row.Provenance)))
+                        text "Create Phi from this item"
+                    }
+
+                    button {
+                        attr.``class`` "button is-danger is-light"
+                        attr.``type`` "button"
+                        on.click (fun _ -> dispatch (RetireParsedAtom (row.SourcePhiId, row.AtomKind, row.AtomText, row.Provenance)))
+                        text "Exclude interpretation"
+                    }
+                }
+
+                p {
+                    attr.``class`` "is-size-7 has-text-grey mb-0"
+                    text "Excluding marks this interpretation inactive for active Model Fitting and downstream candidate generation; the source Phi remains unchanged."
+                }
             }
-        }
-
-        p {
-            attr.``class`` "is-size-7 has-text-grey mb-0"
-            text "Excluding removes this interpretation from active Model Fitting and downstream candidate generation; the source Phi remains unchanged."
-        }
     }
 
 let renderParsedAtomAmendmentControl row amendmentDraft candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis dispatch =
-    match amendmentDraft with
-    | Some amendment when isParseAmendmentDraftForRow row amendment ->
-        renderParseAmendmentInlineEditor amendment candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis dispatch
-    | _ ->
+    if row.IsExcluded then
         div {
             attr.``class`` "sigma-basis-detail-block"
             p {
@@ -1158,19 +1188,35 @@ let renderParsedAtomAmendmentControl row amendmentDraft candidateDecisions sigma
                 text "Amend item kind/value"
             }
             p {
-                attr.``class`` "is-size-7 has-text-grey mb-3"
-                text "Open an amendment draft for this item, then preview and confirm the impact from this panel."
-            }
-            button {
-                attr.``class`` "button is-small is-warning is-light"
-                attr.``type`` "button"
-                on.click (fun _ ->
-                    dispatch
-                        (StartParseAmendment
-                            (row.SourcePhiId, row.AtomKind, row.AtomText, row.Provenance)))
-                text "Amend item"
+                attr.``class`` "is-size-7 has-text-grey mb-0"
+                text "Excluded items are inactive and cannot be amended until the exclusion is undone."
             }
         }
+    else
+        match amendmentDraft with
+        | Some amendment when isParseAmendmentDraftForRow row amendment ->
+            renderParseAmendmentInlineEditor amendment candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis dispatch
+        | _ ->
+            div {
+                attr.``class`` "sigma-basis-detail-block"
+                p {
+                    attr.``class`` "has-text-weight-semibold mb-2"
+                    text "Amend item kind/value"
+                }
+                p {
+                    attr.``class`` "is-size-7 has-text-grey mb-3"
+                    text "Open an amendment draft for this item, then preview and confirm the impact from this panel."
+                }
+                button {
+                    attr.``class`` "button is-small is-warning is-light"
+                    attr.``type`` "button"
+                    on.click (fun _ ->
+                        dispatch
+                            (StartParseAmendment
+                                (row.SourcePhiId, row.AtomKind, row.AtomText, row.Provenance)))
+                    text "Amend item"
+                }
+            }
 
 let renderParsedAtomPhiChips phiIds =
     let visiblePhiIds = phiIds |> List.truncate 5
@@ -1617,6 +1663,23 @@ let renderParsedAtomReviewRow
                     attr.``class`` "column is-4"
                     p {
                         attr.``class`` "heading mb-1"
+                        text "Status"
+                    }
+                    div {
+                        attr.``class`` "tags mb-1"
+                        if row.IsExcluded then
+                            span {
+                                attr.``class`` "tag is-danger is-light"
+                                text "Excluded"
+                            }
+                        else
+                            span {
+                                attr.``class`` "tag is-success is-light"
+                                text "Active"
+                            }
+                    }
+                    p {
+                        attr.``class`` "heading mb-1"
                         text "Provenance"
                     }
                     span {
@@ -1647,7 +1710,7 @@ let renderParsedAtomReviewRow
                         attr.``class`` "heading mb-1"
                         text "Candidate status"
                     }
-                    renderAtomCandidateStatusTags row.CandidateLinks
+                    renderAtomCandidateStatusTags row
                 }
 
                 div {
@@ -1656,9 +1719,15 @@ let renderParsedAtomReviewRow
                         attr.``class`` "heading mb-1"
                         text "Supporting basis status"
                     }
-                    renderAtomBasisStatusTags row.CandidateLinks
+                    renderAtomBasisStatusTags row
                 }
             }
+
+            if row.IsExcluded then
+                div {
+                    attr.``class`` "notification is-danger is-light is-size-7 py-2"
+                    text "Excluded items stay visible for audit/review. They are not emitted into active scenario projections and cannot be selected for realization links or replayed as new Phi input."
+                }
 
             renderParsedAtomNotes noteSummaries
 
@@ -1710,7 +1779,8 @@ let renderParsedAtomReviewRow
     }
 
 let renderParsedAtomReviewTable
-    sequencedParsedPhis
+    visibleSequencedParsedPhis
+    activeSequencedParsedPhis
     sigmaContext
     candidateDecisions
     sigmaBasisItemDecisions
@@ -1726,7 +1796,14 @@ let renderParsedAtomReviewTable
     evidenceNotes
     evidenceContentRef
     dispatch =
-    let atomRows = buildParsedAtomReviewRows sequencedParsedPhis sigmaContext candidateDecisions sigmaBasisItemDecisions
+    let atomRows =
+        buildParsedAtomReviewRows
+            visibleSequencedParsedPhis
+            activeSequencedParsedPhis
+            sigmaContext
+            candidateDecisions
+            sigmaBasisItemDecisions
+            ledgerEvents
     let candidateDeltas = formulateCandidateDeltas sigmaContext
 
     div {
@@ -1744,12 +1821,21 @@ let renderParsedAtomReviewTable
                     atomRows
                     |> List.filter (fun row -> row.AtomKind = atomKind)
                     |> List.length
+                let excludedCount =
+                    atomRows
+                    |> List.filter (fun row -> row.AtomKind = atomKind && row.IsExcluded)
+                    |> List.length
+                let labelText =
+                    if excludedCount > 0 then
+                        label + ": " + string count + " (" + string excludedCount + " excluded)"
+                    else
+                        label + ": " + string count
 
                 button {
                     attr.``class`` (parsedAtomReviewButtonClass selectedParsedAtomReviewKind atomKind)
                     attr.``type`` "button"
                     on.click (fun _ -> dispatch (SelectParsedAtomReviewKind atomKind))
-                    text (label + ": " + string count)
+                    text labelText
                 }
         }
 
@@ -1763,6 +1849,10 @@ let renderParsedAtomReviewTable
             let selectedRows =
                 atomRows
                 |> List.filter (fun row -> row.AtomKind = atomKind)
+            let selectedExcludedCount =
+                selectedRows
+                |> List.filter (fun row -> row.IsExcluded)
+                |> List.length
 
             div {
                 attr.``class`` "cognition-review-section"
@@ -1792,6 +1882,11 @@ let renderParsedAtomReviewTable
                                 attr.``class`` "tag is-light"
                                 text ("Items: " + string (List.length selectedRows))
                             }
+                            if selectedExcludedCount > 0 then
+                                span {
+                                    attr.``class`` "tag is-danger is-light"
+                                    text ("Excluded: " + string selectedExcludedCount)
+                                }
                             button {
                                 attr.``class`` "button is-small is-light"
                                 attr.``type`` "button"
@@ -1815,7 +1910,7 @@ let renderParsedAtomReviewTable
                     candidateDeltas
                     candidateDecisions
                     sigmaBasisItemDecisions
-                    sequencedParsedPhis
+                    activeSequencedParsedPhis
                     dispatch
 
                 match selectedRows with
@@ -1834,7 +1929,7 @@ let renderParsedAtomReviewTable
                                 parseAmendmentStatus
                                 candidateDecisions
                                 sigmaBasisItemDecisions
-                                sequencedParsedPhis
+                                activeSequencedParsedPhis
                                 reviewNeededMarks
                                 ledgerEvents
                                 phiContextEntries
@@ -2694,9 +2789,14 @@ let renderModelFittingSummaryCounts
     let partiallyGovernedCount =
         countCandidateGroupStatuses GroupPartiallyGoverned candidateDeltas candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis
     let basisItemCount = getAllCandidateBasisItems candidateDeltas sequencedParsedPhis |> List.length
+    let excludedItemCount =
+        atomRows
+        |> List.filter (fun row -> row.IsExcluded)
+        |> List.length
     div {
         attr.``class`` "tags are-medium mb-4"
         renderCandidateDecisionCount "Items" (List.length atomRows)
+        renderCandidateDecisionCount "Excluded items" excludedItemCount
         renderCandidateDecisionCount "Candidate groups" candidateCount
         renderCandidateDecisionCount "Group pending" pendingCount
         renderCandidateDecisionCount "Group accepted" acceptedCount
@@ -2735,12 +2835,14 @@ let renderCollapsedIntermediateSummaries
     }
 
 let renderModelFittingWorkspace
-    sequencedParsedPhis
+    visibleSequencedParsedPhis
+    activeSequencedParsedPhis
     sigmaContext
     lastReplayAction
     (candidateDecisions: CandidateDecision list)
     sigmaBasisItemDecisions
     reviewNeededMarks
+    impactProjection
     ledgerEvents
     selectedParsedAtomReviewKind
     parseAmendmentDraft
@@ -2754,7 +2856,14 @@ let renderModelFittingWorkspace
     evidenceNotes
     evidenceContentRef
     dispatch =
-    let atomRows = buildParsedAtomReviewRows sequencedParsedPhis sigmaContext candidateDecisions sigmaBasisItemDecisions
+    let atomRows =
+        buildParsedAtomReviewRows
+            visibleSequencedParsedPhis
+            activeSequencedParsedPhis
+            sigmaContext
+            candidateDecisions
+            sigmaBasisItemDecisions
+            ledgerEvents
     let candidateDeltas = formulateCandidateDeltas sigmaContext
 
     div {
@@ -2777,12 +2886,18 @@ let renderModelFittingWorkspace
             candidateDeltas
             candidateDecisions
             sigmaBasisItemDecisions
-            sequencedParsedPhis
+            activeSequencedParsedPhis
 
         renderRecentReviewNeededEvents ledgerEvents
 
+        renderImpactProjectionSection
+            "No governance or basis impact rows are currently projected."
+            impactProjection
+            impactProjection.GovernanceRows
+
         renderParsedAtomReviewTable
-            sequencedParsedPhis
+            visibleSequencedParsedPhis
+            activeSequencedParsedPhis
             sigmaContext
             candidateDecisions
             sigmaBasisItemDecisions
@@ -2800,13 +2915,14 @@ let renderModelFittingWorkspace
             dispatch
 
         renderCollapsedIntermediateSummaries
-            sequencedParsedPhis
+            activeSequencedParsedPhis
             sigmaContext
             lastReplayAction
     }
 
 let renderOperationalSummaryTablesPanel
-    sequencedParsedPhis
+    visibleSequencedParsedPhis
+    activeSequencedParsedPhis
     sigmaContext
     lastReplayAction
     (candidateDecisions: CandidateDecision list)
@@ -2834,7 +2950,8 @@ let renderOperationalSummaryTablesPanel
         renderCurrentSigmaSummaryTable sigmaContext
 
         renderParsedAtomReviewTable
-            sequencedParsedPhis
+            visibleSequencedParsedPhis
+            activeSequencedParsedPhis
             sigmaContext
             candidateDecisions
             sigmaBasisItemDecisions
@@ -2851,7 +2968,7 @@ let renderOperationalSummaryTablesPanel
             evidenceContentRef
             dispatch
 
-        renderMissingContextSummaryTable sequencedParsedPhis
+        renderMissingContextSummaryTable activeSequencedParsedPhis
 
         renderArchitecturalPressureSummaryTable sigmaContext
 
@@ -2859,7 +2976,7 @@ let renderOperationalSummaryTablesPanel
 
         renderT4CandidateSummaryTable sigmaContext
 
-        renderT5GovernanceSummaryTable sigmaContext candidateDecisions sigmaBasisItemDecisions sequencedParsedPhis reviewNeededMarks ledgerEvents dispatch
+        renderT5GovernanceSummaryTable sigmaContext candidateDecisions sigmaBasisItemDecisions activeSequencedParsedPhis reviewNeededMarks ledgerEvents dispatch
 
         renderLatestDeltaSummaryTable lastReplayAction
     }

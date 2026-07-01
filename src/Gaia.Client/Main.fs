@@ -15,6 +15,7 @@ open Gaia.Client.Persistence
 open Gaia.Client.Ledger
 open Gaia.Client.AppState
 open Gaia.Client.Workflow
+open Gaia.Client.ImpactProjection
 open Gaia.Client.Inquiry
 open Gaia.Client.AppUpdate
 open Gaia.Client.T2ParsingView
@@ -280,11 +281,12 @@ let renderTopNavigation activeTab dispatch =
 
 let homePage model dispatch =
     let includedSequencedParsedPhis = getIncludedSequencedParsedPhis model.excludedPhiIds model.parsedPhis
-    let modelFittingSequencedParsedPhis =
+    let visibleModelFittingSequencedParsedPhis = includedSequencedParsedPhis
+    let activeModelFittingSequencedParsedPhis =
         includedSequencedParsedPhis
         |> applyParsedAtomRetirementsToSequencedPhis model.LedgerEvents
 
-    let currentSigmaContext = buildSigmaContextWithContextEntries model.phiContextEntries modelFittingSequencedParsedPhis
+    let currentSigmaContext = buildSigmaContextWithContextEntries model.phiContextEntries activeModelFittingSequencedParsedPhis
 
     div {
             attr.``class`` "content"
@@ -873,15 +875,17 @@ let homePage model dispatch =
                     div {
                         attr.``class`` "column is-8"
 
-                        renderCurrentSigmaSnapshotPanel modelFittingSequencedParsedPhis model.staleParsedPhiIds currentSigmaContext
+                        renderCurrentSigmaSnapshotPanel activeModelFittingSequencedParsedPhis model.staleParsedPhiIds currentSigmaContext
 
                         renderModelFittingWorkspace
-                            modelFittingSequencedParsedPhis
+                            visibleModelFittingSequencedParsedPhis
+                            activeModelFittingSequencedParsedPhis
                             currentSigmaContext
                             model.lastReplayAction
                             model.candidateDecisions
                             model.sigmaBasisItemDecisions
                             model.reviewNeededMarks
+                            (buildImpactProjection model)
                             model.LedgerEvents
                             model.selectedParsedAtomReviewKind
                             model.parseAmendmentDraft

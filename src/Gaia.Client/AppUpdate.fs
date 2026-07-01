@@ -1180,6 +1180,8 @@ let update (jsRuntime: IJSRuntime) message model =
 
         if not (isValidParsedExposureAtomKind cleanedAtomKind) || String.IsNullOrWhiteSpace(cleanedAtomText) then
             { model with phiDraftStatus = Some "Select a valid Model Fitting item before creating Phi." }, Cmd.none
+        elif isParsedAtomRetired model.LedgerEvents cleanedSourcePhiId cleanedAtomKind cleanedAtomText then
+            { model with phiDraftStatus = Some "Excluded Model Fitting items are inactive and cannot be replayed as new Phi input." }, Cmd.none
         else
             let sourceStatement =
                 model.parsedPhis
@@ -1443,6 +1445,10 @@ let update (jsRuntime: IJSRuntime) message model =
         let reviewMarkedModel =
             if wasExcluded then
                 model
+                |> markReviewNeededForPhiImpact
+                    phiId
+                    "Phi included in replay"
+                    "A parsed Phi was included again in replay; dependent decisions and realization should be reviewed."
             else
                 model
                 |> markReviewNeededForPhiImpact
@@ -1458,39 +1464,42 @@ let update (jsRuntime: IJSRuntime) message model =
         |> fun updatedModel -> updatedModel, Cmd.none
 
     | StartParseAmendment (phiId, atomKind, atomText, provenance) ->
-        match model.parsedPhis |> List.tryFind (fun parse -> parse.PhiId = phiId) with
-        | None ->
-            { model with parseAmendmentStatus = Some "The selected parsed Phi is no longer available." }, Cmd.none
-        | Some parse ->
-            let currentAtomAtoms =
-                getExposureAtomValue atomKind parse
-                |> splitExposureAtomValues
+        if isParsedAtomRetired model.LedgerEvents phiId atomKind atomText then
+            { model with parseAmendmentStatus = Some "Excluded Model Fitting items are inactive and cannot be amended until the exclusion is undone." }, Cmd.none
+        else
+            match model.parsedPhis |> List.tryFind (fun parse -> parse.PhiId = phiId) with
+            | None ->
+                { model with parseAmendmentStatus = Some "The selected parsed Phi is no longer available." }, Cmd.none
+            | Some parse ->
+                let currentAtomAtoms =
+                    getExposureAtomValue atomKind parse
+                    |> splitExposureAtomValues
 
-            let originalAtomText =
-                if atomListContains atomText currentAtomAtoms then
-                    atomText
-                elif List.length currentAtomAtoms = 1 then
-                    currentAtomAtoms |> List.head
-                else
-                    atomText
+                let originalAtomText =
+                    if atomListContains atomText currentAtomAtoms then
+                        atomText
+                    elif List.length currentAtomAtoms = 1 then
+                        currentAtomAtoms |> List.head
+                    else
+                        atomText
 
-            { model with
-                parseAmendmentDraft =
-                    Some
-                        {
-                            SourcePhiId = phiId
-                            OriginalAtomKind = atomKind
-                            OriginalAtomText = originalAtomText
-                            SourcePhiStatement = parse.Statement
-                            Provenance = provenance
-                            ProposedAtomKind = atomKind
-                            ProposedAtomText = originalAtomText
-                            Reason = ""
-                            PreviewRequested = false
-                        }
-                parseAmendmentStatus = None
-                selectedParsedAtomReviewKind = Some atomKind },
-            Cmd.none
+                { model with
+                    parseAmendmentDraft =
+                        Some
+                            {
+                                SourcePhiId = phiId
+                                OriginalAtomKind = atomKind
+                                OriginalAtomText = originalAtomText
+                                SourcePhiStatement = parse.Statement
+                                Provenance = provenance
+                                ProposedAtomKind = atomKind
+                                ProposedAtomText = originalAtomText
+                                Reason = ""
+                                PreviewRequested = false
+                            }
+                    parseAmendmentStatus = None
+                    selectedParsedAtomReviewKind = Some atomKind },
+                Cmd.none
 
     | SetParseAmendmentProposedKind value ->
         { model with

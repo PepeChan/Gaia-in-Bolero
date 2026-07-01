@@ -6,6 +6,7 @@ open Bolero.Html
 open Gaia.Client.Types
 open Gaia.Client.AppState
 open Gaia.Client.EvidenceView
+open Gaia.Client.ImpactProjection
 open Gaia.Client.Realization
 open Gaia.Client.RealizationInquiryEngine
 open Gaia.Client.Workflow
@@ -1289,6 +1290,7 @@ let private renderLinksTable (model: Model) =
 
 let renderT6RealizationTab (model: Model) dispatch =
     let state = model.realizationState
+    let impactProjection = buildImpactProjection model
     let hostCount = model |> getRealizationSourceHosts |> List.length
     let functionCount = model |> getRealizationSourceFunctions |> List.length
     let objectCount = getObjectRows state |> List.length
@@ -1354,6 +1356,10 @@ let renderT6RealizationTab (model: Model) dispatch =
                 renderHostCompletenessTable model
                 renderT6Summary model
                 renderT6ImpactSummary model
+                renderImpactProjectionSection
+                    "No realization impact rows are currently projected."
+                    impactProjection
+                    impactProjection.RealizationRows
                 renderNavigationOperatorsSection model dispatch
                 renderRealizationTraceSection model
                 renderObjectsTable model
